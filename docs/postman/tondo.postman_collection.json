@@ -1,0 +1,599 @@
+{
+  "info": {
+    "name": "Tondo",
+    "description": "API globale du projet Tondo (par Paynala).\n\n## Structure\n\n- **API Dashboard** — endpoints `/api/admin/*` consommés par le dashboard Next.js. Auth Sanctum guard `admin` (Bearer token sur `tondo_admins`).\n- **API Mobile** — endpoints `/api/mobile/*` consommés par l'app Flutter. Auth Sanctum guard `mobile` + OTP statique 123456 en dev.\n- **Health** — endpoint public de monitoring.\n\n## Variables\n\n- `base_url` : URL du backend Laravel (par défaut `http://127.0.0.1:8000`).\n- `admin_token` : auto-rempli après POST /api/admin/login.\n- `mobile_token` : auto-rempli après POST /api/mobile/auth/verify-otp.\n- `cagnotte_ref` : auto-rempli après POST /api/mobile/cagnottes.\n\n## Démarrage\n\n1. `php artisan serve` dans `backend/`.\n2. Importe cette collection dans Postman.\n3. Pour le mobile : execute Auth → request-otp puis verify-otp avec `nom/prenom/date_naissance` (sign-up). Le token est mémorisé.\n4. Crée une cagnotte → la `reference` est mémorisée → cotise dessus.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "tondo-global-collection"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "mobile_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cagnotte_ref",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /api/health",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/health", "host": ["{{base_url}}"], "path": ["api", "health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Service ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "API Dashboard",
+      "description": "Endpoints consommés par le dashboard admin Next.js. Auth Sanctum.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }]
+      },
+      "item": [
+        {
+          "name": "Auth",
+          "item": [
+            {
+              "name": "POST /api/admin/login",
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"daniel@paynala.com\",\n  \"password\": \"S@rdines88\",\n  \"device_name\": \"postman\"\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/admin/login", "host": ["{{base_url}}"], "path": ["api", "admin", "login"] }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                      "const data = pm.response.json();",
+                      "pm.test('Token reçu', () => pm.expect(data.token).to.be.a('string'));",
+                      "pm.collectionVariables.set('admin_token', data.token);",
+                      "console.log('Token stocké dans la variable de collection admin_token.');"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "GET /api/admin/me",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/me", "host": ["{{base_url}}"], "path": ["api", "admin", "me"] }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] }
+                }
+              ]
+            },
+            {
+              "name": "POST /api/admin/logout",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/logout", "host": ["{{base_url}}"], "path": ["api", "admin", "logout"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Utilisateurs",
+          "description": "Gestion des end-users Tondo (mobile). Lecture seule via le dashboard.",
+          "item": [
+            {
+              "name": "GET /api/admin/users",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": {
+                  "raw": "{{base_url}}/api/admin/users?per_page=25&page=1",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "users"],
+                  "query": [
+                    { "key": "per_page", "value": "25" },
+                    { "key": "page", "value": "1" },
+                    { "key": "q", "value": "", "disabled": true, "description": "recherche nom/prénom/numéro" },
+                    { "key": "type_client", "value": "particulier", "disabled": true, "description": "particulier | entreprise | marchand" },
+                    { "key": "kyc_valide_only", "value": "true", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/admin/users/{id}",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/users/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "users", ":id"], "variable": [{ "key": "id", "value": "user-uuid" }] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Administrateurs",
+          "description": "CRUD admins. Création/modif/suppression réservées à super_admin.",
+          "item": [
+            {
+              "name": "GET /api/admin/admins",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": {
+                  "raw": "{{base_url}}/api/admin/admins?per_page=25",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "admins"],
+                  "query": [
+                    { "key": "per_page", "value": "25" },
+                    { "key": "q", "value": "", "disabled": true },
+                    { "key": "role", "value": "admin", "disabled": true, "description": "super_admin | admin | operateur | lecteur" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /api/admin/admins",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"nouvel.admin@paynala.com\",\n  \"password\": \"PasswordSolide123!\",\n  \"nom\": \"Dupont\",\n  \"prenom\": \"Marie\",\n  \"role\": \"operateur\"\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/admin/admins", "host": ["{{base_url}}"], "path": ["api", "admin", "admins"] }
+              }
+            },
+            {
+              "name": "GET /api/admin/admins/{id}",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/admins/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "admins", ":id"], "variable": [{ "key": "id", "value": "admin-uuid" }] }
+              }
+            },
+            {
+              "name": "PATCH /api/admin/admins/{id}",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"role\": \"admin\",\n  \"actif\": true\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/admin/admins/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "admins", ":id"], "variable": [{ "key": "id", "value": "admin-uuid" }] }
+              }
+            },
+            {
+              "name": "DELETE /api/admin/admins/{id}",
+              "request": {
+                "method": "DELETE",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/admins/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "admins", ":id"], "variable": [{ "key": "id", "value": "admin-uuid" }] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tontines & cotisations",
+          "description": "Tondo_cagnottes (tontine périodique ET cotisation ouverte).",
+          "item": [
+            {
+              "name": "GET /api/admin/tontines",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": {
+                  "raw": "{{base_url}}/api/admin/tontines?per_page=25",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "tontines"],
+                  "query": [
+                    { "key": "per_page", "value": "25" },
+                    { "key": "q", "value": "", "disabled": true, "description": "search titre ou reference" },
+                    { "key": "type", "value": "tontine_periodique", "disabled": true, "description": "tontine_periodique | cagnotte_ouverte" },
+                    { "key": "statut", "value": "active", "disabled": true, "description": "active | cloturee" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/admin/tontines/{id}",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/tontines/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "tontines", ":id"], "variable": [{ "key": "id", "value": "cagnotte-uuid" }] }
+              }
+            },
+            {
+              "name": "POST /api/admin/tontines/{id}/cloturer",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/tontines/:id/cloturer", "host": ["{{base_url}}"], "path": ["api", "admin", "tontines", ":id", "cloturer"], "variable": [{ "key": "id", "value": "cagnotte-uuid" }] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Transactions",
+          "description": "Mouvements Mobile Money : payin (cotisation), payout (vers bénéficiaire), payout_paynala (commission Paynala).",
+          "item": [
+            {
+              "name": "GET /api/admin/transactions",
+              "description": "Vue unifiée (union des 3 tables transactionnelles).",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": {
+                  "raw": "{{base_url}}/api/admin/transactions?per_page=25",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "transactions"],
+                  "query": [
+                    { "key": "per_page", "value": "25" },
+                    { "key": "type", "value": "payin", "disabled": true, "description": "payin | payout | payout_paynala" },
+                    { "key": "statut", "value": "succes", "disabled": true, "description": "initie | en_cours | succes | echec | annule" },
+                    { "key": "q", "value": "", "disabled": true, "description": "search trans_id ou operateur_id" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/admin/transactions/payin",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/transactions/payin?per_page=25", "host": ["{{base_url}}"], "path": ["api", "admin", "transactions", "payin"], "query": [{ "key": "per_page", "value": "25" }] }
+              }
+            },
+            {
+              "name": "GET /api/admin/transactions/payout",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/transactions/payout?per_page=25", "host": ["{{base_url}}"], "path": ["api", "admin", "transactions", "payout"], "query": [{ "key": "per_page", "value": "25" }] }
+              }
+            },
+            {
+              "name": "GET /api/admin/transactions/payout-paynala",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/transactions/payout-paynala?per_page=25", "host": ["{{base_url}}"], "path": ["api", "admin", "transactions", "payout-paynala"], "query": [{ "key": "per_page", "value": "25" }] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Signalements",
+          "description": "Alertes utilisateurs (fraude suspectée, contenu inapproprié, doublon, autre).",
+          "item": [
+            {
+              "name": "GET /api/admin/signalements",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": {
+                  "raw": "{{base_url}}/api/admin/signalements?per_page=25",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "signalements"],
+                  "query": [
+                    { "key": "per_page", "value": "25" },
+                    { "key": "statut", "value": "nouveau", "disabled": true, "description": "nouveau | en_traitement | resolu | rejete" },
+                    { "key": "motif", "value": "fraude_suspectee", "disabled": true }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/admin/signalements/{id}",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": { "raw": "{{base_url}}/api/admin/signalements/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "signalements", ":id"], "variable": [{ "key": "id", "value": "signalement-uuid" }] }
+              }
+            },
+            {
+              "name": "PATCH /api/admin/signalements/{id}",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"statut\": \"resolu\",\n  \"resolu_commentaire\": \"Investigué, faux positif.\"\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/admin/signalements/:id", "host": ["{{base_url}}"], "path": ["api", "admin", "signalements", ":id"], "variable": [{ "key": "id", "value": "signalement-uuid" }] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logs",
+          "item": [
+            {
+              "name": "GET /api/admin/logs",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "Accept", "value": "application/json" }],
+                "url": {
+                  "raw": "{{base_url}}/api/admin/logs?per_page=50",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "logs"],
+                  "query": [
+                    { "key": "per_page", "value": "50" },
+                    { "key": "niveau", "value": "error", "disabled": true, "description": "info | warning | error" },
+                    { "key": "acteur_role", "value": "admin", "disabled": true },
+                    { "key": "q", "value": "", "disabled": true }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "API Mobile",
+      "description": "Endpoints consommés par l'app Flutter. Auth Sanctum guard `mobile` + OTP statique 123456 en dev. À swapper contre un middleware Supabase JWT en prod.\n\n## Flow\n\n1. POST /auth/request-otp { indicatif, numero } → log OTP (dev_hint=123456).\n2. POST /auth/verify-otp { indicatif, numero, otp, nom?, prenom?, date_naissance? } → token + user. Si l'user n'existe pas, nom+prenom+date_naissance sont requis (sign-up).\n3. Tous les endpoints suivants : header `Authorization: Bearer {{mobile_token}}` (variable Postman, à set manuellement après step 2).",
+      "item": [
+        {
+          "name": "Auth",
+          "item": [
+            {
+              "name": "POST /api/mobile/auth/request-otp",
+              "description": "Déclenche l'envoi OTP. En dev, retourne `dev_hint: \"123456\"` dans le body.",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": { "mode": "raw", "raw": "{\n  \"indicatif\": \"+241\",\n  \"numero\": \"077123456\"\n}" },
+                "url": { "raw": "{{base_url}}/api/mobile/auth/request-otp", "host": ["{{base_url}}"], "path": ["api", "mobile", "auth", "request-otp"] }
+              }
+            },
+            {
+              "name": "POST /api/mobile/auth/verify-otp",
+              "description": "Vérifie l'OTP (123456 en dev). Si l'user existe pour ce numéro → login. Sinon sign-up : nom + prenom + date_naissance requis.\n\nLa réponse contient `token` à coller dans la variable Postman `mobile_token`.",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200) {",
+                      "  const j = pm.response.json();",
+                      "  if (j.token) pm.collectionVariables.set('mobile_token', j.token);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": { "mode": "raw", "raw": "{\n  \"indicatif\": \"+241\",\n  \"numero\": \"077123456\",\n  \"otp\": \"123456\",\n  \"nom\": \"Test\",\n  \"prenom\": \"Mobile\",\n  \"date_naissance\": \"1990-01-15\"\n}" },
+                "url": { "raw": "{{base_url}}/api/mobile/auth/verify-otp", "host": ["{{base_url}}"], "path": ["api", "mobile", "auth", "verify-otp"] }
+              }
+            },
+            {
+              "name": "GET /api/mobile/auth/me",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "url": { "raw": "{{base_url}}/api/mobile/auth/me", "host": ["{{base_url}}"], "path": ["api", "mobile", "auth", "me"] }
+              }
+            },
+            {
+              "name": "POST /api/mobile/auth/logout",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "url": { "raw": "{{base_url}}/api/mobile/auth/logout", "host": ["{{base_url}}"], "path": ["api", "mobile", "auth", "logout"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Profil",
+          "item": [
+            {
+              "name": "GET /api/mobile/profil",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "url": { "raw": "{{base_url}}/api/mobile/profil", "host": ["{{base_url}}"], "path": ["api", "mobile", "profil"] }
+              }
+            },
+            {
+              "name": "PATCH /api/mobile/profil",
+              "description": "Complète les champs différés. Seuls sexe / adresse / email sont modifiables. Le nom, prenom, numero, date_naissance restent immutables.",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "body": { "mode": "raw", "raw": "{\n  \"sexe\": \"homme\",\n  \"adresse\": \"Libreville, Akanda\",\n  \"email\": \"daniel.doviakon@gmail.com\"\n}" },
+                "url": { "raw": "{{base_url}}/api/mobile/profil", "host": ["{{base_url}}"], "path": ["api", "mobile", "profil"] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cagnottes",
+          "item": [
+            {
+              "name": "GET /api/mobile/cagnottes",
+              "description": "Liste les cagnottes dont l'user est gérant. Filtres : ?statut=active|cloturee, ?type=tontine_periodique|cagnotte_ouverte.",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "url": { "raw": "{{base_url}}/api/mobile/cagnottes", "host": ["{{base_url}}"], "path": ["api", "mobile", "cagnottes"] }
+              }
+            },
+            {
+              "name": "POST /api/mobile/cagnottes (tontine périodique)",
+              "description": "Crée une tontine. Génère une référence numérique 4-5 chiffres unique. Le numéro de retrait est masqué et IMMUTABLE après création.",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "  pm.collectionVariables.set('cagnotte_ref', pm.response.json().cagnotte.reference);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"tontine_periodique\",\n  \"titre\": \"Tontine bureau\",\n  \"numero_retrait\": \"+24177123456\",\n  \"montant_par_cycle\": 50000,\n  \"periodicite\": \"mensuelle\",\n  \"jour_mois\": 15,\n  \"nombre_participants\": 5\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/mobile/cagnottes", "host": ["{{base_url}}"], "path": ["api", "mobile", "cagnottes"] }
+              }
+            },
+            {
+              "name": "POST /api/mobile/cagnottes (cagnotte ouverte)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"cagnotte_ouverte\",\n  \"titre\": \"Anniversaire maman\",\n  \"numero_retrait\": \"+24177123456\",\n  \"montant_cible\": 500000,\n  \"date_fin\": \"2026-08-30\"\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/mobile/cagnottes", "host": ["{{base_url}}"], "path": ["api", "mobile", "cagnottes"] }
+              }
+            },
+            {
+              "name": "GET /api/mobile/cagnottes/{reference}",
+              "description": "Détail + liste participants. 404 si la cagnotte n'appartient pas à l'user (RLS applicatif côté Laravel, RLS DB côté Supabase).",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "url": { "raw": "{{base_url}}/api/mobile/cagnottes/:reference", "host": ["{{base_url}}"], "path": ["api", "mobile", "cagnottes", ":reference"], "variable": [{ "key": "reference", "value": "{{cagnotte_ref}}" }] }
+              }
+            },
+            {
+              "name": "POST /api/mobile/cagnottes/{reference}/cloturer",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "url": { "raw": "{{base_url}}/api/mobile/cagnottes/:reference/cloturer", "host": ["{{base_url}}"], "path": ["api", "mobile", "cagnottes", ":reference", "cloturer"], "variable": [{ "key": "reference", "value": "{{cagnotte_ref}}" }] }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cotisations",
+          "item": [
+            {
+              "name": "POST /api/mobile/cotisations",
+              "description": "Cotise sur une cagnotte (déclenche un payin). Frais 2 % ajoutés sur le montant brut. En dev : passage immédiat en `succes` (agrégateur paiement non branché).",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Accept", "value": "application/json" },
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{mobile_token}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cagnotte_reference\": \"{{cagnotte_ref}}\",\n  \"montant\": 50000\n}"
+                },
+                "url": { "raw": "{{base_url}}/api/mobile/cotisations", "host": ["{{base_url}}"], "path": ["api", "mobile", "cotisations"] }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
