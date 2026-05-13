@@ -42,12 +42,20 @@ class AuthController extends Controller
 
         $phone = $this->formatPhone($data['indicatif'], $data['numero']);
 
-        Log::info("[mobile] request-otp pour {$phone} — OTP dev statique 123456");
+        // Permet à l'UI mobile de décider entre OTP screen (login) et
+        // modale "numéro non inscrit" (proposer sign-up) sans payer un
+        // 2e round-trip.
+        $userExists = TondoUser::where('project_id', Project::tondoId())
+            ->where('numero', $phone)
+            ->exists();
+
+        Log::info("[mobile] request-otp pour {$phone} — exists=" . ($userExists ? '1' : '0') . " — OTP dev statique 123456");
 
         return response()->json([
             'ok' => true,
             'message' => 'OTP envoyé.',
             'phone' => $phone,
+            'user_exists' => $userExists,
             // En dev on retourne explicitement l'OTP pour faciliter les tests
             // Postman / Flutter. À RETIRER en prod (et basculer sur SMS réel).
             'dev_hint' => app()->environment('local', 'testing') ? self::OTP_DEV : null,
