@@ -39,16 +39,36 @@ class AuthController extends Controller
         $data = $request->validate([
             'indicatif' => ['required', 'string', 'regex:/^\+?\d{1,4}$/'],
             'numero' => ['required', 'string', 'regex:/^\d{6,12}$/'],
+            // `login`  : depuis Welcome → "Continuer". On envoie l'OTP
+            //            uniquement si l'user existe ; sinon on rend
+            //            user_exists:false pour que l'app affiche la
+            //            modale "non inscrit" sans gaspiller un SMS.
+            // `signup` : depuis SignUp → "Recevoir le code". On envoie
+            //            toujours l'OTP, c'est explicitement une création
+            //            de compte.
+            'intent' => ['nullable', 'in:login,signup'],
         ]);
 
+        $intent = $data['intent'] ?? 'login';
         $phone = $this->formatPhone($data['indicatif'], $data['numero']);
 
-        // Permet à l'UI mobile de décider entre OTP screen (login) et
-        // modale "numéro non inscrit" (proposer sign-up) sans payer un
-        // 2e round-trip.
         $userExists = TondoUser::where('project_id', Project::tondoId())
             ->where('numero', $phone)
             ->exists();
+
+        // Early return : intent=login + user inexistant = pas la peine
+        // d'envoyer un SMS, l'app va proposer la modale "créer compte".
+        if ($intent === 'login' && ! $userExists) {
+            Log::info("[mobile] request-otp skip SMS pour {$phone} — login sur numéro inexistant");
+            return response()->json([
+                'ok' => true,
+                'message' => 'Numéro non inscrit.',
+                'phone' => $phone,
+                'user_exists' => false,
+                'dev_hint' => null,
+                'otp_sent' => false,
+            ]);
+        }
 
         $driver = config('services.otp.driver', 'dev');
 
@@ -71,6 +91,7 @@ class AuthController extends Controller
                 'phone' => $phone,
                 'user_exists' => $userExists,
                 'dev_hint' => null,
+                'otp_sent' => true,
             ]);
         }
 
@@ -85,6 +106,7 @@ class AuthController extends Controller
             // En dev on retourne explicitement l'OTP pour faciliter les
             // tests Postman / Flutter. Toujours null en driver=twilio.
             'dev_hint' => self::OTP_DEV,
+            'otp_sent' => true,
         ]);
     }
 
