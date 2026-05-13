@@ -5,25 +5,26 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\TondoUser;
+use App\Services\TwilioVerifyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
+use Throwable;
 
 /**
- * Auth mobile — flow OTP statique en mode test (123456).
- *
- * Quand on branchera Supabase Auth phone OTP en prod, ces deux endpoints
- * disparaissent : Flutter parlera directement à Supabase, le trigger
- * `on_auth_user_created` créera la row public.users, et le middleware
- * `verify.supabase.jwt` (à coder) hydratera $request->user() à partir
- * du JWT Supabase. Le reste des controllers mobile reste inchangé.
+ * Auth mobile — flow OTP avec deux drivers (config `services.otp.driver`) :
+ *  - `dev`    : OTP statique 123456 accepté tel quel. Gratuit. dev_hint
+ *               renvoyé dans la réponse pour faciliter les tests.
+ *  - `twilio` : Twilio Verify — SMS réel via l'API. Code généré et géré
+ *               côté Twilio (rate-limit + expiration auto).
  */
 class AuthController extends Controller
 {
-    /** OTP statique acceptée en mode test. */
+    /** OTP statique accepté en mode `dev`. */
     private const OTP_DEV = '123456';
 
     /**
@@ -49,16 +50,41 @@ class AuthController extends Controller
             ->where('numero', $phone)
             ->exists();
 
-        Log::info("[mobile] request-otp pour {$phone} — exists=" . ($userExists ? '1' : '0') . " — OTP dev statique 123456");
+        $driver = config('services.otp.driver', 'dev');
+
+        if ($driver === 'twilio') {
+            $twilioPhone = $this->twilioRecipient($phone);
+            try {
+                app(TwilioVerifyService::class)->sendOtp($twilioPhone);
+            } catch (Throwable $e) {
+                Log::error("[mobile] request-otp twilio failed for {$twilioPhone} (saisi: {$phone}): {$e->getMessage()}");
+                throw ValidationException::withMessages([
+                    'numero' => 'Impossible d\'envoyer le code SMS. Vérifiez le numéro et réessayez.',
+                ]);
+            }
+            $logSuffix = $twilioPhone !== $phone ? " → envoyé à {$twilioPhone} (override trial)" : '';
+            Log::info("[mobile] request-otp twilio OK pour {$phone} — exists=" . ($userExists ? '1' : '0') . $logSuffix);
+
+            return response()->json([
+                'ok' => true,
+                'message' => 'Code envoyé par SMS.',
+                'phone' => $phone,
+                'user_exists' => $userExists,
+                'dev_hint' => null,
+            ]);
+        }
+
+        // driver = dev : on n'envoie pas de SMS, on accepte 123456.
+        Log::info("[mobile] request-otp dev pour {$phone} — exists=" . ($userExists ? '1' : '0'));
 
         return response()->json([
             'ok' => true,
             'message' => 'OTP envoyé.',
             'phone' => $phone,
             'user_exists' => $userExists,
-            // En dev on retourne explicitement l'OTP pour faciliter les tests
-            // Postman / Flutter. À RETIRER en prod (et basculer sur SMS réel).
-            'dev_hint' => app()->environment('local', 'testing') ? self::OTP_DEV : null,
+            // En dev on retourne explicitement l'OTP pour faciliter les
+            // tests Postman / Flutter. Toujours null en driver=twilio.
+            'dev_hint' => self::OTP_DEV,
         ]);
     }
 
@@ -85,13 +111,30 @@ class AuthController extends Controller
             'device_name' => ['nullable', 'string', 'max:64'],
         ]);
 
-        if ($data['otp'] !== self::OTP_DEV) {
-            throw ValidationException::withMessages([
-                'otp' => 'Code OTP invalide.',
-            ]);
+        $phone = $this->formatPhone($data['indicatif'], $data['numero']);
+
+        // Vérification OTP selon le driver. En `twilio`, Twilio gère
+        // l'expiration (10 min) et le rate-limit (5 essais max) côté
+        // serveur — on récupère juste un bool. Si l'override est actif,
+        // on check sur le numéro Twilio (= numéro de Daniel) au lieu
+        // du numéro saisi.
+        $driver = config('services.otp.driver', 'dev');
+        if ($driver === 'twilio') {
+            $twilioPhone = $this->twilioRecipient($phone);
+            $ok = app(TwilioVerifyService::class)->checkOtp($twilioPhone, $data['otp']);
+            if (! $ok) {
+                throw ValidationException::withMessages([
+                    'otp' => 'Code OTP invalide ou expiré.',
+                ]);
+            }
+        } else {
+            if ($data['otp'] !== self::OTP_DEV) {
+                throw ValidationException::withMessages([
+                    'otp' => 'Code OTP invalide.',
+                ]);
+            }
         }
 
-        $phone = $this->formatPhone($data['indicatif'], $data['numero']);
         $projectId = Project::tondoId();
 
         $user = TondoUser::where('project_id', $projectId)
@@ -157,6 +200,21 @@ class AuthController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Retourne le numéro réellement utilisé pour les appels Twilio.
+     *
+     * En compte payant, c'est toujours le numéro saisi par l'user.
+     * En compte trial avec `TWILIO_OVERRIDE_RECIPIENT` défini dans
+     * `.env`, on redirige tous les SMS vers ce numéro (qui doit être
+     * un Verified Caller ID). Le numéro saisi reste enregistré tel
+     * quel dans la table `users` pour les futurs login.
+     */
+    private function twilioRecipient(string $phoneSaisi): string
+    {
+        $override = config('services.twilio.override_recipient');
+        return $override !== null && $override !== '' ? $override : $phoneSaisi;
+    }
 
     /**
      * Formate indicatif + numéro en E.164 : "+241XXXXXXXX". On stocke
