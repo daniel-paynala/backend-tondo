@@ -199,6 +199,18 @@ class AuthController extends Controller
             $created = true;
         } else {
             $created = false;
+
+            // Complétion silencieuse au login si l'opérateur n'a pas été détecté
+            // lors du sign-up (utilisateurs anciens ou config ajoutée après).
+            if (! $user->operateur) {
+                $detected = app(OperateurDetectorService::class)->detect($projectId, $phone);
+                if ($detected) {
+                    $user->operateur = $detected['operateur'];
+                    $user->pays      = $detected['pays'];
+                    $user->indicatif = $detected['indicatif'];
+                    $user->save();
+                }
+            }
         }
 
         $deviceName = $data['device_name'] ?? 'mobile-app';
