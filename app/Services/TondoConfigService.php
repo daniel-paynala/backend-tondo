@@ -8,8 +8,8 @@ use Illuminate\Support\Collection;
 /**
  * Source de vérité pour la config tarifaire d'un projet.
  *
- * Frais de transfert + commission Paynala : DB (`tondo_project_config`) > `config/airtel.php`.
- * La commission est configurable par opérateur / pays (mettre 0 si non applicable).
+ * Frais de retrait + commission Paynala : DB (`tondo_project_config`) > `config/airtel.php`.
+ * La commission et les tranches sont configurables par opérateur / pays.
  */
 class TondoConfigService
 {
@@ -39,11 +39,7 @@ class TondoConfigService
             'commission_paynala' => (float) $c['commission_paynala'],
             'plafond_par_envoi'  => (int) $c['plafond_par_envoi'],
             'plafond_journalier' => (int) $c['plafond_journalier'],
-            'retrait'            => [
-                'seuil_tranche'    => (int)   $c['retrait']['seuil_tranche'],
-                'taux_pourcentage' => (float) $c['retrait']['taux_pourcentage'],
-                'forfait'          => (int)   $c['retrait']['forfait'],
-            ],
+            'tranches'           => $c['tranches'] ?? [],
         ];
     }
 

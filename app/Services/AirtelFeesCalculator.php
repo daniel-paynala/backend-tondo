@@ -5,59 +5,44 @@ namespace App\Services;
 use RuntimeException;
 
 /**
- * Calculateur de frais Airtel Money pour les décaissements vers le bénéficiaire.
+ * Calculateur de frais de retrait pour les décaissements Mobile Money.
  *
- * Modèle A (validé 2026-05-12 par Daniel) : le COTISANT absorbe les frais de
- * retrait Airtel. Le bénéficiaire reçoit exactement le cash annoncé. Pour ça
- * on doit savoir combien envoyer au wallet pour qu'après retrait, il reste
- * exactement la cible.
+ * Modèle A (validé 2026-05-12) : le cotisant absorbe tous les frais de retrait ;
+ * le bénéficiaire reçoit exactement le cash annoncé.
  *
- * Grille tarifaire : lue depuis `config/airtel.php` (et à terme une table
- * éditable depuis le dashboard admin). Aucun taux codé en dur ici.
- *  - Tranche 1 : envoi dans [100 ; seuil_tranche] → frais = taux_pourcentage
- *  - Tranche 2 : envoi dans [seuil_tranche+1 ; plafond] → frais = forfait
+ * Grille tarifaire : tableau `tranches` libre, configurable par opérateur/pays
+ * depuis le dashboard admin. Chaque tranche définit :
+ *   - montant_max : gross max auquel cette tranche s'applique (null = sans limite)
+ *   - type        : "pourcentage" (frais = ceil(gross * valeur)) |
+ *                   "forfait"     (frais = valeur FCFA fixe)
+ *   - valeur      : taux décimal (0.03 = 3 %) ou montant FCFA
  *
- * Stratégie : on sature au plafond tant qu'il reste plus que le cash livrable
- * par un envoi saturé, puis on régularise avec un dernier envoi calé sur la
- * tranche la moins chère.
+ * 0 tranche configurée → frais de retrait = 0.
  */
 class AirtelFeesCalculator
 {
     private int $plafondParEnvoi;
     private int $plafondJournalier;
-    private int $seuilTranche;       // gross max de la tranche 1 (3 %)
-    private float $tauxPourcentage;  // tranche 1
-    private int $forfait;            // tranche 2
+
+    /** Tranches triées par montant_max croissant (null en dernier). */
+    private array $tranches;
 
     /**
-     * @param array<string,mixed>|null $config taux explicites (tests) ;
-     *        si null, lus depuis `config('airtel')`.
+     * @param array<string,mixed>|null $config  Si null, lu depuis config('airtel').
      */
     public function __construct(?array $config = null)
     {
         $config ??= config('airtel');
 
-        $this->plafondParEnvoi = (int) $config['plafond_par_envoi'];
+        $this->plafondParEnvoi   = (int) $config['plafond_par_envoi'];
         $this->plafondJournalier = (int) $config['plafond_journalier'];
-        $this->seuilTranche = (int) $config['retrait']['seuil_tranche'];
-        $this->tauxPourcentage = (float) $config['retrait']['taux_pourcentage'];
-        $this->forfait = (int) $config['retrait']['forfait'];
-    }
+        $this->tranches          = $config['tranches'] ?? [];
 
-    /** Cash net livré par un envoi saturé (gross = plafond, frais = forfait). */
-    private function cashParEnvoiMax(): int
-    {
-        return $this->plafondParEnvoi - $this->forfait;
-    }
-
-    /**
-     * Cash net maximum livrable en tranche 1. À `gross = seuilTranche` le
-     * frais 3 % est arrondi au supérieur ; le net dispo est donc
-     * `seuilTranche - ceil(taux * seuilTranche)`.
-     */
-    private function trancheUnMaxNet(): int
-    {
-        return $this->seuilTranche - (int) ceil($this->tauxPourcentage * $this->seuilTranche);
+        usort($this->tranches, static function (array $a, array $b): int {
+            if ($a['montant_max'] === null) return 1;
+            if ($b['montant_max'] === null) return -1;
+            return (int) $a['montant_max'] <=> (int) $b['montant_max'];
+        });
     }
 
     public function plafondJournalier(): int
@@ -67,37 +52,31 @@ class AirtelFeesCalculator
 
     /**
      * Calcule la séquence optimale d'envois pour livrer exactement
-     * `$cashCible` FCFA en cash au bénéficiaire.
+     * `$cashCible` FCFA net au bénéficiaire.
      *
-     * Retour :
-     *  - envois[]            : détail (gross, net, frais_airtel) par envoi
-     *  - total_a_envoyer     : somme des gross (débité du wallet émetteur Paynala)
-     *  - total_frais_airtel  : somme des frais Airtel
-     *  - cash_livre          : somme des net (>= cashCible, exact en pratique)
-     *  - nombre_envois       : nb total d'envois Mobile Money
-     *  - nombre_splits       : nb d'envois saturés au plafond
-     *
-     * @return array<string,mixed>
-     * @throws RuntimeException si le cash cible est hors bornes valides.
+     * @return array{envois:list<array>, total_a_envoyer:int, total_frais_airtel:int,
+     *               cash_livre:int, nombre_envois:int, nombre_splits:int}
      */
     public function plan(int $cashCible): array
     {
         if ($cashCible < 100) {
-            throw new RuntimeException("Cash cible doit être >= 100 FCFA (minimum Airtel).");
+            throw new RuntimeException("Cash cible doit être >= 100 FCFA (minimum Mobile Money).");
         }
 
-        $envois = [];
-        $reste = $cashCible;
+        $envois       = [];
+        $reste        = $cashCible;
         $nombreSplits = 0;
-        $cashParEnvoiMax = $this->cashParEnvoiMax();
+        $cashMax      = $this->cashParEnvoiMax();
 
-        while ($reste > $cashParEnvoiMax) {
+        // Envoyer au plafond tant que le reste dépasse ce qu'un envoi max peut couvrir
+        while ($reste > $cashMax) {
+            $fee      = $this->fee($this->plafondParEnvoi);
             $envois[] = [
-                'gross' => $this->plafondParEnvoi,
-                'net' => $cashParEnvoiMax,
-                'frais_airtel' => $this->forfait,
+                'gross'         => $this->plafondParEnvoi,
+                'net'           => $cashMax,
+                'frais_airtel'  => $fee,
             ];
-            $reste -= $cashParEnvoiMax;
+            $reste -= $cashMax;
             $nombreSplits++;
         }
 
@@ -105,63 +84,97 @@ class AirtelFeesCalculator
             $envois[] = $this->envoiFinal($reste);
         }
 
-        $totalAEnvoyer = array_sum(array_column($envois, 'gross'));
-        $totalFraisAirtel = array_sum(array_column($envois, 'frais_airtel'));
-        $cashLivre = array_sum(array_column($envois, 'net'));
-
         return [
-            'envois' => $envois,
-            'total_a_envoyer' => $totalAEnvoyer,
-            'total_frais_airtel' => $totalFraisAirtel,
-            'cash_livre' => $cashLivre,
-            'nombre_envois' => count($envois),
-            'nombre_splits' => $nombreSplits,
+            'envois'             => $envois,
+            'total_a_envoyer'    => array_sum(array_column($envois, 'gross')),
+            'total_frais_airtel' => array_sum(array_column($envois, 'frais_airtel')),
+            'cash_livre'         => array_sum(array_column($envois, 'net')),
+            'nombre_envois'      => count($envois),
+            'nombre_splits'      => $nombreSplits,
         ];
     }
 
+    // ─────────────────────────────────────────────────────────────────
+
+    /** Frais de retrait pour un gross donné (première tranche applicable). */
+    private function fee(int $gross): int
+    {
+        foreach ($this->tranches as $t) {
+            if ($t['montant_max'] === null || $gross <= (int) $t['montant_max']) {
+                return $t['type'] === 'pourcentage'
+                    ? (int) ceil((float) $t['valeur'] * $gross)
+                    : (int) $t['valeur'];
+            }
+        }
+        return 0;
+    }
+
+    /** Cash net maximum livrable par un envoi saturé au plafond. */
+    private function cashParEnvoiMax(): int
+    {
+        return $this->plafondParEnvoi - $this->fee($this->plafondParEnvoi);
+    }
+
     /**
-     * Trouve le plus petit `gross` valide qui livre au moins `$cashLeft`
-     * en cash net. Évalue les deux tranches et garde la moins chère.
-     *
-     * @return array<string,int>
+     * Trouve le gross minimum valide qui livre >= $cashLeft net.
+     * Évalue chaque tranche dans sa plage et retient le candidat le moins cher.
      */
     private function envoiFinal(int $cashLeft): array
     {
         $candidats = [];
+        $prevMax   = 99; // gross minimum Mobile Money = 100 → prevMax = 99
 
-        if ($cashLeft <= $this->trancheUnMaxNet()) {
-            $gross = (int) ceil($cashLeft / (1 - $this->tauxPourcentage));
-            while ($gross - (int) ceil($this->tauxPourcentage * $gross) < $cashLeft
-                   && $gross <= $this->seuilTranche) {
-                $gross++;
+        foreach ($this->tranches as $t) {
+            $minGross = $prevMax + 1;
+            $maxGross = $t['montant_max'] !== null
+                ? min((int) $t['montant_max'], $this->plafondParEnvoi)
+                : $this->plafondParEnvoi;
+            $prevMax  = $t['montant_max'] ?? PHP_INT_MAX;
+
+            if ($minGross > $maxGross) {
+                continue;
             }
-            $frais = (int) ceil($this->tauxPourcentage * $gross);
-            if ($gross >= 100 && $gross <= $this->seuilTranche
-                && $gross - $frais >= $cashLeft) {
-                $candidats[] = [
-                    'gross' => $gross,
-                    'net' => $gross - $frais,
-                    'frais_airtel' => $frais,
-                ];
+
+            if ($t['type'] === 'pourcentage') {
+                $rate = (float) $t['valeur'];
+                if ($rate >= 1.0) {
+                    continue;
+                }
+                // Net max livrable par cette tranche à son propre plafond
+                $maxNetTranche = $maxGross - (int) ceil($rate * $maxGross);
+                if ($cashLeft > $maxNetTranche) {
+                    continue;
+                }
+                $gross = (int) ceil($cashLeft / (1 - $rate));
+                // Nudge until net >= cashLeft (arrondi au supérieur)
+                while ($gross <= $maxGross
+                    && ($gross - (int) ceil($rate * $gross)) < $cashLeft) {
+                    $gross++;
+                }
+                $frais = (int) ceil($rate * $gross);
+                if ($gross >= $minGross && $gross <= $maxGross && $gross - $frais >= $cashLeft) {
+                    $candidats[] = ['gross' => $gross, 'net' => $gross - $frais, 'frais_airtel' => $frais];
+                }
+            } else {
+                // Forfait : gross = max(cashLeft + forfait, minGross)
+                $forfait = (int) $t['valeur'];
+                $gross   = max($cashLeft + $forfait, $minGross);
+                if ($gross <= $maxGross) {
+                    $candidats[] = ['gross' => $gross, 'net' => $gross - $forfait, 'frais_airtel' => $forfait];
+                }
             }
         }
 
-        // Tranche 2 (forfait) : gross dans [seuil+1 ; plafond]. On prend
-        // max(borne inf tranche 2, cashLeft + forfait) — ça gère proprement
-        // la bascule où la tranche 1 est saturée : on entre forcément en
-        // tranche 2 avec un léger overshoot (≤ 1 FCFA).
-        $grossFlat = max($this->seuilTranche + 1, $cashLeft + $this->forfait);
-        if ($grossFlat <= $this->plafondParEnvoi) {
-            $candidats[] = [
-                'gross' => $grossFlat,
-                'net' => $grossFlat - $this->forfait,
-                'frais_airtel' => $this->forfait,
-            ];
+        // Sans tranches : envoi direct, frais = 0
+        if (empty($candidats) && empty($this->tranches)) {
+            if ($cashLeft <= $this->plafondParEnvoi) {
+                return ['gross' => $cashLeft, 'net' => $cashLeft, 'frais_airtel' => 0];
+            }
         }
 
         if (empty($candidats)) {
             throw new RuntimeException(
-                "Impossible de planifier un envoi pour {$cashLeft} FCFA (hors tranches Airtel)."
+                "Impossible de planifier un envoi pour {$cashLeft} FCFA avec la grille configurée."
             );
         }
 

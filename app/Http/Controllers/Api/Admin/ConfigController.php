@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * CRUD de la configuration tarifaire par opérateur / pays.
@@ -21,12 +22,9 @@ class ConfigController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $projectId = $request->user()->project_id;
-        $rows      = $this->svc->listOperatorConfigs($projectId);
+        $rows = $this->svc->listOperatorConfigs($request->user()->project_id);
 
-        return response()->json([
-            'operateurs' => $rows->values(),
-        ]);
+        return response()->json(['operateurs' => $rows->values()]);
     }
 
     public function store(Request $request): JsonResponse
@@ -71,12 +69,13 @@ class ConfigController extends Controller
     private function validated(Request $request, bool $withKeys = false): array
     {
         $rules = [
-            'commission_paynala'       => ['required', 'numeric', 'min:0',    'max:0.25'],
-            'plafond_par_envoi'        => ['required', 'integer', 'min:50000',  'max:5000000'],
-            'plafond_journalier'       => ['required', 'integer', 'min:100000', 'max:50000000'],
-            'retrait.seuil_tranche'    => ['required', 'integer', 'min:10000',  'max:2000000'],
-            'retrait.taux_pourcentage' => ['required', 'numeric', 'min:0.001',  'max:0.25'],
-            'retrait.forfait'          => ['required', 'integer', 'min:100',    'max:100000'],
+            'commission_paynala'     => ['required', 'numeric', 'min:0',       'max:0.25'],
+            'plafond_par_envoi'      => ['required', 'integer', 'min:50000',   'max:5000000'],
+            'plafond_journalier'     => ['required', 'integer', 'min:100000',  'max:50000000'],
+            'tranches'               => ['required', 'array'],
+            'tranches.*.type'        => ['required', Rule::in(['pourcentage', 'forfait'])],
+            'tranches.*.valeur'      => ['required', 'numeric', 'min:0'],
+            'tranches.*.montant_max' => ['nullable', 'integer', 'min:100'],
         ];
 
         if ($withKeys) {

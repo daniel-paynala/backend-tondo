@@ -15,12 +15,10 @@ class TondoProjectConfig extends Model
     protected $guarded = ['id'];
 
     protected $casts = [
-        'commission_paynala'       => 'float',
-        'plafond_par_envoi'        => 'integer',
-        'plafond_journalier'       => 'integer',
-        'retrait_seuil_tranche'    => 'integer',
-        'retrait_taux_pourcentage' => 'float',
-        'retrait_forfait'          => 'integer',
+        'commission_paynala' => 'float',
+        'plafond_par_envoi'  => 'integer',
+        'plafond_journalier' => 'integer',
+        'tranches'           => 'array',
     ];
 
     /** Convertit la ligne DB en tableau compatible AirtelFeesCalculator. */
@@ -32,11 +30,7 @@ class TondoProjectConfig extends Model
             'commission_paynala' => $this->commission_paynala,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
-            'retrait' => [
-                'seuil_tranche'    => $this->retrait_seuil_tranche,
-                'taux_pourcentage' => $this->retrait_taux_pourcentage,
-                'forfait'          => $this->retrait_forfait,
-            ],
+            'tranches'           => $this->tranches ?? [],
         ];
     }
 
@@ -59,12 +53,10 @@ class TondoProjectConfig extends Model
             $row->pays       = $pays;
         }
 
-        $row->commission_paynala       = $data['commission_paynala'];
-        $row->plafond_par_envoi        = $data['plafond_par_envoi'];
-        $row->plafond_journalier       = $data['plafond_journalier'];
-        $row->retrait_seuil_tranche    = $data['retrait']['seuil_tranche'];
-        $row->retrait_taux_pourcentage = $data['retrait']['taux_pourcentage'];
-        $row->retrait_forfait          = $data['retrait']['forfait'];
+        $row->commission_paynala = $data['commission_paynala'];
+        $row->plafond_par_envoi  = $data['plafond_par_envoi'];
+        $row->plafond_journalier = $data['plafond_journalier'];
+        $row->tranches           = $data['tranches'] ?? [];
         $row->save();
 
         return $row;

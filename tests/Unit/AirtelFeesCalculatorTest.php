@@ -8,13 +8,11 @@ use RuntimeException;
 
 /**
  * Référentiel des 5 cas posés par Daniel le 2026-05-12, plus les bornes
- * critiques (bascule tranche 1 / tranche 2, plafond par envoi, plafond
- * journalier émetteur).
+ * critiques (bascule de tranche, plafond par envoi, minimum).
  *
- * Si un de ces tests casse, c'est que les hypothèses tarifaires Airtel ont
- * changé OU qu'une refonte du calculateur a introduit une régression. Dans
- * les deux cas il faut un handoff vers Cowork avant de modifier les valeurs
- * attendues.
+ * Config utilisée : Airtel Gabon par défaut —
+ *   T1 : gross ≤ 166 667 FCFA → 3 %
+ *   T2 : gross > 166 667 FCFA → forfait 5 000 FCFA
  */
 class AirtelFeesCalculatorTest extends TestCase
 {
@@ -23,16 +21,13 @@ class AirtelFeesCalculatorTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        // Config explicite (test unitaire pur, sans bootstrap Laravel) —
-        // valeurs identiques aux défauts de config/airtel.php.
         $this->calc = new AirtelFeesCalculator([
             'commission_paynala' => 0.02,
-            'plafond_par_envoi' => 500_000,
+            'plafond_par_envoi'  => 500_000,
             'plafond_journalier' => 2_500_000,
-            'retrait' => [
-                'seuil_tranche' => 166_667,
-                'taux_pourcentage' => 0.03,
-                'forfait' => 5_000,
+            'tranches'           => [
+                ['montant_max' => 166_667, 'type' => 'pourcentage', 'valeur' => 0.03],
+                ['montant_max' => null,    'type' => 'forfait',     'valeur' => 5_000],
             ],
         ]);
     }
@@ -85,17 +80,16 @@ class AirtelFeesCalculatorTest extends TestCase
 
     public function test_bascule_tranche1_tranche2_overshoot_minime(): void
     {
-        // Cash 161 667 = exactement entre tranches. Tranche 1 sature à 161 666
-        // cash net (gross 166 667 → fee 5 001). Tranche 2 part de gross 166 668
-        // → net 161 668 (overshoot 1 FCFA). On accepte l'overshoot.
+        // cashLeft=161 667 : tranche 1 sature à 161 666 net (gross=166 667 → fee=5 001).
+        // On bascule en tranche 2 avec un overshoot de 1 FCFA.
         $p = $this->calc->plan(161_667);
         $this->assertSame(166_668, $p['total_a_envoyer']);
         $this->assertSame(161_668, $p['cash_livre']);
     }
 
-    public function test_cash_max_un_envoi_satureplafond(): void
+    public function test_cash_max_un_envoi_sature_plafond(): void
     {
-        // Cash 495 000 = exactement ce qu'un envoi saturé livre (500 000 - 5 000).
+        // 495 000 = net exact d'un envoi saturé (500 000 - forfait 5 000).
         $p = $this->calc->plan(495_000);
         $this->assertSame(1, $p['nombre_envois']);
         $this->assertSame(500_000, $p['total_a_envoyer']);
@@ -112,5 +106,35 @@ class AirtelFeesCalculatorTest extends TestCase
     {
         $this->expectException(RuntimeException::class);
         $this->calc->plan(50);
+    }
+
+    public function test_sans_tranches_frais_nuls(): void
+    {
+        $calc = new AirtelFeesCalculator([
+            'commission_paynala' => 0.0,
+            'plafond_par_envoi'  => 500_000,
+            'plafond_journalier' => 2_500_000,
+            'tranches'           => [],
+        ]);
+        $p = $calc->plan(200_000);
+        $this->assertSame(200_000, $p['total_a_envoyer']);
+        $this->assertSame(0, $p['total_frais_airtel']);
+        $this->assertSame(200_000, $p['cash_livre']);
+    }
+
+    public function test_forfait_unique_sans_seuil(): void
+    {
+        // Opérateur avec un seul forfait fixe de 3 000 FCFA pour tout montant.
+        $calc = new AirtelFeesCalculator([
+            'commission_paynala' => 0.0,
+            'plafond_par_envoi'  => 500_000,
+            'plafond_journalier' => 2_500_000,
+            'tranches'           => [
+                ['montant_max' => null, 'type' => 'forfait', 'valeur' => 3_000],
+            ],
+        ]);
+        $p = $calc->plan(200_000);
+        $this->assertSame(203_000, $p['total_a_envoyer']);
+        $this->assertSame(3_000, $p['total_frais_airtel']);
     }
 }
