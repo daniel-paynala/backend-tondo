@@ -75,7 +75,8 @@ class ConfigController extends Controller
             'tranches'               => ['required', 'array'],
             'tranches.*.type'        => ['required', Rule::in(['pourcentage', 'forfait'])],
             'tranches.*.valeur'      => ['required', 'numeric', 'min:0'],
-            'tranches.*.montant_max' => ['nullable', 'integer', 'min:100'],
+            'tranches.*.montant_min' => ['nullable', 'integer', 'min:0'],
+            'tranches.*.montant_max' => ['nullable', 'integer', 'min:1'],
         ];
 
         if ($withKeys) {

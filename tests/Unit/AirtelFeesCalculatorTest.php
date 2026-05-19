@@ -26,8 +26,8 @@ class AirtelFeesCalculatorTest extends TestCase
             'plafond_par_envoi'  => 500_000,
             'plafond_journalier' => 2_500_000,
             'tranches'           => [
-                ['montant_max' => 166_667, 'type' => 'pourcentage', 'valeur' => 0.03],
-                ['montant_max' => null,    'type' => 'forfait',     'valeur' => 5_000],
+                ['montant_min' => 100,     'montant_max' => 166_667, 'type' => 'pourcentage', 'valeur' => 0.03],
+                ['montant_min' => 166_668, 'montant_max' => null,    'type' => 'forfait',     'valeur' => 5_000],
             ],
         ]);
     }
@@ -130,7 +130,7 @@ class AirtelFeesCalculatorTest extends TestCase
             'plafond_par_envoi'  => 500_000,
             'plafond_journalier' => 2_500_000,
             'tranches'           => [
-                ['montant_max' => null, 'type' => 'forfait', 'valeur' => 3_000],
+                ['montant_min' => null, 'montant_max' => null, 'type' => 'forfait', 'valeur' => 3_000],
             ],
         ]);
         $p = $calc->plan(200_000);

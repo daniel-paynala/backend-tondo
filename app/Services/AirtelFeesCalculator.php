@@ -10,12 +10,11 @@ use RuntimeException;
  * Modèle A (validé 2026-05-12) : le cotisant absorbe tous les frais de retrait ;
  * le bénéficiaire reçoit exactement le cash annoncé.
  *
- * Grille tarifaire : tableau `tranches` libre, configurable par opérateur/pays
- * depuis le dashboard admin. Chaque tranche définit :
- *   - montant_max : gross max auquel cette tranche s'applique (null = sans limite)
- *   - type        : "pourcentage" (frais = ceil(gross * valeur)) |
- *                   "forfait"     (frais = valeur FCFA fixe)
- *   - valeur      : taux décimal (0.03 = 3 %) ou montant FCFA
+ * Chaque tranche définit une plage gross [montant_min, montant_max] :
+ *   - montant_min : null = pas de borne basse (≥ 100 FCFA min Mobile Money)
+ *   - montant_max : null = pas de borne haute
+ *   - type "pourcentage" : frais = ceil(gross * valeur)
+ *   - type "forfait"     : frais = valeur FCFA fixe
  *
  * 0 tranche configurée → frais de retrait = 0.
  */
@@ -24,7 +23,7 @@ class AirtelFeesCalculator
     private int $plafondParEnvoi;
     private int $plafondJournalier;
 
-    /** Tranches triées par montant_max croissant (null en dernier). */
+    /** Tranches triées par montant_min croissant. */
     private array $tranches;
 
     /**
@@ -39,9 +38,9 @@ class AirtelFeesCalculator
         $this->tranches          = $config['tranches'] ?? [];
 
         usort($this->tranches, static function (array $a, array $b): int {
-            if ($a['montant_max'] === null) return 1;
-            if ($b['montant_max'] === null) return -1;
-            return (int) $a['montant_max'] <=> (int) $b['montant_max'];
+            $aMin = isset($a['montant_min']) ? (int) $a['montant_min'] : 0;
+            $bMin = isset($b['montant_min']) ? (int) $b['montant_min'] : 0;
+            return $aMin <=> $bMin;
         });
     }
 
@@ -68,13 +67,12 @@ class AirtelFeesCalculator
         $nombreSplits = 0;
         $cashMax      = $this->cashParEnvoiMax();
 
-        // Envoyer au plafond tant que le reste dépasse ce qu'un envoi max peut couvrir
         while ($reste > $cashMax) {
             $fee      = $this->fee($this->plafondParEnvoi);
             $envois[] = [
-                'gross'         => $this->plafondParEnvoi,
-                'net'           => $cashMax,
-                'frais_airtel'  => $fee,
+                'gross'        => $this->plafondParEnvoi,
+                'net'          => $cashMax,
+                'frais_airtel' => $fee,
             ];
             $reste -= $cashMax;
             $nombreSplits++;
@@ -96,11 +94,19 @@ class AirtelFeesCalculator
 
     // ─────────────────────────────────────────────────────────────────
 
-    /** Frais de retrait pour un gross donné (première tranche applicable). */
+    /**
+     * Frais de retrait pour un gross donné.
+     * Retourne le frais de la première tranche dont [montant_min, montant_max]
+     * contient $gross. Retourne 0 si aucune tranche ne s'applique.
+     */
     private function fee(int $gross): int
     {
         foreach ($this->tranches as $t) {
-            if ($t['montant_max'] === null || $gross <= (int) $t['montant_max']) {
+            $minOk = (! isset($t['montant_min'])) || $gross >= (int) $t['montant_min'];
+            $maxOk = (! isset($t['montant_max'])) || $t['montant_max'] === null
+                || $gross <= (int) $t['montant_max'];
+
+            if ($minOk && $maxOk) {
                 return $t['type'] === 'pourcentage'
                     ? (int) ceil((float) $t['valeur'] * $gross)
                     : (int) $t['valeur'];
@@ -117,19 +123,20 @@ class AirtelFeesCalculator
 
     /**
      * Trouve le gross minimum valide qui livre >= $cashLeft net.
-     * Évalue chaque tranche dans sa plage et retient le candidat le moins cher.
+     * Pour chaque tranche, calcule le candidat optimal dans [minGross, maxGross]
+     * et retient le moins cher.
      */
     private function envoiFinal(int $cashLeft): array
     {
         $candidats = [];
-        $prevMax   = 99; // gross minimum Mobile Money = 100 → prevMax = 99
 
         foreach ($this->tranches as $t) {
-            $minGross = $prevMax + 1;
-            $maxGross = $t['montant_max'] !== null
+            $minGross = isset($t['montant_min']) && $t['montant_min'] !== null
+                ? max((int) $t['montant_min'], 100)
+                : 100;
+            $maxGross = isset($t['montant_max']) && $t['montant_max'] !== null
                 ? min((int) $t['montant_max'], $this->plafondParEnvoi)
                 : $this->plafondParEnvoi;
-            $prevMax  = $t['montant_max'] ?? PHP_INT_MAX;
 
             if ($minGross > $maxGross) {
                 continue;
@@ -140,13 +147,12 @@ class AirtelFeesCalculator
                 if ($rate >= 1.0) {
                     continue;
                 }
-                // Net max livrable par cette tranche à son propre plafond
                 $maxNetTranche = $maxGross - (int) ceil($rate * $maxGross);
                 if ($cashLeft > $maxNetTranche) {
                     continue;
                 }
                 $gross = (int) ceil($cashLeft / (1 - $rate));
-                // Nudge until net >= cashLeft (arrondi au supérieur)
+                $gross = max($gross, $minGross);
                 while ($gross <= $maxGross
                     && ($gross - (int) ceil($rate * $gross)) < $cashLeft) {
                     $gross++;
@@ -156,7 +162,6 @@ class AirtelFeesCalculator
                     $candidats[] = ['gross' => $gross, 'net' => $gross - $frais, 'frais_airtel' => $frais];
                 }
             } else {
-                // Forfait : gross = max(cashLeft + forfait, minGross)
                 $forfait = (int) $t['valeur'];
                 $gross   = max($cashLeft + $forfait, $minGross);
                 if ($gross <= $maxGross) {

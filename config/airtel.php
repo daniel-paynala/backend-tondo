@@ -31,21 +31,26 @@ return [
     'plafond_journalier' => (int) env('AIRTEL_PLAFOND_JOUR', 2_500_000),
 
     /*
-    | Tranches de frais de retrait — tableau ordonné par montant_max croissant
-    | (null = sans limite, doit être en dernier).
+    | Tranches de frais de retrait.
+    |
+    | Chaque tranche définit sa plage gross [montant_min, montant_max] :
+    |   montant_min : null = pas de borne basse (dès 100 FCFA min Mobile Money)
+    |   montant_max : null = pas de borne haute
     |
     | type "pourcentage" : frais = ceil(gross * valeur)
-    | type "forfait"     : frais = valeur (FCFA fixe)
+    | type "forfait"     : frais = valeur FCFA fixe
     |
     | 0 tranche = pas de frais de retrait.
     */
     'tranches' => [
         [
+            'montant_min' => 100,
             'montant_max' => (int) env('AIRTEL_RETRAIT_SEUIL', 166_667),
             'type'        => 'pourcentage',
             'valeur'      => (float) env('AIRTEL_RETRAIT_TAUX', 0.03),
         ],
         [
+            'montant_min' => (int) env('AIRTEL_RETRAIT_SEUIL', 166_667) + 1,
             'montant_max' => null,
             'type'        => 'forfait',
             'valeur'      => (int) env('AIRTEL_RETRAIT_FORFAIT', 5_000),
