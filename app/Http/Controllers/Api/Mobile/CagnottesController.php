@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
+use App\Services\AirtelFeesCalculator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,18 +18,20 @@ use Illuminate\Validation\ValidationException;
  * Règles métier appliquées (claude-link/context.md RÈGLE 4-bis) :
  *  - reference numérique 4-5 chiffres unique
  *  - numero_retrait_masque immutable après création
- *  - tontine : montant_par_cycle + periodicite + nombre_participants requis
- *  - cagnotte ouverte : montant_cible et date_fin optionnels
- *  - frais 2 % à la charge du cotisant (calculés à la cotisation, pas ici)
- *  - plafond 500 000 FCFA par transaction → nombre_splits dérivé du montant
- *    bénéficiaire pour le bookkeeping des envois
+ *  - tontine : montant_par_cycle (= cash back par cycle) + periodicite + N participants
+ *  - cagnotte ouverte : montant_cible (= cash back final) et date_fin optionnels
+ *  - frais 2 % Paynala + frais Airtel retrait à la charge du cotisant (Modèle A)
+ *  - plafond 500 000 FCFA par transaction → nombre_envois calculé par
+ *    AirtelFeesCalculator (peut dépasser nombre_splits si régularisation)
+ *
+ * Modèle A (décidé 2026-05-12) : `montant_par_cycle` / `montant_cible` représente
+ * le CASH NET livré au bénéficiaire. On calcule en remontant : envois Airtel
+ * + commission Paynala = ce que paient effectivement les cotisants.
  */
 class CagnottesController extends Controller
 {
     /** Montant min indicatif cagnotte ouverte (FCFA). */
     private const MONTANT_MIN_DEFAULT = 100;
-    /** Plafond par transaction Mobile Money (FCFA). */
-    private const PLAFOND_PAR_ENVOI = 500_000;
 
     /**
      * GET /api/mobile/cagnottes
@@ -94,9 +97,13 @@ class CagnottesController extends Controller
         $cagnotte->statut = 'active';
         $cagnotte->numero_retrait_masque = $this->maskPhone($base['numero_retrait']);
 
+        $calc = app(AirtelFeesCalculator::class);
+
         if ($type === 'tontine_periodique') {
             $extra = $request->validate([
-                'montant_par_cycle' => ['required', 'integer', 'min:100', 'max:5000000'],
+                // CASH BACK net livré au bénéficiaire à chaque cycle.
+                // Plafond 2 500 000 = limite journalière émetteur Airtel.
+                'montant_par_cycle' => ['required', 'integer', 'min:100', 'max:2500000'],
                 'periodicite' => ['required', Rule::in(['hebdomadaire', 'mensuelle'])],
                 'intervalle' => ['nullable', 'integer', 'min:1', 'max:12'],
                 'jour_semaine' => [
@@ -107,37 +114,39 @@ class CagnottesController extends Controller
                 'nombre_participants' => ['required', 'integer', 'min:2', 'max:200'],
             ]);
 
-            $beneficiaire = $extra['montant_par_cycle'] * $extra['nombre_participants'];
+            $cashBack = $extra['montant_par_cycle'];
+            $plan = $calc->plan($cashBack);
+            $this->appliquerPlan($cagnotte, $plan, $cashBack);
 
-            $cagnotte->montant_par_cycle = $extra['montant_par_cycle'];
+            $cagnotte->montant_par_cycle = $cashBack;
             $cagnotte->periodicite = $extra['periodicite'];
             $cagnotte->intervalle = $extra['intervalle'] ?? 1;
             $cagnotte->jour_semaine = $extra['jour_semaine'] ?? null;
             $cagnotte->jour_mois = $extra['jour_mois'] ?? null;
             $cagnotte->nombre_participants = $extra['nombre_participants'];
-            $cagnotte->nombre_envois = $extra['nombre_participants']; // 1 envoi par cycle
-            $cagnotte->montant_beneficiaire = $beneficiaire;
-            $cagnotte->nombre_splits = (int) ceil($beneficiaire / self::PLAFOND_PAR_ENVOI);
         } else {
             $extra = $request->validate([
-                'montant_cible' => ['nullable', 'integer', 'min:1000'],
+                'montant_cible' => ['nullable', 'integer', 'min:100', 'max:2500000'],
                 'montant_min' => ['nullable', 'integer', 'min:100'],
                 'date_fin' => ['nullable', 'date', 'after:today'],
             ]);
 
             $cagnotte->montant_cible = $extra['montant_cible'] ?? null;
             $cagnotte->date_fin = $extra['date_fin'] ?? null;
-            $cagnotte->montant_beneficiaire = $extra['montant_cible'] ?? null;
             $cagnotte->nombre_participants = 0;
-            $cagnotte->nombre_envois = 1;
-            $cagnotte->nombre_splits = $extra['montant_cible']
-                ? (int) ceil($extra['montant_cible'] / self::PLAFOND_PAR_ENVOI)
-                : 1;
-        }
 
-        // Frais 2 % à la charge du cotisant, ajoutés sur le montant brut payé.
-        if ($cagnotte->montant_beneficiaire) {
-            $cagnotte->montant_avec_frais = (int) round($cagnotte->montant_beneficiaire * 1.02);
+            if (! empty($extra['montant_cible'])) {
+                $plan = $calc->plan($extra['montant_cible']);
+                $this->appliquerPlan($cagnotte, $plan, $extra['montant_cible']);
+            } else {
+                // Cagnotte sans cible : pas de plan d'envoi pré-calculé,
+                // on recalculera à la clôture sur le montant_collecte effectif.
+                $cagnotte->montant_beneficiaire = null;
+                $cagnotte->montant_avec_frais = null;
+                $cagnotte->total_a_envoyer = null;
+                $cagnotte->nombre_envois = null;
+                $cagnotte->nombre_splits = null;
+            }
         }
 
         // Génère une référence 4-5 chiffres unique (retry si collision).
@@ -214,6 +223,29 @@ class CagnottesController extends Controller
     // ─────────────────────────────────────────────────────────────────
 
     /**
+     * Applique le plan de décaissement Airtel + commission Paynala sur la
+     * cagnotte. Modèle A : tous les frais (Airtel retrait + Paynala 2 %)
+     * sont absorbés par les cotisants ; le bénéficiaire reçoit exactement
+     * `$cashBack` FCFA en main.
+     *
+     *   montant_beneficiaire = cash net livré au bénéficiaire
+     *   total_a_envoyer      = cash + frais Airtel (= ce qui débite le wallet émetteur)
+     *   montant_avec_frais   = total_a_envoyer + 2 % Paynala (= total payé par les cotisants)
+     */
+    private function appliquerPlan(TondoCagnotte $cagnotte, array $plan, int $cashBack): void
+    {
+        $commission = (float) config('airtel.commission_paynala');
+        $totalAEnvoyer = $plan['total_a_envoyer'];
+        $montantAvecFrais = (int) ceil($totalAEnvoyer * (1 + $commission));
+
+        $cagnotte->montant_beneficiaire = $cashBack;
+        $cagnotte->total_a_envoyer = $totalAEnvoyer;
+        $cagnotte->montant_avec_frais = $montantAvecFrais;
+        $cagnotte->nombre_splits = $plan['nombre_splits'];
+        $cagnotte->nombre_envois = $plan['nombre_envois'];
+    }
+
+    /**
      * Génère une référence numérique 4 ou 5 chiffres unique (table-wide).
      * Démarre à 4 chiffres ; si collision après 5 tentatives, passe à 5.
      * Une fois plus de ~10k cagnottes, à étendre à 6 chiffres (à voir).
@@ -263,6 +295,7 @@ class CagnottesController extends Controller
             'montant_collecte' => (int) $c->montant_collecte,
             'montant_beneficiaire' => $c->montant_beneficiaire,
             'montant_avec_frais' => $c->montant_avec_frais,
+            'total_a_envoyer' => $c->total_a_envoyer,
             'montant_cible' => $c->montant_cible,
             'date_fin' => $c->date_fin?->toIso8601String(),
             'montant_par_cycle' => $c->montant_par_cycle,

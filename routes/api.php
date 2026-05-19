@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Admin\TransactionsController;
 use App\Http\Controllers\Api\Admin\UsersController;
 use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
+use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use Illuminate\Support\Facades\Route;
@@ -88,6 +89,9 @@ Route::prefix('mobile')->group(function () {
         // Profil
         Route::get('/profil',   [MobileProfilController::class, 'show']);
         Route::patch('/profil', [MobileProfilController::class, 'update']);
+
+        // Config dynamique (taux de frais, pilotés serveur)
+        Route::get('/config/frais', [MobileConfigController::class, 'frais']);
 
         // Cagnottes (gérant)
         Route::get('/cagnottes',                       [MobileCagnottesController::class, 'index']);

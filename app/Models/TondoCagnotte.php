@@ -19,6 +19,7 @@ class TondoCagnotte extends Model
         'montant_collecte' => 'integer',
         'montant_beneficiaire' => 'integer',
         'montant_avec_frais' => 'integer',
+        'total_a_envoyer' => 'integer',
         'montant_cible' => 'integer',
         'montant_par_cycle' => 'integer',
         'nombre_participants' => 'integer',
