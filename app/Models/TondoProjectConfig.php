@@ -20,6 +20,7 @@ class TondoProjectConfig extends Model
         'plafond_journalier' => 'integer',
         'tranches'           => 'array',
         'prefixes'           => 'array',
+        'actif'              => 'boolean',
     ];
 
     /** Convertit la ligne DB en tableau compatible AirtelFeesCalculator. */
@@ -30,6 +31,7 @@ class TondoProjectConfig extends Model
             'pays'               => $this->pays,
             'indicatif'          => $this->indicatif,
             'prefixes'           => $this->prefixes ?? [],
+            'actif'              => (bool) ($this->actif ?? true),
             'commission_paynala' => $this->commission_paynala,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,

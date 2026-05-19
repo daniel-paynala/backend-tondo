@@ -53,6 +53,17 @@ class ConfigController extends Controller
         return $this->index($request);
     }
 
+    public function toggle(Request $request, string $operateur, string $pays): JsonResponse
+    {
+        $this->svc->toggleOperatorConfig(
+            $request->user()->project_id,
+            $operateur,
+            $pays,
+        );
+
+        return $this->index($request);
+    }
+
     public function destroy(Request $request, string $operateur, string $pays): JsonResponse
     {
         $this->svc->deleteOperatorConfig(

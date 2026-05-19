@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\TondoProjectConfig;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Source de vérité pour la config tarifaire d'un projet.
@@ -63,6 +64,18 @@ class TondoConfigService
         array  $data,
     ): TondoProjectConfig {
         return TondoProjectConfig::upsert($projectId, $operateur, $pays, $data);
+    }
+
+    /** Bascule actif ↔ inactif. */
+    public function toggleOperatorConfig(
+        string $projectId,
+        string $operateur,
+        string $pays,
+    ): void {
+        TondoProjectConfig::where('project_id', $projectId)
+            ->where('operateur', $operateur)
+            ->where('pays', $pays)
+            ->update(['actif' => DB::raw('NOT actif')]);
     }
 
     /** Supprime une config opérateur. */
