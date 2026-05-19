@@ -108,7 +108,7 @@ class AirtelFeesCalculator
 
             if ($minOk && $maxOk) {
                 return $t['type'] === 'pourcentage'
-                    ? (int) ceil((float) $t['valeur'] * $gross)
+                    ? (int) ceil(round((float) $t['valeur'] * $gross, 2))
                     : (int) $t['valeur'];
             }
         }
@@ -147,17 +147,17 @@ class AirtelFeesCalculator
                 if ($rate >= 1.0) {
                     continue;
                 }
-                $maxNetTranche = $maxGross - (int) ceil($rate * $maxGross);
+                $maxNetTranche = $maxGross - (int) ceil(round($rate * $maxGross, 2));
                 if ($cashLeft > $maxNetTranche) {
                     continue;
                 }
                 $gross = (int) ceil($cashLeft / (1 - $rate));
                 $gross = max($gross, $minGross);
                 while ($gross <= $maxGross
-                    && ($gross - (int) ceil($rate * $gross)) < $cashLeft) {
+                    && ($gross - (int) ceil(round($rate * $gross, 2))) < $cashLeft) {
                     $gross++;
                 }
-                $frais = (int) ceil($rate * $gross);
+                $frais = (int) ceil(round($rate * $gross, 2));
                 if ($gross >= $minGross && $gross <= $maxGross && $gross - $frais >= $cashLeft) {
                     $candidats[] = ['gross' => $gross, 'net' => $gross - $frais, 'frais_airtel' => $frais];
                 }
