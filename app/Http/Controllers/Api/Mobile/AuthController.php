@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\TondoUser;
+use App\Services\OperateurDetectorService;
 use App\Services\TwilioVerifyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -184,6 +185,15 @@ class AuthController extends Controller
             $user->numero = $phone;
             $user->type_client = $data['type_client'] ?? 'particulier';
             $user->kyc_valide = false; // KYC opérateur fait plus tard
+
+            // Détection automatique de l'opérateur depuis le préfixe du numéro.
+            $detected = app(OperateurDetectorService::class)->detect($projectId, $phone);
+            if ($detected) {
+                $user->operateur = $detected['operateur'];
+                $user->pays      = $detected['pays'];
+                $user->indicatif = $detected['indicatif'];
+            }
+
             $user->save();
 
             $created = true;
@@ -253,16 +263,19 @@ class AuthController extends Controller
     private function serializeUser(TondoUser $user): array
     {
         return [
-            'id' => $user->id,
-            'nom' => $user->nom,
-            'prenom' => $user->prenom,
-            'numero' => $user->numero,
+            'id'             => $user->id,
+            'nom'            => $user->nom,
+            'prenom'         => $user->prenom,
+            'numero'         => $user->numero,
             'date_naissance' => $user->date_naissance?->toDateString(),
-            'type_client' => $user->type_client,
-            'kyc_valide' => $user->kyc_valide,
-            'sexe' => $user->sexe,
-            'adresse' => $user->adresse,
-            'email' => $user->email,
+            'type_client'    => $user->type_client,
+            'kyc_valide'     => $user->kyc_valide,
+            'operateur'      => $user->operateur,
+            'pays'           => $user->pays,
+            'indicatif'      => $user->indicatif,
+            'sexe'           => $user->sexe,
+            'adresse'        => $user->adresse,
+            'email'          => $user->email,
         ];
     }
 }

@@ -21,6 +21,9 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string  $numero
  * @property string  $type_client
  * @property bool    $kyc_valide
+ * @property ?string $operateur   Opérateur détecté au sign-up (ex : "airtel")
+ * @property ?string $pays        Code pays ISO 2 (ex : "GA")
+ * @property ?string $indicatif   Indicatif sans "+" (ex : "241")
  * @property ?string $sexe
  * @property ?string $adresse
  * @property ?string $email

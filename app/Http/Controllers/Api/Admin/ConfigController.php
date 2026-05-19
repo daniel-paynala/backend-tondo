@@ -77,6 +77,9 @@ class ConfigController extends Controller
             'tranches.*.valeur'      => ['required', 'numeric', 'min:0'],
             'tranches.*.montant_min' => ['nullable', 'integer', 'min:0'],
             'tranches.*.montant_max' => ['nullable', 'integer', 'min:1'],
+            'indicatif'              => ['nullable', 'string', 'max:10', 'regex:/^\+?\d{1,4}$/'],
+            'prefixes'               => ['nullable', 'array'],
+            'prefixes.*'             => ['string', 'regex:/^\d{2,6}$/'],
         ];
 
         if ($withKeys) {
