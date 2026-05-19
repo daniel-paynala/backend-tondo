@@ -23,10 +23,12 @@ class TondoProjectConfig extends Model
         'retrait_forfait'          => 'integer',
     ];
 
-    /** Convertit la ligne DB en tableau compatible config/airtel.php. */
-    public function toAirtelArray(): array
+    /** Convertit la ligne DB en tableau compatible AirtelFeesCalculator. */
+    public function toConfigArray(): array
     {
         return [
+            'operateur'          => $this->operateur,
+            'pays'               => $this->pays,
             'commission_paynala' => $this->commission_paynala,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
@@ -38,12 +40,23 @@ class TondoProjectConfig extends Model
         ];
     }
 
-    /** Upsert depuis un tableau au format config/airtel.php. */
-    public static function upsertForProject(string $projectId, array $data): self
-    {
-        $row = self::firstOrNew(['project_id' => $projectId]);
+    /** Upsert depuis un tableau de frais. */
+    public static function upsert(
+        string $projectId,
+        string $operateur,
+        string $pays,
+        array  $data,
+    ): self {
+        $row = self::firstOrNew([
+            'project_id' => $projectId,
+            'operateur'  => $operateur,
+            'pays'       => $pays,
+        ]);
         if (! $row->id) {
-            $row->id = (string) Str::uuid();
+            $row->id         = (string) Str::uuid();
+            $row->project_id = $projectId;
+            $row->operateur  = $operateur;
+            $row->pays       = $pays;
         }
 
         $row->commission_paynala       = $data['commission_paynala'];

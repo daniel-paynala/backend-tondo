@@ -98,7 +98,9 @@ class CagnottesController extends Controller
         $cagnotte->statut = 'active';
         $cagnotte->numero_retrait_masque = $this->maskPhone($base['numero_retrait']);
 
-        $airtelConfig = app(TondoConfigService::class)->getAirtelConfig($request->user()->project_id);
+        $airtelConfig = app(TondoConfigService::class)->getOperatorConfig(
+            $request->user()->project_id,
+        );
         $calc         = new AirtelFeesCalculator($airtelConfig);
         $commission   = (float) $airtelConfig['commission_paynala'];
 

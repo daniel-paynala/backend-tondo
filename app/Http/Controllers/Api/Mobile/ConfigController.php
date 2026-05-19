@@ -3,38 +3,39 @@
 namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
  * Config dynamique exposée au mobile.
  *
- * Permet au client Flutter de récupérer des paramètres pilotés serveur
- * (et à terme par le dashboard admin) au lieu de les coder en dur dans
- * l'app — un changement de taux ne nécessite alors aucune mise à jour
- * de l'app sur les stores.
+ * Permet au client Flutter de récupérer les paramètres tarifaires pilotés
+ * serveur par opérateur / pays — un changement de taux ne nécessite aucune
+ * mise à jour de l'app sur les stores.
+ *
+ * La commission Paynala est exclue de la réponse (backend-only).
  */
 class ConfigController extends Controller
 {
-    /**
-     * GET /api/mobile/config/frais
-     *
-     * Renvoie la grille tarifaire (commission Paynala + frais de retrait
-     * Airtel) utilisée par le mobile pour calculer l'aperçu des frais à la
-     * création d'une cagnotte. Source : `config/airtel.php`.
-     */
-    public function frais(): JsonResponse
-    {
-        $airtel = config('airtel');
+    public function __construct(private TondoConfigService $svc) {}
 
-        return response()->json([
-            'commission_paynala' => (float) $airtel['commission_paynala'],
-            'plafond_par_envoi' => (int) $airtel['plafond_par_envoi'],
-            'plafond_journalier' => (int) $airtel['plafond_journalier'],
-            'retrait' => [
-                'seuil_tranche' => (int) $airtel['retrait']['seuil_tranche'],
-                'taux_pourcentage' => (float) $airtel['retrait']['taux_pourcentage'],
-                'forfait' => (int) $airtel['retrait']['forfait'],
-            ],
-        ]);
+    /**
+     * GET /api/mobile/config/frais?operateur=airtel&pays=GA
+     *
+     * Retourne la grille tarifaire de transfert pour l'opérateur/pays demandé.
+     * Commission Paynala exclue — appliquée côté serveur uniquement.
+     */
+    public function frais(Request $request): JsonResponse
+    {
+        $operateur = $request->query('operateur', 'airtel');
+        $pays      = $request->query('pays', 'GA');
+        $projectId = $request->user()->project_id;
+
+        $cfg = $this->svc->getOperatorConfig($projectId, $operateur, $pays);
+
+        unset($cfg['commission_paynala']);
+
+        return response()->json($cfg);
     }
 }

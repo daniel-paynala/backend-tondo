@@ -68,9 +68,11 @@ Route::prefix('admin')->group(function () {
         // Logs (audit)
         Route::get('/logs', [LogsController::class, 'index']);
 
-        // Configuration système (lecture + écriture)
-        Route::get('/config',   [AdminConfigController::class, 'index']);
-        Route::patch('/config', [AdminConfigController::class, 'update']);
+        // Configuration tarifaire per-opérateur / per-pays (CRUD)
+        Route::get('/config',                          [AdminConfigController::class, 'index']);
+        Route::post('/config',                         [AdminConfigController::class, 'store']);
+        Route::patch('/config/{operateur}/{pays}',     [AdminConfigController::class, 'update']);
+        Route::delete('/config/{operateur}/{pays}',    [AdminConfigController::class, 'destroy']);
     });
 });
 
