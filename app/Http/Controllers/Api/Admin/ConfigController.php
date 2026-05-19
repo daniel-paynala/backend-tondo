@@ -3,26 +3,27 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
- * Exposition de la configuration système aux admins.
+ * Gestion de la configuration tarifaire depuis le back-office admin.
  *
- * Lecture seule pour l'instant — les taux sont pilotés par les variables
- * d'environnement (config/airtel.php). Une table `tondo_project_config`
- * sera ajoutée quand le dashboard doit pouvoir les modifier en live.
+ * Lecture : fusionne ligne DB + fallback config/airtel.php.
+ * Écriture : persiste dans `tondo_project_config` (une ligne par projet).
  */
 class ConfigController extends Controller
 {
+    public function __construct(private TondoConfigService $configService) {}
+
     /**
      * GET /api/admin/config
-     *
-     * Retourne la grille tarifaire complète + paramètres de définition
-     * d'une cagnotte. Consommé par la page Paramètres du back-office.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $airtel = config('airtel');
+        $projectId = $request->user()->project_id;
+        $airtel    = $this->configService->getAirtelConfig($projectId);
 
         return response()->json([
             'airtel' => [
@@ -36,12 +37,36 @@ class ConfigController extends Controller
                 ],
             ],
             'cagnotte' => [
-                'montant_min'          => 100,
+                'montant_min'             => 100,
                 'plafond_par_transaction' => (int) $airtel['plafond_par_envoi'],
-                'plafond_journalier'   => (int) $airtel['plafond_journalier'],
-                'reference_longueur'   => '4-5 chiffres',
-                'types_supportes'      => ['tontine_periodique', 'cagnotte_ouverte'],
+                'plafond_journalier'      => (int) $airtel['plafond_journalier'],
+                'reference_longueur'      => '4-5 chiffres',
+                'types_supportes'         => ['tontine_periodique', 'cagnotte_ouverte'],
             ],
         ]);
+    }
+
+    /**
+     * PATCH /api/admin/config
+     *
+     * Valide et persiste les nouveaux taux. Les bornes évitent les erreurs
+     * de saisie grossières (ex : confusion % vs décimal).
+     */
+    public function update(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'commission_paynala'       => ['required', 'numeric', 'min:0.001', 'max:0.25'],
+            'plafond_par_envoi'        => ['required', 'integer', 'min:50000', 'max:5000000'],
+            'plafond_journalier'       => ['required', 'integer', 'min:100000', 'max:50000000'],
+            'retrait.seuil_tranche'    => ['required', 'integer', 'min:10000', 'max:2000000'],
+            'retrait.taux_pourcentage' => ['required', 'numeric', 'min:0.001', 'max:0.25'],
+            'retrait.forfait'          => ['required', 'integer', 'min:100', 'max:100000'],
+        ]);
+
+        $projectId = $request->user()->project_id;
+        $this->configService->updateAirtelConfig($projectId, $data);
+
+        // Re-lire pour confirmer la valeur persistée.
+        return $this->index($request);
     }
 }

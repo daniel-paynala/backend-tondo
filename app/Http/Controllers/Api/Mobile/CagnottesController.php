@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Services\AirtelFeesCalculator;
+use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -97,7 +98,9 @@ class CagnottesController extends Controller
         $cagnotte->statut = 'active';
         $cagnotte->numero_retrait_masque = $this->maskPhone($base['numero_retrait']);
 
-        $calc = app(AirtelFeesCalculator::class);
+        $airtelConfig = app(TondoConfigService::class)->getAirtelConfig($request->user()->project_id);
+        $calc         = new AirtelFeesCalculator($airtelConfig);
+        $commission   = (float) $airtelConfig['commission_paynala'];
 
         if ($type === 'tontine_periodique') {
             $extra = $request->validate([
@@ -116,7 +119,7 @@ class CagnottesController extends Controller
 
             $cashBack = $extra['montant_par_cycle'];
             $plan = $calc->plan($cashBack);
-            $this->appliquerPlan($cagnotte, $plan, $cashBack);
+            $this->appliquerPlan($cagnotte, $plan, $cashBack, $commission);
 
             $cagnotte->montant_par_cycle = $cashBack;
             $cagnotte->periodicite = $extra['periodicite'];
@@ -137,7 +140,7 @@ class CagnottesController extends Controller
 
             if (! empty($extra['montant_cible'])) {
                 $plan = $calc->plan($extra['montant_cible']);
-                $this->appliquerPlan($cagnotte, $plan, $extra['montant_cible']);
+                $this->appliquerPlan($cagnotte, $plan, $extra['montant_cible'], $commission);
             } else {
                 // Cagnotte sans cible : pas de plan d'envoi pré-calculé,
                 // on recalculera à la clôture sur le montant_collecte effectif.
@@ -232,9 +235,8 @@ class CagnottesController extends Controller
      *   total_a_envoyer      = cash + frais Airtel (= ce qui débite le wallet émetteur)
      *   montant_avec_frais   = total_a_envoyer + 2 % Paynala (= total payé par les cotisants)
      */
-    private function appliquerPlan(TondoCagnotte $cagnotte, array $plan, int $cashBack): void
+    private function appliquerPlan(TondoCagnotte $cagnotte, array $plan, int $cashBack, float $commission): void
     {
-        $commission = (float) config('airtel.commission_paynala');
         $totalAEnvoyer = $plan['total_a_envoyer'];
         $montantAvecFrais = (int) ceil($totalAEnvoyer * (1 + $commission));
 

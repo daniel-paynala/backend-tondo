@@ -68,8 +68,9 @@ Route::prefix('admin')->group(function () {
         // Logs (audit)
         Route::get('/logs', [LogsController::class, 'index']);
 
-        // Configuration système (lecture)
-        Route::get('/config', [AdminConfigController::class, 'index']);
+        // Configuration système (lecture + écriture)
+        Route::get('/config',   [AdminConfigController::class, 'index']);
+        Route::patch('/config', [AdminConfigController::class, 'update']);
     });
 });
 
