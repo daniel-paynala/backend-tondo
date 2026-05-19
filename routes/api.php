@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\AdminsController;
 use App\Http\Controllers\Api\Admin\AuthController;
+use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
 use App\Http\Controllers\Api\Admin\SignalementsController;
 use App\Http\Controllers\Api\Admin\TontinesController;
@@ -66,6 +67,9 @@ Route::prefix('admin')->group(function () {
 
         // Logs (audit)
         Route::get('/logs', [LogsController::class, 'index']);
+
+        // Configuration système (lecture)
+        Route::get('/config', [AdminConfigController::class, 'index']);
     });
 });
 
