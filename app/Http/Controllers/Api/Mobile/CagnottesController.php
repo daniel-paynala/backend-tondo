@@ -156,6 +156,7 @@ class CagnottesController extends Controller
 
         // Génère une référence 4-5 chiffres unique (retry si collision).
         $cagnotte->reference = $this->generateReference();
+        $cagnotte->date_creation = now();
 
         $cagnotte->save();
 
@@ -197,6 +198,37 @@ class CagnottesController extends Controller
             'cagnotte' => $this->serialize($cagnotte),
             'participants' => $participants,
         ]);
+    }
+
+    /**
+     * DELETE /api/mobile/cagnottes/{reference}
+     *
+     * Supprime une cagnotte uniquement si aucun versement n'a encore été
+     * enregistré (montant_collecte = 0). Règle anti-fraude : impossible de
+     * supprimer une cagnotte qui a reçu de l'argent.
+     */
+    public function destroy(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+
+        if ((int) $cagnotte->montant_collecte > 0) {
+            return response()->json([
+                'message' => 'Impossible de supprimer une cagnotte ayant reçu des versements.',
+            ], 422);
+        }
+
+        $cagnotte->delete();
+
+        return response()->json(['message' => 'Cagnotte supprimée.'], 200);
     }
 
     /**

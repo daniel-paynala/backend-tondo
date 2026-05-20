@@ -105,6 +105,7 @@ Route::prefix('mobile')->group(function () {
         Route::get('/cagnottes',                       [MobileCagnottesController::class, 'index']);
         Route::post('/cagnottes',                      [MobileCagnottesController::class, 'store']);
         Route::get('/cagnottes/{reference}',           [MobileCagnottesController::class, 'show']);
+        Route::delete('/cagnottes/{reference}',        [MobileCagnottesController::class, 'destroy']);
         Route::post('/cagnottes/{reference}/cloturer', [MobileCagnottesController::class, 'cloturer']);
 
         // Cotisations (payin)
