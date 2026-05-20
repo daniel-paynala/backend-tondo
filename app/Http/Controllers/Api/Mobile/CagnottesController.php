@@ -322,11 +322,8 @@ class CagnottesController extends Controller
             'created_at'  => now(),
         ]);
 
-        // Mise à jour du compteur
-        $cagnotte->nombre_participants = DB::table('tondo_participants')
-            ->where('cagnotte_id', $cagnotte->id)
-            ->count();
-        $cagnotte->save();
+        // Incrémente le compteur d'inscrits (nombre_participants reste la cible déclarée).
+        $cagnotte->increment('nombre_inscrits');
 
         return response()->json([
             'participant' => [
@@ -450,6 +447,7 @@ class CagnottesController extends Controller
             'jour_semaine' => $c->jour_semaine,
             'jour_mois' => $c->jour_mois,
             'nombre_participants' => $c->nombre_participants,
+            'nombre_inscrits' => (int) $c->nombre_inscrits,
             'nombre_splits' => $c->nombre_splits,
             'nombre_envois' => $c->nombre_envois,
             'date_creation' => $c->date_creation?->toIso8601String(),
