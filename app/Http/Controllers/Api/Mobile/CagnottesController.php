@@ -38,28 +38,53 @@ class CagnottesController extends Controller
      * GET /api/mobile/cagnottes
      * Query : ?statut=active|cloturee, ?type=...
      *
-     * Liste les cagnottes dont l'utilisateur courant est gérant.
+     * Retourne :
+     *   - les cagnottes dont l'user est gérant (role_utilisateur = 'gerant')
+     *   - les cagnottes dont l'user est participant cotiseur (role_utilisateur = 'cotiseur'),
+     *     c.-à-d. celles où il apparaît dans tondo_participants avec son user_id.
+     *     Pour les cagnottes ouvertes, l'entrée participant est créée automatiquement
+     *     au premier paiement (CotisationsController::store).
      */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        $q = TondoCagnotte::where('project_id', $user->project_id)
+        $filtreStatut = $request->filled('statut') ? $request->string('statut')->toString() : null;
+        $filtreType   = $request->filled('type')   ? $request->string('type')->toString()   : null;
+
+        // ── Cagnottes gérant ─────────────────────────────────────────────
+        $qGerant = TondoCagnotte::where('project_id', $user->project_id)
             ->where('user_id', $user->id)
             ->orderBy('date_creation', 'desc');
+        if ($filtreStatut) $qGerant->where('statut', $filtreStatut);
+        if ($filtreType)   $qGerant->where('type',   $filtreType);
 
-        if ($request->filled('statut')) {
-            $q->where('statut', $request->string('statut'));
-        }
-        if ($request->filled('type')) {
-            $q->where('type', $request->string('type'));
-        }
+        $gerant = $qGerant->limit(100)->get()
+            ->map(fn ($c) => array_merge($this->serialize($c), ['role_utilisateur' => 'gerant']));
 
-        $rows = $q->limit(100)->get();
+        // ── Cagnottes cotiseur ────────────────────────────────────────────
+        // Récupère les IDs des cagnottes où l'user est participant (user_id connu).
+        $cagnotteIdsCotiseur = DB::table('tondo_participants')
+            ->where('user_id', $user->id)
+            ->pluck('cagnotte_id');
+
+        $qCotiseur = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('user_id', '!=', $user->id)   // exclure celles où il est gérant
+            ->whereIn('id', $cagnotteIdsCotiseur)
+            ->orderBy('date_creation', 'desc');
+        if ($filtreStatut) $qCotiseur->where('statut', $filtreStatut);
+        if ($filtreType)   $qCotiseur->where('type',   $filtreType);
+
+        $cotiseur = $qCotiseur->limit(100)->get()
+            ->map(fn ($c) => array_merge($this->serialize($c), ['role_utilisateur' => 'cotiseur']));
+
+        $all = $gerant->concat($cotiseur)
+            ->sortByDesc('date_creation')
+            ->values();
 
         return response()->json([
-            'data' => $rows->map(fn ($c) => $this->serialize($c))->all(),
-            'total' => $rows->count(),
+            'data'  => $all->all(),
+            'total' => $all->count(),
         ]);
     }
 

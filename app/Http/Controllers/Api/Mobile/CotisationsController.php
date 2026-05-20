@@ -90,20 +90,30 @@ class CotisationsController extends Controller
                 if (! $participant) {
                     $participantId = (string) Str::uuid();
                     DB::table('tondo_participants')->insert([
-                        'id' => $participantId,
-                        'project_id' => $cagnotte->project_id,
-                        'cagnotte_id' => $cagnotte->id,
-                        'user_id' => $user->id,
-                        'nom' => $user->nom,
-                        'prenom' => $user->prenom,
-                        'numero_masque' => $this->maskPhone($user->numero),
-                        'statut_paiement' => 'paye',
-                        'montant_paye' => $montantNet,
+                        'id'                   => $participantId,
+                        'project_id'           => $cagnotte->project_id,
+                        'cagnotte_id'          => $cagnotte->id,
+                        'user_id'              => $user->id,
+                        'nom'                  => $user->nom,
+                        'prenom'               => $user->prenom,
+                        'numero_masque'        => $this->maskPhone($user->numero),
+                        'statut_paiement'      => 'paye',
+                        'montant_paye'         => $montantNet,
                         'date_dernier_paiement' => now(),
+                        'created_at'           => now(),
                     ]);
+                    // Pour une cagnotte ouverte, nombre_participants = inscrits réels.
+                    // Pour une tontine, nombre_participants = cible déclarée (immuable) ;
+                    // seul nombre_inscrits évolue.
+                    $incrParticipants = $cagnotte->type === 'cagnotte_ouverte'
+                        ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
+                        : [];
                     DB::table('tondo_cagnottes')
                         ->where('id', $cagnotte->id)
-                        ->update(['nombre_participants' => DB::raw('nombre_participants + 1')]);
+                        ->update(array_merge(
+                            $incrParticipants,
+                            ['nombre_inscrits' => DB::raw('nombre_inscrits + 1')],
+                        ));
                 } else {
                     $participantId = $participant->id;
                     DB::table('tondo_participants')
