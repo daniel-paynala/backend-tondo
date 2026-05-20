@@ -232,6 +232,116 @@ class CagnottesController extends Controller
     }
 
     /**
+     * POST /api/mobile/cagnottes/{reference}/participants
+     *
+     * Ajoute un participant à une cagnotte. Seul le gérant peut appeler cet endpoint.
+     *
+     * Corps : { numero, nom?, prenom? }
+     *   - Si le numéro est trouvé dans tondo_users, nom/prénom sont récupérés automatiquement.
+     *   - Sinon, nom et prénom sont obligatoires dans le corps.
+     *
+     * Retourne 201 + { participant } en cas de succès.
+     * Retourne 422 si numéro déjà présent ou si nom/prénom manquants.
+     */
+    public function storeParticipant(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+
+        if ($cagnotte->statut === 'cloturee') {
+            return response()->json(['message' => 'Impossible de modifier une cagnotte clôturée.'], 422);
+        }
+
+        $data = $request->validate([
+            'numero' => ['required', 'string', 'regex:/^\+?\d{8,15}$/'],
+            'nom'    => ['nullable', 'string', 'max:60'],
+            'prenom' => ['nullable', 'string', 'max:60'],
+        ]);
+
+        $numero      = preg_replace('/[\s\-]/', '', $data['numero']);
+        $numeroMasque = $this->maskPhone($numero);
+
+        // Doublon : même numéro masqué dans la même cagnotte
+        $dejaPrecent = DB::table('tondo_participants')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('numero_masque', $numeroMasque)
+            ->exists();
+
+        if ($dejaPrecent) {
+            return response()->json(['message' => 'Ce participant est déjà dans la cagnotte.'], 422);
+        }
+
+        // Recherche du compte Tondo si le numéro est enregistré
+        $utilisateur = \App\Models\TondoUser::where('project_id', $user->project_id)
+            ->where('numero', $numero)
+            ->first();
+
+        // Si user_id déjà participant (numéro différent mais même compte)
+        if ($utilisateur) {
+            $dejaParUserId = DB::table('tondo_participants')
+                ->where('cagnotte_id', $cagnotte->id)
+                ->where('user_id', $utilisateur->id)
+                ->exists();
+            if ($dejaParUserId) {
+                return response()->json(['message' => 'Cet utilisateur est déjà dans la cagnotte.'], 422);
+            }
+        }
+
+        $nom    = $utilisateur?->nom    ?? $data['nom']    ?? null;
+        $prenom = $utilisateur?->prenom ?? $data['prenom'] ?? null;
+
+        if (! $nom || ! $prenom) {
+            return response()->json([
+                'message' => 'Numéro non enregistré — nom et prénom requis.',
+                'errors'  => [
+                    'nom'    => ['Le nom est requis pour ce numéro.'],
+                    'prenom' => ['Le prénom est requis pour ce numéro.'],
+                ],
+            ], 422);
+        }
+
+        $participantId = (string) \Illuminate\Support\Str::uuid();
+        DB::table('tondo_participants')->insert([
+            'id'          => $participantId,
+            'project_id'  => $user->project_id,
+            'cagnotte_id' => $cagnotte->id,
+            'user_id'     => $utilisateur?->id,
+            'nom'         => $nom,
+            'prenom'      => $prenom,
+            'numero_masque' => $numeroMasque,
+            'statut_paiement' => 'en_attente',
+            'montant_paye' => 0,
+            'created_at'  => now(),
+        ]);
+
+        // Mise à jour du compteur
+        $cagnotte->nombre_participants = DB::table('tondo_participants')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->count();
+        $cagnotte->save();
+
+        return response()->json([
+            'participant' => [
+                'id'              => $participantId,
+                'nom'             => $nom,
+                'prenom'          => $prenom,
+                'numero_masque'   => $numeroMasque,
+                'statut_paiement' => 'en_attente',
+                'montant_paye'    => 0,
+                'dans_systeme'    => $utilisateur !== null,
+            ],
+        ], 201);
+    }
+
+    /**
      * POST /api/mobile/cagnottes/{reference}/cloturer
      */
     public function cloturer(Request $request, string $reference): JsonResponse

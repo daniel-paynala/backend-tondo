@@ -101,12 +101,16 @@ Route::prefix('mobile')->group(function () {
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
 
+        // Lookup numéro (autocompletion ajout participant)
+        Route::get('/users/lookup', [MobileProfilController::class, 'lookup']);
+
         // Cagnottes (gérant)
-        Route::get('/cagnottes',                       [MobileCagnottesController::class, 'index']);
-        Route::post('/cagnottes',                      [MobileCagnottesController::class, 'store']);
-        Route::get('/cagnottes/{reference}',           [MobileCagnottesController::class, 'show']);
-        Route::delete('/cagnottes/{reference}',        [MobileCagnottesController::class, 'destroy']);
-        Route::post('/cagnottes/{reference}/cloturer', [MobileCagnottesController::class, 'cloturer']);
+        Route::get('/cagnottes',                              [MobileCagnottesController::class, 'index']);
+        Route::post('/cagnottes',                             [MobileCagnottesController::class, 'store']);
+        Route::get('/cagnottes/{reference}',                  [MobileCagnottesController::class, 'show']);
+        Route::delete('/cagnottes/{reference}',               [MobileCagnottesController::class, 'destroy']);
+        Route::post('/cagnottes/{reference}/cloturer',        [MobileCagnottesController::class, 'cloturer']);
+        Route::post('/cagnottes/{reference}/participants',    [MobileCagnottesController::class, 'storeParticipant']);
 
         // Cotisations (payin)
         Route::post('/cotisations', [MobileCotisationsController::class, 'store']);

@@ -39,6 +39,32 @@ class ProfilController extends Controller
     }
 
     /**
+     * GET /api/mobile/users/lookup?numero=+24177xxxxxx
+     *
+     * Vérifie si un numéro est enregistré dans Tondo.
+     * Renvoie { found: true, nom, prenom } ou { found: false }.
+     * Utilisé par l'écran d'ajout de participants pour éviter la saisie manuelle.
+     */
+    public function lookup(Request $request): JsonResponse
+    {
+        $numero = preg_replace('/[\s\-]/', '', $request->string('numero')->toString());
+
+        $user = \App\Models\TondoUser::where('project_id', $request->user()->project_id)
+            ->where('numero', $numero)
+            ->first();
+
+        if (! $user) {
+            return response()->json(['found' => false]);
+        }
+
+        return response()->json([
+            'found'  => true,
+            'nom'    => $user->nom,
+            'prenom' => $user->prenom,
+        ]);
+    }
+
+    /**
      * PATCH /api/mobile/profil
      * Body : { sexe?, adresse?, email? }
      *
