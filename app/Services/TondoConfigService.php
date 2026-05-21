@@ -102,9 +102,14 @@ class TondoConfigService
             if (! $indicatif || ! str_starts_with($clean, $indicatif)) {
                 continue;
             }
+            // Le préfixe peut être stocké en format local avec zéro ("066")
+            // alors que la partie locale après indicatif n'en a pas ("66").
+            // On teste les deux formes.
             $localPart = substr($clean, strlen($indicatif));
+            $localPartAvecZero = '0' . $localPart;
             foreach (($cfg->prefixes ?? []) as $prefix) {
-                if (str_starts_with($localPart, $prefix)) {
+                if (str_starts_with($localPart, $prefix) ||
+                    str_starts_with($localPartAvecZero, $prefix)) {
                     return [
                         'operateur'      => $cfg->operateur,
                         'operateur_logo' => $cfg->logo,
