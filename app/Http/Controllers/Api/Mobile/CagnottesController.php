@@ -114,17 +114,19 @@ class CagnottesController extends Controller
             'numero_retrait' => ['required', 'string', 'regex:/^\+?\d{8,15}$/'],
         ]);
 
+        $user = $request->user();
+
         $cagnotte = new TondoCagnotte();
         $cagnotte->id = (string) Str::uuid();
-        $cagnotte->project_id = $request->user()->project_id;
-        $cagnotte->user_id = $request->user()->id;
+        $cagnotte->project_id = $user->project_id;
+        $cagnotte->user_id = $user->id;
         $cagnotte->titre = $base['titre'];
         $cagnotte->type = $type;
         $cagnotte->statut = 'active';
         $cagnotte->numero_retrait_masque = $this->maskPhone($base['numero_retrait']);
 
         $airtelConfig = app(TondoConfigService::class)->getOperatorConfig(
-            $request->user()->project_id,
+            $user->project_id,
         );
         $calc         = new AirtelFeesCalculator($airtelConfig);
         $commission   = (float) $airtelConfig['commission_paynala'];
