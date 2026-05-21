@@ -233,12 +233,17 @@ class CagnottesController extends Controller
         }
 
         $configSvc    = app(TondoConfigService::class);
+        $userMasque   = $this->maskPhone($user->numero);
         $participants = DB::table('tondo_participants')
             ->where('cagnotte_id', $cagnotte->id)
             ->orderBy('created_at', 'asc')
             ->get()
-            ->map(function ($p) use ($user, $configSvc) {
+            ->map(function ($p) use ($user, $userMasque, $configSvc) {
                 $opInfo = $configSvc->detectOperateur($p->numero_masque, $user->project_id);
+                // is_me : via user_id si disponible, sinon par numéro masqué
+                // (fallback pour les participants ajoutés avant l'introduction du user_id).
+                $isMe = ($p->user_id !== null && $p->user_id === $user->id)
+                    || $p->numero_masque === $userMasque;
                 return [
                     'id'                    => $p->id,
                     'nom'                   => $p->nom,
@@ -247,7 +252,7 @@ class CagnottesController extends Controller
                     'statut_paiement'       => $p->statut_paiement,
                     'montant_paye'          => $p->montant_paye,
                     'date_dernier_paiement' => $p->date_dernier_paiement,
-                    'is_me'                 => $p->user_id === $user->id,
+                    'is_me'                 => $isMe,
                     'operateur'             => $opInfo['operateur'],
                     'operateur_logo'        => $opInfo['operateur_logo'],
                 ];
