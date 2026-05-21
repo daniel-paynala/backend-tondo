@@ -185,6 +185,24 @@ class CagnottesController extends Controller
 
         $cagnotte->save();
 
+        // Le créateur est automatiquement inscrit comme premier participant.
+        if ($type === 'tontine_periodique') {
+            DB::table('tondo_participants')->insert([
+                'id'              => (string) Str::uuid(),
+                'project_id'      => $user->project_id,
+                'cagnotte_id'     => $cagnotte->id,
+                'user_id'         => $user->id,
+                'nom'             => $user->nom,
+                'prenom'          => $user->prenom,
+                'numero_masque'   => $this->maskPhone($user->numero),
+                'statut_paiement' => 'en_attente',
+                'montant_paye'    => 0,
+                'created_at'      => now(),
+            ]);
+            $cagnotte->nombre_inscrits = 1;
+            $cagnotte->save();
+        }
+
         return response()->json([
             'cagnotte' => $this->serialize($cagnotte),
         ], 201);
@@ -214,13 +232,29 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Accès refusé.'], 403);
         }
 
+        $configSvc    = app(TondoConfigService::class);
         $participants = DB::table('tondo_participants')
             ->where('cagnotte_id', $cagnotte->id)
-            ->orderBy('created_at', 'desc')
-            ->get();
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(function ($p) use ($user, $configSvc) {
+                $opInfo = $configSvc->detectOperateur($p->numero_masque, $user->project_id);
+                return [
+                    'id'                    => $p->id,
+                    'nom'                   => $p->nom,
+                    'prenom'                => $p->prenom,
+                    'numero_masque'         => $p->numero_masque,
+                    'statut_paiement'       => $p->statut_paiement,
+                    'montant_paye'          => $p->montant_paye,
+                    'date_dernier_paiement' => $p->date_dernier_paiement,
+                    'is_me'                 => $p->user_id === $user->id,
+                    'operateur'             => $opInfo['operateur'],
+                    'operateur_logo'        => $opInfo['operateur_logo'],
+                ];
+            });
 
         return response()->json([
-            'cagnotte' => $this->serialize($cagnotte),
+            'cagnotte'     => $this->serialize($cagnotte),
             'participants' => $participants,
         ]);
     }
@@ -350,6 +384,8 @@ class CagnottesController extends Controller
         // Incrémente le compteur d'inscrits (nombre_participants reste la cible déclarée).
         $cagnotte->increment('nombre_inscrits');
 
+        $opInfo = app(TondoConfigService::class)->detectOperateur($numero, $user->project_id);
+
         return response()->json([
             'participant' => [
                 'id'              => $participantId,
@@ -359,6 +395,8 @@ class CagnottesController extends Controller
                 'statut_paiement' => 'en_attente',
                 'montant_paye'    => 0,
                 'dans_systeme'    => $utilisateur !== null,
+                'operateur'       => $opInfo['operateur'],
+                'operateur_logo'  => $opInfo['operateur_logo'],
             ],
         ], 201);
     }

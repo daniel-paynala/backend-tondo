@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -47,20 +48,29 @@ class ProfilController extends Controller
      */
     public function lookup(Request $request): JsonResponse
     {
-        $numero = preg_replace('/[\s\-]/', '', $request->string('numero')->toString());
+        $numero    = preg_replace('/[\s\-]/', '', $request->string('numero')->toString());
+        $projectId = $request->user()->project_id;
 
-        $user = \App\Models\TondoUser::where('project_id', $request->user()->project_id)
+        $utilisateur = \App\Models\TondoUser::where('project_id', $projectId)
             ->where('numero', $numero)
             ->first();
 
-        if (! $user) {
-            return response()->json(['found' => false]);
+        $opInfo = app(TondoConfigService::class)->detectOperateur($numero, $projectId);
+
+        if (! $utilisateur) {
+            return response()->json([
+                'found'          => false,
+                'operateur'      => $opInfo['operateur'],
+                'operateur_logo' => $opInfo['operateur_logo'],
+            ]);
         }
 
         return response()->json([
-            'found'  => true,
-            'nom'    => $user->nom,
-            'prenom' => $user->prenom,
+            'found'          => true,
+            'nom'            => $utilisateur->nom,
+            'prenom'         => $utilisateur->prenom,
+            'operateur'      => $opInfo['operateur'],
+            'operateur_logo' => $opInfo['operateur_logo'],
         ]);
     }
 

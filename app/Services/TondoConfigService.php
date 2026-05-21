@@ -78,6 +78,44 @@ class TondoConfigService
             ->update(['actif' => DB::raw('NOT actif')]);
     }
 
+    /**
+     * Détecte l'opérateur et son logo depuis un numéro E.164 ou masqué
+     * (ex : "+24177****56"). Retourne ['operateur' => ..., 'operateur_logo' => ...].
+     */
+    public function detectOperateur(string $numero, string $projectId): array
+    {
+        // Pour les numéros masqués "+24177****56", on extrait les chiffres
+        // avant le premier "*" pour ne comparer que le préfixe connu.
+        $knownPart = preg_replace('/\*.*$/', '', $numero);
+        $clean     = preg_replace('/[^\d]/', '', $knownPart);
+
+        if (! $clean) {
+            return ['operateur' => null, 'operateur_logo' => null];
+        }
+
+        $configs = TondoProjectConfig::where('project_id', $projectId)
+            ->where('actif', true)
+            ->get();
+
+        foreach ($configs as $cfg) {
+            $indicatif = preg_replace('/[^\d]/', '', $cfg->indicatif ?? '');
+            if (! $indicatif || ! str_starts_with($clean, $indicatif)) {
+                continue;
+            }
+            $localPart = substr($clean, strlen($indicatif));
+            foreach (($cfg->prefixes ?? []) as $prefix) {
+                if (str_starts_with($localPart, $prefix)) {
+                    return [
+                        'operateur'      => $cfg->operateur,
+                        'operateur_logo' => $cfg->logo,
+                    ];
+                }
+            }
+        }
+
+        return ['operateur' => null, 'operateur_logo' => null];
+    }
+
     /** Supprime une config opérateur. */
     public function deleteOperatorConfig(
         string $projectId,
