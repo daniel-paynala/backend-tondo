@@ -199,8 +199,8 @@ class CagnottesController extends Controller
                 'montant_paye'    => 0,
                 'created_at'      => now(),
             ]);
-            $cagnotte->nombre_inscrits = 1;
-            $cagnotte->save();
+            // nombre_inscrits ne compte que les participants AJOUTÉS après création.
+            // Le créateur est toujours +1 implicite — l'UI ajoute ce +1 à l'affichage.
         }
 
         return response()->json([
