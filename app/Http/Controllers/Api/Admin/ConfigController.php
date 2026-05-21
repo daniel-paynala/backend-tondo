@@ -91,6 +91,7 @@ class ConfigController extends Controller
             'indicatif'              => ['nullable', 'string', 'max:10', 'regex:/^\+?\d{1,4}$/'],
             'prefixes'               => ['nullable', 'array'],
             'prefixes.*'             => ['string', 'regex:/^\d{2,6}$/'],
+            'logo'                   => ['nullable', 'string'],
         ];
 
         if ($withKeys) {

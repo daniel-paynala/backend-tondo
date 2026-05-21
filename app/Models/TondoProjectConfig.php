@@ -36,6 +36,7 @@ class TondoProjectConfig extends Model
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
             'tranches'           => $this->tranches ?? [],
+            'logo'               => $this->logo,
         ];
     }
 
@@ -64,6 +65,12 @@ class TondoProjectConfig extends Model
         $row->tranches           = $data['tranches'] ?? [];
         $row->indicatif          = $data['indicatif'] ?? null;
         $row->prefixes           = $data['prefixes'] ?? null;
+
+        // logo : data URI (data:image/webp;base64,…) ou null
+        if (array_key_exists('logo', $data)) {
+            $row->logo = $data['logo'] ?: null;
+        }
+
         $row->save();
 
         return $row;
