@@ -109,8 +109,10 @@ Route::prefix('mobile')->group(function () {
         Route::post('/cagnottes',                             [MobileCagnottesController::class, 'store']);
         Route::get('/cagnottes/{reference}',                  [MobileCagnottesController::class, 'show']);
         Route::delete('/cagnottes/{reference}',               [MobileCagnottesController::class, 'destroy']);
-        Route::post('/cagnottes/{reference}/cloturer',        [MobileCagnottesController::class, 'cloturer']);
-        Route::post('/cagnottes/{reference}/participants',    [MobileCagnottesController::class, 'storeParticipant']);
+        Route::post('/cagnottes/{reference}/cloturer',              [MobileCagnottesController::class, 'cloturer']);
+        Route::post('/cagnottes/{reference}/demarrer',              [MobileCagnottesController::class, 'demarrer']);
+        Route::post('/cagnottes/{reference}/participants',          [MobileCagnottesController::class, 'storeParticipant']);
+        Route::post('/cagnottes/{reference}/participants/ordre',    [MobileCagnottesController::class, 'ordonnerParticipants']);
 
         // Cotisations (payin)
         Route::post('/cotisations', [MobileCotisationsController::class, 'store']);

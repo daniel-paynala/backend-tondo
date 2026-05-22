@@ -257,6 +257,7 @@ class CagnottesController extends Controller
                     'is_me'                 => $isMe,
                     'operateur'             => $opInfo['operateur'],
                     'operateur_logo'        => $opInfo['operateur_logo'],
+                    'ordre_passage'         => (int) ($p->ordre_passage ?? 0),
                 ];
             });
 
@@ -324,6 +325,17 @@ class CagnottesController extends Controller
 
         if ($cagnotte->statut === 'cloturee') {
             return response()->json(['message' => 'Impossible de modifier une cagnotte clôturée.'], 422);
+        }
+
+        // Contrôle capacité : pour une tontine périodique, le créateur occupe
+        // une place (non comptée dans nombre_inscrits). Tontine pleine si
+        // nombre_inscrits + 1 (créateur) >= nombre_participants.
+        if ($cagnotte->type === 'tontine_periodique' && (int) $cagnotte->nombre_participants > 0) {
+            if ((int) $cagnotte->nombre_inscrits + 1 >= (int) $cagnotte->nombre_participants) {
+                return response()->json([
+                    'message' => 'Tontine complète — le nombre maximum de participants est atteint.',
+                ], 422);
+            }
         }
 
         $data = $request->validate([
@@ -406,6 +418,78 @@ class CagnottesController extends Controller
                 'operateur_logo'  => $opInfo['operateur_logo'],
             ],
         ], 201);
+    }
+
+    /**
+     * POST /api/mobile/cagnottes/{reference}/demarrer
+     *
+     * Passe le statut de la tontine de `active` à `en_cours`.
+     * Une fois démarrée, l'ordre de passage est verrouillé.
+     */
+    public function demarrer(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+        if ($cagnotte->type !== 'tontine_periodique') {
+            return response()->json(['message' => 'Seules les tontines peuvent être démarrées.'], 422);
+        }
+        if ($cagnotte->statut !== 'active') {
+            return response()->json(['message' => 'La tontine doit être active pour être démarrée.'], 422);
+        }
+        if ((int) $cagnotte->nombre_inscrits < 1) {
+            return response()->json(['message' => 'Ajoutez au moins un participant avant de démarrer.'], 422);
+        }
+
+        $cagnotte->statut = 'en_cours';
+        $cagnotte->save();
+
+        return response()->json(['cagnotte' => $this->serialize($cagnotte)]);
+    }
+
+    /**
+     * POST /api/mobile/cagnottes/{reference}/participants/ordre
+     *
+     * Enregistre l'ordre de passage des participants.
+     * Corps : { "ordre": ["uuid1", "uuid2", ...] } — liste ordonnée d'IDs.
+     * Interdit si la tontine est déjà en_cours.
+     */
+    public function ordonnerParticipants(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+        if ($cagnotte->statut === 'en_cours') {
+            return response()->json(['message' => 'L\'ordre ne peut plus être modifié après démarrage.'], 422);
+        }
+
+        $data = $request->validate([
+            'ordre'   => ['required', 'array'],
+            'ordre.*' => ['required', 'string'],
+        ]);
+
+        foreach ($data['ordre'] as $position => $participantId) {
+            DB::table('tondo_participants')
+                ->where('id', $participantId)
+                ->where('cagnotte_id', $cagnotte->id)
+                ->update(['ordre_passage' => $position + 1]);
+        }
+
+        return response()->json(['message' => 'Ordre enregistré.']);
     }
 
     /**
