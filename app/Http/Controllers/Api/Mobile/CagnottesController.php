@@ -502,6 +502,11 @@ class CagnottesController extends Controller
             'ordre.*' => ['required', 'string'],
         ]);
 
+        // Auto-heal : participants ajoutés avant la fonctionnalité "comptes light"
+        // n'ont pas de user_id. On leur crée un compte light minimal avec un numéro
+        // synthétique (non utilisable pour SMS/paiement) avant d'enregistrer l'ordre.
+        $this->healParticipantsSansCompte($data['ordre'], $cagnotte->id, $user->project_id);
+
         foreach ($data['ordre'] as $position => $participantId) {
             DB::table('tondo_participants')
                 ->where('id', $participantId)
@@ -539,6 +544,52 @@ class CagnottesController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Crée des comptes light pour les participants qui n'en ont pas encore
+     * (ajoutés avant la fonctionnalité comptes light, donc user_id = null).
+     *
+     * Le numéro synthétique `+00000XXXXXXXXXX` est déterministe (hash du
+     * participant ID) et clairement fictif (indicatif +00000 inexistant).
+     * Il ne servira jamais à un SMS ou un paiement — rôle : ancrer l'identité
+     * du participant pour les futures fonctionnalités nécessitant user_id.
+     */
+    private function healParticipantsSansCompte(array $participantIds, string $cagnotteId, string $projectId): void
+    {
+        $orphelins = DB::table('tondo_participants')
+            ->whereIn('id', $participantIds)
+            ->where('cagnotte_id', $cagnotteId)
+            ->whereNull('user_id')
+            ->get();
+
+        foreach ($orphelins as $p) {
+            // Numéro synthétique unique et reproductible : +00000 + 10 chiffres
+            $syntheticNumero = '+00000' . str_pad((string) abs(crc32($p->id)), 10, '0', STR_PAD_LEFT);
+
+            // Si un compte light a déjà été créé pour ce même numéro (idempotence)
+            $existant = \App\Models\TondoUser::where('project_id', $projectId)
+                ->where('numero', $syntheticNumero)
+                ->first();
+
+            if (! $existant) {
+                $newUser = new \App\Models\TondoUser();
+                $newUser->id          = (string) \Illuminate\Support\Str::uuid();
+                $newUser->project_id  = $projectId;
+                $newUser->nom         = $p->nom;
+                $newUser->prenom      = $p->prenom;
+                $newUser->numero      = $syntheticNumero;
+                $newUser->compte_type = 'light';
+                $newUser->type_client = 'particulier';
+                $newUser->kyc_valide  = false;
+                $newUser->save();
+                $existant = $newUser;
+            }
+
+            DB::table('tondo_participants')
+                ->where('id', $p->id)
+                ->update(['user_id' => $existant->id]);
+        }
+    }
 
     /**
      * Applique le plan de décaissement Airtel + commission Paynala sur la
