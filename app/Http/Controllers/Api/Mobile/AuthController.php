@@ -53,8 +53,12 @@ class AuthController extends Controller
         $intent = $data['intent'] ?? 'login';
         $phone = $this->formatPhone($data['indicatif'], $data['numero']);
 
+        // Seuls les comptes full comptent comme "existants" pour le login.
+        // Les comptes light (créés par ajout à une cagnotte) ne peuvent pas
+        // se connecter — ils sont traités comme inexistants jusqu'à inscription.
         $userExists = TondoUser::where('project_id', Project::tondoId())
             ->where('numero', $phone)
+            ->where('compte_type', 'full')
             ->exists();
 
         // Early return : intent=login + user inexistant = pas la peine
@@ -164,29 +168,43 @@ class AuthController extends Controller
             ->where('numero', $phone)
             ->first();
 
-        if (! $user) {
-            // Sign-up : on exige les 3 champs minimaux (RÈGLE 4-bis).
+        $isLightUpgrade = $user && ($user->compte_type ?? 'full') === 'light';
+
+        if (! $user || $isLightUpgrade) {
+            // Sign-up ou upgrade d'un compte light.
+            // Pour un compte light, nom/prénom sont déjà connus — seule
+            // la date de naissance est obligatoire en plus (RÈGLE 4-bis).
             $missing = [];
-            foreach (['nom', 'prenom', 'date_naissance'] as $f) {
-                if (empty($data[$f])) {
-                    $missing[$f] = "Le champ {$f} est requis pour la création du compte.";
+            if (! $isLightUpgrade) {
+                foreach (['nom', 'prenom'] as $f) {
+                    if (empty($data[$f])) {
+                        $missing[$f] = "Le champ {$f} est requis pour la création du compte.";
+                    }
                 }
+            }
+            if (empty($data['date_naissance'])) {
+                $missing['date_naissance'] = 'La date de naissance est requise.';
             }
             if (! empty($missing)) {
                 throw ValidationException::withMessages($missing);
             }
 
-            $user = new TondoUser();
-            $user->id = (string) Str::uuid();
-            $user->project_id = $projectId;
-            $user->nom = $data['nom'];
-            $user->prenom = $data['prenom'];
-            $user->date_naissance = $data['date_naissance'];
-            $user->numero = $phone;
-            $user->type_client = $data['type_client'] ?? 'particulier';
-            $user->kyc_valide = false; // KYC opérateur fait plus tard
+            if (! $user) {
+                $user = new TondoUser();
+                $user->id         = (string) Str::uuid();
+                $user->project_id = $projectId;
+                $user->numero     = $phone;
+            }
 
-            // Détection automatique de l'opérateur depuis le préfixe du numéro.
+            // On met à jour (ou initialise) les champs — les champs du compte
+            // light existant sont conservés si pas fournis dans la requête.
+            if (! empty($data['nom']))    $user->nom    = $data['nom'];
+            if (! empty($data['prenom'])) $user->prenom = $data['prenom'];
+            $user->date_naissance = $data['date_naissance'];
+            $user->type_client    = $data['type_client'] ?? $user->type_client ?? 'particulier';
+            $user->compte_type    = 'full';
+            $user->kyc_valide     = false;
+
             $detected = app(OperateurDetectorService::class)->detect($projectId, $phone);
             if ($detected) {
                 $user->operateur = $detected['operateur'];

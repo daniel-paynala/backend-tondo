@@ -386,24 +386,44 @@ class CagnottesController extends Controller
             ], 422);
         }
 
+        $opInfo = app(TondoConfigService::class)->detectOperateur($numero, $user->project_id);
+
+        // Crée un compte light si le participant n'a pas encore de compte Tondo.
+        // Les comptes light ont accès au paiement via web/WhatsApp uniquement.
+        // Ils peuvent s'inscrire normalement ensuite — leur compte sera upgradé.
+        $wasExisting = $utilisateur !== null;
+        if (! $utilisateur) {
+            $utilisateur = new \App\Models\TondoUser();
+            $utilisateur->id          = (string) Str::uuid();
+            $utilisateur->project_id  = $user->project_id;
+            $utilisateur->nom         = $nom;
+            $utilisateur->prenom      = $prenom;
+            $utilisateur->numero      = $numero;
+            $utilisateur->compte_type = 'light';
+            $utilisateur->type_client = 'particulier';
+            $utilisateur->kyc_valide  = false;
+            if ($opInfo['operateur']) {
+                $utilisateur->operateur = $opInfo['operateur'];
+            }
+            $utilisateur->save();
+        }
+
         $participantId = (string) \Illuminate\Support\Str::uuid();
         DB::table('tondo_participants')->insert([
-            'id'          => $participantId,
-            'project_id'  => $user->project_id,
-            'cagnotte_id' => $cagnotte->id,
-            'user_id'     => $utilisateur?->id,
-            'nom'         => $nom,
-            'prenom'      => $prenom,
-            'numero_masque' => $numeroMasque,
+            'id'              => $participantId,
+            'project_id'      => $user->project_id,
+            'cagnotte_id'     => $cagnotte->id,
+            'user_id'         => $utilisateur->id,
+            'nom'             => $nom,
+            'prenom'          => $prenom,
+            'numero_masque'   => $numeroMasque,
             'statut_paiement' => 'en_attente',
-            'montant_paye' => 0,
-            'created_at'  => now(),
+            'montant_paye'    => 0,
+            'created_at'      => now(),
         ]);
 
         // Incrémente le compteur d'inscrits (nombre_participants reste la cible déclarée).
         $cagnotte->increment('nombre_inscrits');
-
-        $opInfo = app(TondoConfigService::class)->detectOperateur($numero, $user->project_id);
 
         return response()->json([
             'participant' => [
@@ -413,7 +433,7 @@ class CagnottesController extends Controller
                 'numero_masque'   => $numeroMasque,
                 'statut_paiement' => 'en_attente',
                 'montant_paye'    => 0,
-                'dans_systeme'    => $utilisateur !== null,
+                'dans_systeme'    => $wasExisting,
                 'operateur'       => $opInfo['operateur'],
                 'operateur_logo'  => $opInfo['operateur_logo'],
             ],
