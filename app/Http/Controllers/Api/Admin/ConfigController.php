@@ -20,11 +20,25 @@ class ConfigController extends Controller
 {
     public function __construct(private TondoConfigService $svc) {}
 
+    /**
+     * Opérateurs avec un badge `integration_paiement` :
+     *  - `'effective'`   : intégration live avec l'API de paiement (airtel aujourd'hui)
+     *  - `'en_attente'`  : pas encore intégré — paiements en mode mock
+     */
+    private const OPERATEURS_INTEGRES = ['airtel'];
+
     public function index(Request $request): JsonResponse
     {
         $rows = $this->svc->listOperatorConfigs($request->user()->project_id);
 
-        return response()->json(['operateurs' => $rows->values()]);
+        $enriched = $rows->map(function (array $op): array {
+            $op['integration_paiement'] = in_array($op['operateur'], self::OPERATEURS_INTEGRES)
+                ? 'effective'
+                : 'en_attente';
+            return $op;
+        });
+
+        return response()->json(['operateurs' => $enriched->values()]);
     }
 
     public function store(Request $request): JsonResponse

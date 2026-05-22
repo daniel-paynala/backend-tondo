@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Services\AirtelFeesCalculator;
+use App\Services\OneSignalService;
 use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -425,6 +426,16 @@ class CagnottesController extends Controller
         // Incrémente le compteur d'inscrits (nombre_participants reste la cible déclarée).
         $cagnotte->increment('nombre_inscrits');
 
+        // Notifie le participant ajouté (uniquement les comptes full avec device enregistré).
+        if ($utilisateur && ($utilisateur->compte_type ?? 'full') === 'full') {
+            app(OneSignalService::class)->notifyOne(
+                userId:  $utilisateur->id,
+                titleFr: 'Vous avez été ajouté à une tontine',
+                bodyFr:  "Vous participez maintenant à « {$cagnotte->titre} ».",
+                data:    ['type' => 'ajout_tontine', 'cagnotte_id' => $cagnotte->id],
+            );
+        }
+
         return response()->json([
             'participant' => [
                 'id'              => $participantId,
@@ -470,6 +481,38 @@ class CagnottesController extends Controller
 
         $cagnotte->statut = 'en_cours';
         $cagnotte->save();
+
+        // Récupère tous les participants ayant un compte full pour les notifier.
+        $participants = DB::table('tondo_participants')
+            ->join('users', 'users.id', '=', 'tondo_participants.user_id')
+            ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+            ->where('users.compte_type', 'full')
+            ->select('users.id as user_id', 'tondo_participants.ordre_passage')
+            ->get();
+
+        $notifSvc = app(OneSignalService::class);
+
+        // Notifie tous les participants du démarrage.
+        $tousLesIds = $participants->pluck('user_id')->filter()->values()->all();
+        if (! empty($tousLesIds)) {
+            $notifSvc->notify(
+                userIds: $tousLesIds,
+                titleFr: 'La tontine a démarré !',
+                bodyFr:  "« {$cagnotte->titre} » est maintenant en cours.",
+                data:    ['type' => 'tontine_demarree', 'cagnotte_id' => $cagnotte->id],
+            );
+        }
+
+        // Notifie spécifiquement le premier bénéficiaire (ordre_passage = 1).
+        $premier = $participants->firstWhere('ordre_passage', 1);
+        if ($premier) {
+            $notifSvc->notifyOne(
+                userId:  $premier->user_id,
+                titleFr: 'Vous êtes le premier bénéficiaire !',
+                bodyFr:  "C'est vous qui recevrez la première mise de « {$cagnotte->titre} ».",
+                data:    ['type' => 'premier_beneficiaire', 'cagnotte_id' => $cagnotte->id],
+            );
+        }
 
         return response()->json(['cagnotte' => $this->serialize($cagnotte)]);
     }
@@ -649,6 +692,54 @@ class CagnottesController extends Controller
         $last2 = substr($clean, -2);
 
         return $prefix . str_repeat('*', strlen($clean) - strlen($prefix) - 2) . $last2;
+    }
+
+    /**
+     * POST /api/mobile/cagnottes/{reference}/rappel
+     *
+     * Le gérant envoie un rappel de paiement à tous les participants
+     * dont le statut est encore `en_attente`.
+     * Réservé au créateur de la cagnotte.
+     */
+    public function rappel(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable ou accès refusé.'], 404);
+        }
+
+        // Participants en retard ayant un compte full.
+        $participantsEnAttente = DB::table('tondo_participants')
+            ->join('users', 'users.id', '=', 'tondo_participants.user_id')
+            ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+            ->where('tondo_participants.statut_paiement', 'en_attente')
+            ->where('users.compte_type', 'full')
+            ->pluck('users.id')
+            ->filter()
+            ->values()
+            ->all();
+
+        if (empty($participantsEnAttente)) {
+            return response()->json(['message' => 'Aucun participant en attente de paiement.']);
+        }
+
+        app(OneSignalService::class)->notify(
+            userIds: $participantsEnAttente,
+            titleFr: 'Rappel de cotisation',
+            bodyFr:  "Votre cotisation pour « {$cagnotte->titre} » est en attente.",
+            data:    ['type' => 'rappel_paiement', 'cagnotte_id' => $cagnotte->id],
+        );
+
+        return response()->json([
+            'message'      => 'Rappel envoyé.',
+            'destinataires' => count($participantsEnAttente),
+        ]);
     }
 
     private function serialize(TondoCagnotte $c): array

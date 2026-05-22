@@ -52,6 +52,35 @@ return [
         'driver' => env('OTP_DRIVER', 'dev'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Paynala Payment Gateway — Airtel Money Gabon
+    |--------------------------------------------------------------------------
+    |
+    | PAYNALA_BASE_URL : staging = https://testapi.paynala.com/functions/v1
+    |                    prod    = https://api.paynala.com/functions/v1
+    |
+    */
+    'paynala' => [
+        'client_id'     => env('PAYNALA_CLIENT_ID'),
+        'client_secret' => env('PAYNALA_CLIENT_SECRET'),
+        'base_url'      => env('PAYNALA_BASE_URL', 'https://testapi.paynala.com/functions/v1'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | OneSignal — Push notifications mobile
+    |--------------------------------------------------------------------------
+    |
+    | App ID   : onglet "Keys & IDs" du dashboard OneSignal.
+    | REST Key : REST API Key (à ne pas confondre avec le User Auth Key).
+    |
+    */
+    'onesignal' => [
+        'app_id'       => env('ONESIGNAL_APP_ID'),
+        'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+    ],
+
     'twilio' => [
         'account_sid' => env('TWILIO_ACCOUNT_SID'),
         'auth_token' => env('TWILIO_AUTH_TOKEN'),
