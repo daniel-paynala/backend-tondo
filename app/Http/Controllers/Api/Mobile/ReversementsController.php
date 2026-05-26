@@ -112,8 +112,11 @@ class ReversementsController extends Controller
         $transId = 'TONDOPAYOUT' . strtoupper(Str::random(9));
 
         // Numéro local 9 chiffres requis par l'API Paynala disburse (ex : 074577473).
-        // On strip le +241 et on remet le 0 initial.
-        $msisdnLocal = '0' . ltrim(ltrim($numeroBeneficiaireE164, '+'), '241');
+        // +24174577473 → substr(4) = "74577473" → "0" . = "074577473"
+        // substr sur l'index 4 : "+241" = 4 caractères fixes.
+        $msisdnLocal = str_starts_with($numeroBeneficiaireE164, '+241')
+            ? '0' . substr($numeroBeneficiaireE164, 4)
+            : $numeroBeneficiaireE164;
 
         // Référence lisible tronquée à 20 chars (contrainte API).
         $reference = mb_substr($cagnotte->titre ?? $cagnotte->reference, 0, 20);

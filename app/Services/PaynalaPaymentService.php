@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Client HTTP vers l'API de paiement Paynala (Airtel Money Gabon).
@@ -167,9 +168,18 @@ class PaynalaPaymentService
             ]);
 
         if (! $response->successful() || ! ($response->json('success') ?? false)) {
+            Log::error('[Paynala disburse] échec', [
+                'status'   => $response->status(),
+                'body'     => $response->body(),
+                'msisdn'   => $msisdn,
+                'amount'   => $amount,
+            ]);
+
             $msg = $response->json('error.message')
+                ?? $response->json('error')
                 ?? $response->json('message')
-                ?? 'Erreur lors du décaissement Airtel Money.';
+                ?? $response->json('detail')
+                ?? ('Erreur Paynala disburse (HTTP ' . $response->status() . '): ' . $response->body());
             throw new \RuntimeException($msg);
         }
 
