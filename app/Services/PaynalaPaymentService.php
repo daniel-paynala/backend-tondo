@@ -120,10 +120,6 @@ class PaynalaPaymentService
                 ->timeout(10)
                 ->post("{$this->baseUrl}/kyc", ['msisdn' => $msisdn]);
 
-            \Illuminate\Support\Facades\Log::info('[PaynalaKYC] msisdn=' . $msisdn
-                . ' status=' . $response->status()
-                . ' body=' . $response->body());
-
             // Succès confirmé.
             if ($response->json('success') === true && $response->json('status') === 'FOUND') {
                 Cache::put($cacheKey, true, now()->addHours(24));
