@@ -76,6 +76,20 @@ class AuthController extends Controller
             ]);
         }
 
+        // Early return : intent=signup + user déjà inscrit → l'app affiche
+        // le toast "déjà inscrit" sans gaspiller un SMS ni appeler le KYC.
+        if ($intent === 'signup' && $userExists) {
+            Log::info("[mobile] request-otp skip SMS pour {$phone} — signup sur numéro déjà inscrit");
+            return response()->json([
+                'ok' => true,
+                'message' => 'Numéro déjà inscrit.',
+                'phone' => $phone,
+                'user_exists' => true,
+                'dev_hint' => null,
+                'otp_sent' => false,
+            ]);
+        }
+
         // KYC Airtel — uniquement au sign-up, avant d'envoyer l'OTP.
         if ($intent === 'signup') {
             $projectId = Project::tondoId();
