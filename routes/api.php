@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
 use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
+use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use Illuminate\Support\Facades\Route;
 
@@ -118,5 +119,8 @@ Route::prefix('mobile')->group(function () {
         // Cotisations (payin)
         Route::post('/cotisations', [MobileCotisationsController::class, 'store']);
         Route::get('/cotisations/{trans_id}/status', [MobileCotisationsController::class, 'status']);
+
+        // Reversements partiels (payout gérant → bénéficiaire, cagnotte ouverte)
+        Route::post('/reversements', [MobileReversementsController::class, 'store']);
     });
 });

@@ -139,6 +139,43 @@ class PaynalaPaymentService
         }
     }
 
+    /**
+     * Décaissement Airtel Money (payout) vers un bénéficiaire.
+     *
+     * @param  string $idempotencyKey  Clé unique (ex : TONDOPAYOUT-XXXXXXXXX) — évite les doublons.
+     * @param  int    $amount          Montant en XAF.
+     * @param  string $msisdn          Numéro local 9 chiffres (ex : 074577473).
+     * @param  string $reference       Courte référence lisible (titre cagnotte tronqué).
+     * @return array  Données retournées par l'API (airtel_money_id, status, …).
+     * @throws \RuntimeException  Si l'API retourne une erreur.
+     */
+    public function disburse(
+        string $idempotencyKey,
+        int    $amount,
+        string $msisdn,
+        string $reference,
+    ): array {
+        $token = $this->getToken();
+
+        $response = Http::withToken($token)
+            ->timeout(15)
+            ->post("{$this->baseUrl}/disburse", [
+                'msisdn'          => $msisdn,
+                'amount'          => $amount,
+                'reference'       => $reference,
+                'idempotency_key' => $idempotencyKey,
+            ]);
+
+        if (! $response->successful() || ! ($response->json('success') ?? false)) {
+            $msg = $response->json('error.message')
+                ?? $response->json('message')
+                ?? 'Erreur lors du décaissement Airtel Money.';
+            throw new \RuntimeException($msg);
+        }
+
+        return $response->json();
+    }
+
     // ─────────────────────────────────────────────────────────────────
 
     private function getToken(): string
