@@ -17,12 +17,14 @@ class PaynalaPaymentService
     private string $baseUrl;
     private string $clientId;
     private string $clientSecret;
+    private string $operatorKey;
 
     public function __construct()
     {
         $this->baseUrl      = rtrim(config('services.paynala.base_url', 'https://testapi.paynala.com/functions/v1'), '/');
         $this->clientId     = (string) config('services.paynala.client_id', '');
         $this->clientSecret = (string) config('services.paynala.client_secret', '');
+        $this->operatorKey  = (string) config('services.paynala.operator_key', '');
     }
 
     /**
@@ -91,6 +93,49 @@ class PaynalaPaymentService
         }
 
         return $response->json('data', ['status' => 'PENDING']);
+    }
+
+    /**
+     * Vérifie si un numéro Airtel possède un compte Mobile Money actif.
+     *
+     * @param  string $msisdn  Numéro local avec zéro initial (ex : "077730634").
+     * @return bool  true = compte actif, false = inactif ou KYC indisponible.
+     */
+    public function checkKyc(string $msisdn): bool
+    {
+        // Cache 24h : un compte Mobile Money actif reste actif. On ne
+        // recache que les true — les false ne sont pas stockés pour
+        // permettre une nouvelle tentative si le compte est activé plus tard.
+        $cacheKey = 'paynala_kyc_' . $msisdn;
+
+        if (Cache::has($cacheKey)) {
+            return true;
+        }
+
+        try {
+            $token = $this->getToken();
+
+            $response = Http::withToken($token)
+                ->withHeaders(['x-operator-key' => $this->operatorKey])
+                ->timeout(10)
+                ->post("{$this->baseUrl}/kyc", ['msisdn' => $msisdn]);
+
+            \Illuminate\Support\Facades\Log::info('[PaynalaKYC] msisdn=' . $msisdn
+                . ' status=' . $response->status()
+                . ' body=' . $response->body());
+
+            $active = $response->json('success') === true
+                   && $response->json('status') === 'FOUND';
+
+            if ($active) {
+                Cache::put($cacheKey, true, now()->addHours(24));
+            }
+
+            return $active;
+        } catch (\Throwable) {
+            // KYC indisponible : on ne bloque pas l'inscription.
+            return false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

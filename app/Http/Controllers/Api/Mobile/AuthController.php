@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\TondoUser;
 use App\Services\OperateurDetectorService;
+use App\Services\PaynalaPaymentService;
 use App\Services\TwilioVerifyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -73,6 +74,21 @@ class AuthController extends Controller
                 'dev_hint' => null,
                 'otp_sent' => false,
             ]);
+        }
+
+        // KYC Airtel — uniquement au sign-up, avant d'envoyer l'OTP.
+        if ($intent === 'signup') {
+            $projectId = Project::tondoId();
+            $detected  = app(OperateurDetectorService::class)->detect($projectId, $phone);
+            if ($detected && $detected['operateur'] === 'airtel') {
+                $msisdn = '0' . ltrim($data['numero'], '0');
+                $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
+                if (! $kycOk) {
+                    throw ValidationException::withMessages([
+                        'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif. Veuillez utiliser un numéro avec un compte Airtel Money pour vous inscrire.',
+                    ]);
+                }
+            }
         }
 
         $driver = config('services.otp.driver', 'dev');
@@ -203,13 +219,16 @@ class AuthController extends Controller
             $user->date_naissance = $data['date_naissance'];
             $user->type_client    = $data['type_client'] ?? $user->type_client ?? 'particulier';
             $user->compte_type    = 'full';
-            $user->kyc_valide     = false;
-
+            // KYC déjà vérifié dans requestOtp (intent=signup) — on marque
+            // kyc_valide=true pour les numéros Airtel qui ont passé ce contrôle.
             $detected = app(OperateurDetectorService::class)->detect($projectId, $phone);
             if ($detected) {
-                $user->operateur = $detected['operateur'];
-                $user->pays      = $detected['pays'];
-                $user->indicatif = $detected['indicatif'];
+                $user->operateur  = $detected['operateur'];
+                $user->pays       = $detected['pays'];
+                $user->indicatif  = $detected['indicatif'];
+                $user->kyc_valide = $detected['operateur'] === 'airtel';
+            } else {
+                $user->kyc_valide = false;
             }
 
             $user->save();
