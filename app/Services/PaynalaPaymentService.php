@@ -156,6 +156,9 @@ class PaynalaPaymentService
         string $msisdn,
         string $reference,
     ): array {
+        // Toujours un token frais pour disburse : l'endpoint est plus strict
+        // que KYC/payment et rejette les tokens mis en cache trop longtemps.
+        Cache::forget('paynala_oauth_token');
         $token = $this->getToken();
 
         $response = Http::withToken($token)
