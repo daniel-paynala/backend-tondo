@@ -17,14 +17,12 @@ class PaynalaPaymentService
     private string $baseUrl;
     private string $clientId;
     private string $clientSecret;
-    private string $operatorKey;
 
     public function __construct()
     {
         $this->baseUrl      = rtrim(config('services.paynala.base_url', 'https://testapi.paynala.com/functions/v1'), '/');
         $this->clientId     = (string) config('services.paynala.client_id', '');
         $this->clientSecret = (string) config('services.paynala.client_secret', '');
-        $this->operatorKey  = (string) config('services.paynala.operator_key', '');
     }
 
     /**
@@ -93,54 +91,6 @@ class PaynalaPaymentService
         }
 
         return $response->json('data', ['status' => 'PENDING']);
-    }
-
-    /**
-     * Vérifie si un numéro Airtel possède un compte Mobile Money actif.
-     *
-     * @param  string $msisdn  Numéro local avec zéro initial (ex : "077730634").
-     * @return bool|null
-     *   true  = compte actif confirmé → autoriser
-     *   false = numéro introuvable confirmé (success:false, status:FAILED) → bloquer
-     *   null  = service indisponible (merchant inactif, timeout…) → laisser passer
-     */
-    public function checkKyc(string $msisdn): bool|null
-    {
-        $cacheKey = 'paynala_kyc_' . $msisdn;
-
-        if (Cache::has($cacheKey)) {
-            return true;
-        }
-
-        try {
-            $token = $this->getToken();
-
-            $response = Http::withToken($token)
-                ->withHeaders(['x-operator-key' => $this->operatorKey])
-                ->timeout(10)
-                ->post("{$this->baseUrl}/kyc", ['msisdn' => $msisdn]);
-
-            \Illuminate\Support\Facades\Log::info('[PaynalaKYC] msisdn=' . $msisdn
-                . ' status=' . $response->status()
-                . ' body=' . $response->body());
-
-            // Succès confirmé.
-            if ($response->json('success') === true && $response->json('status') === 'FOUND') {
-                Cache::put($cacheKey, true, now()->addHours(24));
-                return true;
-            }
-
-            // Échec confirmé : le numéro n'a pas de compte Airtel Money.
-            if ($response->json('success') === false && $response->json('status') === 'FAILED') {
-                return false;
-            }
-
-            // Tout autre cas (merchant inactif, réponse inattendue…) :
-            // service indisponible → on ne bloque pas.
-            return null;
-        } catch (\Throwable) {
-            return null;
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────

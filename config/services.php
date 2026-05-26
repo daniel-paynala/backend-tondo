@@ -65,7 +65,6 @@ return [
         'client_id'     => env('PAYNALA_CLIENT_ID'),
         'client_secret' => env('PAYNALA_CLIENT_SECRET'),
         'base_url'      => env('PAYNALA_BASE_URL', 'https://testapi.paynala.com/functions/v1'),
-        'operator_key'  => env('PAYNALA_OPERATOR_KEY'),
     ],
 
     /*
