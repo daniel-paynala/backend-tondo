@@ -28,12 +28,17 @@ use Illuminate\Validation\ValidationException;
  */
 class CotisationsController extends Controller
 {
-    private const FRAIS_PAYNALA_RATIO = 0.02;
-
     public function __construct(
-        private readonly PaynalaPaymentService  $paynala,
+        private readonly PaynalaPaymentService    $paynala,
         private readonly OperateurDetectorService $detector,
     ) {}
+
+    /** Commission Paynala lue depuis la config projet (jamais hardcodée). */
+    private function commissionPaynala(string $projectId): float
+    {
+        $config = app(TondoConfigService::class)->getOperatorConfig($projectId);
+        return (float) $config['commission_paynala'];
+    }
 
     /**
      * POST /api/mobile/cotisations
@@ -98,7 +103,8 @@ class CotisationsController extends Controller
             $plan         = $calc->plan($montantNet);
             $montantBrut  = (int) ceil($plan['total_a_envoyer'] * (1 + $commission));
         } else {
-            $montantBrut = (int) round($montantNet * (1 + self::FRAIS_PAYNALA_RATIO));
+            $commission  = $this->commissionPaynala($user->project_id);
+            $montantBrut = (int) round($montantNet * (1 + $commission));
         }
         $frais = $montantBrut - $montantNet;
 
@@ -164,7 +170,8 @@ class CotisationsController extends Controller
 
         if ($apiStatus === 'SUCCESS') {
             $requestMeta = json_decode($payin->request, true) ?? [];
-            $netAmount   = $requestMeta['montant_net'] ?? (int) round($payin->montant / (1 + self::FRAIS_PAYNALA_RATIO));
+            $commission  = $this->commissionPaynala($payin->project_id);
+            $netAmount   = $requestMeta['montant_net'] ?? (int) round($payin->montant / (1 + $commission));
 
             try {
                 DB::transaction(function () use ($payin, $statusData, $netAmount) {
