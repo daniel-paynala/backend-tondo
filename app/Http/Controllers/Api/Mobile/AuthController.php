@@ -97,7 +97,9 @@ class AuthController extends Controller
             if ($detected && $detected['operateur'] === 'airtel') {
                 $msisdn = '0' . ltrim($data['numero'], '0');
                 $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
-                if (! $kycOk) {
+                // null = service indisponible → on laisse passer sans bloquer.
+                // false = numéro sans compte Airtel Money → on bloque.
+                if ($kycOk === false) {
                     throw ValidationException::withMessages([
                         'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif. Veuillez utiliser un numéro avec un compte Airtel Money pour vous inscrire.',
                     ]);

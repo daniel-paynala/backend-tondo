@@ -99,13 +99,13 @@ class PaynalaPaymentService
      * Vérifie si un numéro Airtel possède un compte Mobile Money actif.
      *
      * @param  string $msisdn  Numéro local avec zéro initial (ex : "077730634").
-     * @return bool  true = compte actif, false = inactif ou KYC indisponible.
+     * @return bool|null
+     *   true  = compte actif confirmé → autoriser
+     *   false = numéro introuvable confirmé (success:false, status:FAILED) → bloquer
+     *   null  = service indisponible (merchant inactif, timeout…) → laisser passer
      */
-    public function checkKyc(string $msisdn): bool
+    public function checkKyc(string $msisdn): bool|null
     {
-        // Cache 24h : un compte Mobile Money actif reste actif. On ne
-        // recache que les true — les false ne sont pas stockés pour
-        // permettre une nouvelle tentative si le compte est activé plus tard.
         $cacheKey = 'paynala_kyc_' . $msisdn;
 
         if (Cache::has($cacheKey)) {
@@ -124,17 +124,22 @@ class PaynalaPaymentService
                 . ' status=' . $response->status()
                 . ' body=' . $response->body());
 
-            $active = $response->json('success') === true
-                   && $response->json('status') === 'FOUND';
-
-            if ($active) {
+            // Succès confirmé.
+            if ($response->json('success') === true && $response->json('status') === 'FOUND') {
                 Cache::put($cacheKey, true, now()->addHours(24));
+                return true;
             }
 
-            return $active;
+            // Échec confirmé : le numéro n'a pas de compte Airtel Money.
+            if ($response->json('success') === false && $response->json('status') === 'FAILED') {
+                return false;
+            }
+
+            // Tout autre cas (merchant inactif, réponse inattendue…) :
+            // service indisponible → on ne bloque pas.
+            return null;
         } catch (\Throwable) {
-            // KYC indisponible : on ne bloque pas l'inscription.
-            return false;
+            return null;
         }
     }
 
