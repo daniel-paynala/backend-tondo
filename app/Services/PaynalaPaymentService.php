@@ -162,6 +162,7 @@ class PaynalaPaymentService
         $token = $this->getToken();
 
         $response = Http::withToken($token)
+            ->withHeaders(['x-operator-key' => $this->operatorKey])
             ->timeout(15)
             ->post("{$this->baseUrl}/disburse", [
                 'msisdn'          => $msisdn,
