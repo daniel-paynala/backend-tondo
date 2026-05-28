@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Admin\AdminsController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
+use App\Http\Controllers\Api\Admin\ReconciliationController;
 use App\Http\Controllers\Api\Admin\SignalementsController;
 use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
@@ -75,6 +76,10 @@ Route::prefix('admin')->group(function () {
         Route::patch('/config/{operateur}/{pays}',          [AdminConfigController::class, 'update']);
         Route::post('/config/{operateur}/{pays}/toggle',    [AdminConfigController::class, 'toggle']);
         Route::delete('/config/{operateur}/{pays}',         [AdminConfigController::class, 'destroy']);
+
+        // Réconciliation financière
+        Route::get('/reconcile',                             [ReconciliationController::class, 'index']);
+        Route::get('/cagnottes/{reference}/reconcile',       [ReconciliationController::class, 'show']);
     });
 });
 

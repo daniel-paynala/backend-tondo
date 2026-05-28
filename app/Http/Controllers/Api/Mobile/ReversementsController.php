@@ -8,6 +8,7 @@ use App\Services\PaynalaPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -15,9 +16,14 @@ use Illuminate\Validation\ValidationException;
  * Reversements partiels (payout gérant → bénéficiaire).
  *
  * Disponible uniquement pour les cagnottes ouvertes, uniquement pour le
- * créateur. Déduit du montant_collecte après confirmation Paynala disburse.
+ * créateur.
  *
- * API synchrone : Paynala répond SUCCESS immédiatement, pas besoin de polling.
+ * Contrôles de sécurité financière :
+ *  – Solde vérifié sous row-lock (anti-race-condition).
+ *  – Enregistrement `initie` AVANT l'appel Paynala → zéro transaction fantôme.
+ *  – Restauration du solde + marquage `echec` si Paynala échoue.
+ *  – KYC du bénéficiaire avant tout transfert d'argent.
+ *  – Plafond 500 000 FCFA par opération.
  */
 class ReversementsController extends Controller
 {
@@ -29,11 +35,10 @@ class ReversementsController extends Controller
      * POST /api/mobile/reversements
      * Body : {
      *   cagnotte_reference   : string  (4-5 chiffres)
-     *   numero_beneficiaire  : string|null  (9 chiffres local, ex : 074577473) — exclusif avec participant_id
-     *   participant_id        : string|null  (UUID tondo_participants.id) — exclusif avec numero_beneficiaire
-     *   montant              : int           (FCFA, min 100)
-     *
-     * Exactement l'un des deux (numero_beneficiaire | participant_id) doit être fourni.
+     *   numero_beneficiaire  : string|null  (9 chiffres local, ex : 074577473)
+     *   participant_id        : string|null  (UUID tondo_participants.id)
+     *   montant              : int           (FCFA, min 100, max 500 000)
+     * }
      */
     public function store(Request $request): JsonResponse
     {
@@ -80,15 +85,7 @@ class ReversementsController extends Controller
             ]);
         }
 
-        $solde = (int) $cagnotte->montant_collecte;
-
-        if ($data['montant'] > $solde) {
-            throw ValidationException::withMessages([
-                'montant' => 'Solde insuffisant. Disponible : ' . number_format($solde, 0, ',', ' ') . ' FCFA.',
-            ]);
-        }
-
-        // Résolution du numéro bénéficiaire selon le mode de saisie.
+        // ── Résolution du numéro bénéficiaire ────────────────────────────────
         if (! empty($data['participant_id'])) {
             $participant = DB::table('tondo_participants')
                 ->join('users', 'tondo_participants.user_id', '=', 'users.id')
@@ -105,31 +102,97 @@ class ReversementsController extends Controller
 
             $numeroBeneficiaireE164 = $participant->numero_user;
         } else {
-            // Numéro local 9 chiffres → E.164 Gabon
             $numeroBeneficiaireE164 = '+241' . ltrim($data['numero_beneficiaire'], '0');
         }
 
-        $transId = 'TONDOPAYOUT' . strtoupper(Str::random(9));
-
-        // Numéro local 9 chiffres requis par l'API Paynala disburse (ex : 074577473).
-        // +24174577473 → substr(4) = "74577473" → "0" . = "074577473"
-        // substr sur l'index 4 : "+241" = 4 caractères fixes.
+        // Numéro local 9 chiffres requis par l'API Paynala disburse.
         $msisdnLocal = str_starts_with($numeroBeneficiaireE164, '+241')
             ? '0' . substr($numeroBeneficiaireE164, 4)
             : $numeroBeneficiaireE164;
 
-        // Numéro séquentiel global du prochain disbursement.
-        $nextNum    = DB::table('tondo_payout')->count() + 1;
-        $typeLabel  = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
+        // ── KYC bénéficiaire ─────────────────────────────────────────────────
+        // Vérifie que le numéro destination possède bien un compte Airtel Money.
+        // null = service indisponible → on laisse passer pour ne pas bloquer.
+        $kycOk = $this->paynala->checkKyc($msisdnLocal);
+        if ($kycOk === false) {
+            throw ValidationException::withMessages([
+                'numero_beneficiaire' => 'Ce numéro ne possède pas de compte Airtel Money actif.',
+            ]);
+        }
 
-        // reference unique horodatée (ex : TONDODISBURSEMENT1748345678123).
-        $reference = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-
-        // idempotency_key structuré + séquentiel (ex : TONDO-COTISATION-0042).
+        // ── Génération des identifiants Paynala ──────────────────────────────
+        $nextNum        = DB::table('tondo_payout')->count() + 1;
+        $typeLabel      = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
+        $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
         $idempotencyKey = 'TONDO-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
 
-        // Appel API Paynala disburse — avant la transaction DB pour ne pas
-        // déduire le solde si l'API échoue.
+        $payoutId = (string) Str::uuid();
+        $transId  = 'TONDOPAYOUT' . strtoupper(Str::random(9));
+
+        // ── PHASE 1 : réserver les fonds sous row-lock ───────────────────────
+        // On verrouille la ligne cagnotte, on re-vérifie le solde et on insère
+        // le payout en statut 'initie' dans la même transaction. Cela empêche
+        // deux requêtes simultanées de vider la même cagnotte (race condition).
+        try {
+            DB::transaction(function () use (
+                $cagnotte, $data, $payoutId, $transId, $idempotencyKey,
+                $reference, $numeroBeneficiaireE164, $user
+            ) {
+                // Verrouillage exclusif de la ligne cagnotte.
+                $soldeActuel = DB::table('tondo_cagnottes')
+                    ->where('id', $cagnotte->id)
+                    ->lockForUpdate()
+                    ->value('montant_collecte');
+
+                if ((int) $soldeActuel < $data['montant']) {
+                    throw ValidationException::withMessages([
+                        'montant' => 'Solde insuffisant. Disponible : '
+                            . number_format((int) $soldeActuel, 0, ',', ' ') . ' FCFA.',
+                    ]);
+                }
+
+                // Enregistrement initie — fonds "réservés" côté Tondo.
+                DB::table('tondo_payout')->insert([
+                    'id'            => $payoutId,
+                    'project_id'    => $cagnotte->project_id,
+                    'cagnotte_id'   => $cagnotte->id,
+                    'user_id'       => $user->id,
+                    'trans_id'      => $transId,
+                    'operateur_id'  => null,
+                    'numero_tel'    => $numeroBeneficiaireE164,
+                    'montant'       => $data['montant'],
+                    'statut'        => 'initie',
+                    'request'       => json_encode([
+                        'idempotency_key'     => $idempotencyKey,
+                        'reference'           => $reference,
+                        'cagnotte_reference'  => $cagnotte->reference,
+                        'numero_beneficiaire' => $numeroBeneficiaireE164,
+                        'montant'             => $data['montant'],
+                    ]),
+                    'date_creation' => now(),
+                    'created_at'    => now(),
+                    'updated_at'    => now(),
+                ]);
+
+                // Décrémentation atomique du solde.
+                DB::table('tondo_cagnottes')
+                    ->where('id', $cagnotte->id)
+                    ->update([
+                        'montant_collecte' => DB::raw('montant_collecte - ' . (int) $data['montant']),
+                        'updated_at'       => now(),
+                    ]);
+            });
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('[reversement] échec phase réservation', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Erreur lors de la réservation des fonds.',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+
+        // ── PHASE 2 : appel Paynala (hors transaction DB) ────────────────────
         try {
             $disburseData = $this->paynala->disburse(
                 idempotencyKey: $idempotencyKey,
@@ -138,45 +201,42 @@ class ReversementsController extends Controller
                 reference:      $reference,
             );
         } catch (\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 502);
-        }
-
-        try {
-            DB::transaction(function () use ($user, $cagnotte, $transId, $data, $numeroBeneficiaireE164, $disburseData) {
-                DB::table('tondo_payout')->insert([
-                    'id'            => (string) Str::uuid(),
-                    'project_id'    => $cagnotte->project_id,
-                    'cagnotte_id'   => $cagnotte->id,
-                    'user_id'       => $user->id,
-                    'trans_id'      => $transId,
-                    'operateur_id'  => $disburseData['airtel_money_id'] ?? null,
-                    'numero_tel'    => $numeroBeneficiaireE164,
-                    'montant'       => $data['montant'],
-                    'statut'        => 'succes',
-                    'request'       => json_encode([
-                        'cagnotte_reference'  => $data['cagnotte_reference'],
-                        'numero_beneficiaire' => $numeroBeneficiaireE164,
-                        'montant'             => $data['montant'],
-                    ]),
-                    'response'      => json_encode($disburseData),
-                    'date_creation' => now(),
-                    'created_at'    => now(),
-                    'updated_at'    => now(),
-                ]);
+            // Paynala a échoué → on annule la réservation (solde restauré).
+            DB::transaction(function () use ($payoutId, $cagnotte, $data, $e) {
+                DB::table('tondo_payout')
+                    ->where('id', $payoutId)
+                    ->update([
+                        'statut'     => 'echec',
+                        'response'   => json_encode(['error' => $e->getMessage()]),
+                        'updated_at' => now(),
+                    ]);
 
                 DB::table('tondo_cagnottes')
                     ->where('id', $cagnotte->id)
                     ->update([
-                        'montant_collecte' => DB::raw('montant_collecte - ' . (int) $data['montant']),
+                        'montant_collecte' => DB::raw('montant_collecte + ' . (int) $data['montant']),
                         'updated_at'       => now(),
                     ]);
             });
-        } catch (\Throwable $e) {
-            return response()->json([
-                'message' => 'Erreur lors du reversement.',
-                'error'   => $e->getMessage(),
-            ], 500);
+
+            Log::error('[reversement] échec Paynala — solde restauré', [
+                'payout_id' => $payoutId,
+                'montant'   => $data['montant'],
+                'error'     => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => $e->getMessage()], 502);
         }
+
+        // ── PHASE 3 : confirmer le payout ────────────────────────────────────
+        DB::table('tondo_payout')
+            ->where('id', $payoutId)
+            ->update([
+                'statut'       => 'succes',
+                'operateur_id' => $disburseData['airtel_money_id'] ?? null,
+                'response'     => json_encode($disburseData),
+                'updated_at'   => now(),
+            ]);
 
         $cagnotte->refresh();
 

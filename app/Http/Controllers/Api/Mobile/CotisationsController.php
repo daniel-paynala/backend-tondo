@@ -81,6 +81,24 @@ class CotisationsController extends Controller
             ]);
         }
 
+        // Contrôle double cotisation (tontine uniquement) :
+        // un participant ne peut cotiser qu'une fois par cycle.
+        // statut_paiement = 'paye' indique que le cycle courant est déjà réglé.
+        if ($cagnotte->type === 'tontine_periodique') {
+            $dejaPayeCycle = DB::table('tondo_participants')
+                ->where('cagnotte_id', $cagnotte->id)
+                ->where('user_id', $user->id)
+                ->where('statut_paiement', 'paye')
+                ->exists();
+
+            if ($dejaPayeCycle) {
+                return response()->json([
+                    'message'  => 'Vous avez déjà cotisé pour ce cycle.',
+                    'statut'   => 'deja_paye',
+                ], 422);
+            }
+        }
+
         // Numéro qui paie (E.164). Par défaut celui de l'user authentifié.
         $numeroPayeurE164 = $user->numero;
         if (! empty($data['indicatif_payeur']) && ! empty($data['numero_payeur'])) {
