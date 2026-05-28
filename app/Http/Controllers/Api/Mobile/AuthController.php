@@ -233,7 +233,11 @@ class AuthController extends Controller
             if (! empty($data['nom']))    $user->nom    = $data['nom'];
             if (! empty($data['prenom'])) $user->prenom = $data['prenom'];
             $user->date_naissance = $data['date_naissance'];
-            $user->type_client    = $data['type_client'] ?? $user->type_client ?? 'particulier';
+            // Priorité : grade KYC Airtel (mis en cache lors du request-otp)
+            // > valeur explicitement passée par le client > valeur existante > défaut.
+            $kycMsisdn     = '0' . ltrim($data['numero'], '0');
+            $kycTypeClient = app(PaynalaPaymentService::class)->resolveTypeClientFromKyc($kycMsisdn);
+            $user->type_client = $kycTypeClient ?? $data['type_client'] ?? $user->type_client ?? 'particulier';
             $user->compte_type    = 'full';
             // KYC déjà vérifié dans requestOtp (intent=signup) — on marque
             // kyc_valide=true pour les numéros Airtel qui ont passé ce contrôle.

@@ -107,7 +107,8 @@ class PaynalaPaymentService
      */
     public function checkKyc(string $msisdn): bool|null
     {
-        $cacheKey = 'paynala_kyc_' . $msisdn;
+        $cacheKey     = 'paynala_kyc_'      . $msisdn;
+        $typeClientKey = 'paynala_kyc_type_' . $msisdn;
 
         if (Cache::has($cacheKey)) {
             return true;
@@ -124,6 +125,16 @@ class PaynalaPaymentService
             // Succès confirmé.
             if ($response->json('success') === true && $response->json('status') === 'FOUND') {
                 Cache::put($cacheKey, true, now()->addHours(24));
+
+                // Dérive type_client depuis le grade Airtel :
+                // SUBS (abonné particulier) et TEMP (enregistrement temporaire)
+                // → particulier ; tout autre grade → entreprise.
+                $grade      = $response->json('data.grade');
+                $typeClient = in_array($grade, ['SUBS', 'TEMP'], true)
+                    ? 'particulier'
+                    : 'entreprise';
+                Cache::put($typeClientKey, $typeClient, now()->addHours(24));
+
                 return true;
             }
 
@@ -138,6 +149,15 @@ class PaynalaPaymentService
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Retourne le type_client dérivé du grade KYC mis en cache lors du sign-up.
+     * null si le KYC n'a pas encore été appelé pour ce numéro.
+     */
+    public function resolveTypeClientFromKyc(string $msisdn): ?string
+    {
+        return Cache::get('paynala_kyc_type_' . $msisdn);
     }
 
     /**
