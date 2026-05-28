@@ -118,14 +118,21 @@ class ReversementsController extends Controller
             ? '0' . substr($numeroBeneficiaireE164, 4)
             : $numeroBeneficiaireE164;
 
-        // Référence lisible tronquée à 20 chars (contrainte API).
-        $reference = mb_substr($cagnotte->titre ?? $cagnotte->reference, 0, 20);
+        // Numéro séquentiel global du prochain disbursement.
+        $nextNum    = DB::table('tondo_payout')->count() + 1;
+        $typeLabel  = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
+
+        // reference unique horodatée (ex : TONDODISBURSEMENT1748345678123).
+        $reference = 'TONDODISBURSEMENT' . now()->getTimestampMs();
+
+        // idempotency_key structuré + séquentiel (ex : TONDO-COTISATION-0042).
+        $idempotencyKey = 'TONDO-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
 
         // Appel API Paynala disburse — avant la transaction DB pour ne pas
         // déduire le solde si l'API échoue.
         try {
             $disburseData = $this->paynala->disburse(
-                idempotencyKey: $transId,
+                idempotencyKey: $idempotencyKey,
                 amount:         $data['montant'],
                 msisdn:         $msisdnLocal,
                 reference:      $reference,
