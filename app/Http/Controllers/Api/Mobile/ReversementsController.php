@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Mail\DisbursementFailedMail;
 use App\Models\TondoCagnotte;
 use App\Services\PaynalaPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -21,9 +23,7 @@ use Illuminate\Validation\ValidationException;
  * Contrôles de sécurité financière :
  *  – Solde vérifié sous row-lock (anti-race-condition).
  *  – Enregistrement `initie` AVANT l'appel Paynala → zéro transaction fantôme.
- *  – Restauration du solde + marquage `echec` si Paynala échoue.
- *  – KYC du bénéficiaire avant tout transfert d'argent.
- *  – Plafond 500 000 FCFA par opération.
+ *  – Échec Paynala → alerte email aux admins, intervention manuelle requise.
  */
 class ReversementsController extends Controller
 {
@@ -46,7 +46,7 @@ class ReversementsController extends Controller
             'cagnotte_reference'  => ['required', 'string', 'regex:/^\d{4,5}$/'],
             'numero_beneficiaire' => ['nullable', 'string', 'regex:/^\d{9}$/'],
             'participant_id'      => ['nullable', 'string', 'uuid'],
-            'montant'             => ['required', 'integer', 'min:100', 'max:500000'],
+            'montant'             => ['required', 'integer', 'min:100'],
         ]);
 
         if (empty($data['numero_beneficiaire']) && empty($data['participant_id'])) {
@@ -109,16 +109,6 @@ class ReversementsController extends Controller
         $msisdnLocal = str_starts_with($numeroBeneficiaireE164, '+241')
             ? '0' . substr($numeroBeneficiaireE164, 4)
             : $numeroBeneficiaireE164;
-
-        // ── KYC bénéficiaire ─────────────────────────────────────────────────
-        // Vérifie que le numéro destination possède bien un compte Airtel Money.
-        // null = service indisponible → on laisse passer pour ne pas bloquer.
-        $kycOk = $this->paynala->checkKyc($msisdnLocal);
-        if ($kycOk === false) {
-            throw ValidationException::withMessages([
-                'numero_beneficiaire' => 'Ce numéro ne possède pas de compte Airtel Money actif.',
-            ]);
-        }
 
         // ── Génération des identifiants Paynala ──────────────────────────────
         $nextNum        = DB::table('tondo_payout')->count() + 1;
@@ -201,31 +191,55 @@ class ReversementsController extends Controller
                 reference:      $reference,
             );
         } catch (\RuntimeException $e) {
-            // Paynala a échoué → on annule la réservation (solde restauré).
-            DB::transaction(function () use ($payoutId, $cagnotte, $data, $e) {
-                DB::table('tondo_payout')
-                    ->where('id', $payoutId)
-                    ->update([
-                        'statut'     => 'echec',
-                        'response'   => json_encode(['error' => $e->getMessage()]),
-                        'updated_at' => now(),
-                    ]);
+            // Paynala a échoué APRÈS la réservation des fonds.
+            // On ne restaure PAS automatiquement le solde — l'état Paynala
+            // est inconnu. On marque 'echec' et on alerte les admins pour
+            // qu'ils vérifient manuellement avant toute correction.
+            DB::table('tondo_payout')
+                ->where('id', $payoutId)
+                ->update([
+                    'statut'     => 'echec',
+                    'response'   => json_encode(['error' => $e->getMessage()]),
+                    'updated_at' => now(),
+                ]);
 
-                DB::table('tondo_cagnottes')
-                    ->where('id', $cagnotte->id)
-                    ->update([
-                        'montant_collecte' => DB::raw('montant_collecte + ' . (int) $data['montant']),
-                        'updated_at'       => now(),
-                    ]);
-            });
-
-            Log::error('[reversement] échec Paynala — solde restauré', [
-                'payout_id' => $payoutId,
-                'montant'   => $data['montant'],
-                'error'     => $e->getMessage(),
+            Log::critical('[reversement] échec Paynala — INTERVENTION MANUELLE REQUISE', [
+                'payout_id'       => $payoutId,
+                'trans_id'        => $transId,
+                'cagnotte_ref'    => $cagnotte->reference,
+                'montant'         => $data['montant'],
+                'beneficiaire'    => $numeroBeneficiaireE164,
+                'idempotency_key' => $idempotencyKey,
+                'error'           => $e->getMessage(),
             ]);
 
-            return response()->json(['message' => $e->getMessage()], 502);
+            // Alerte email à tous les admins actifs.
+            try {
+                $adminEmails = DB::table('tondo_admins')
+                    ->where('actif', true)
+                    ->pluck('email')
+                    ->toArray();
+
+                if (! empty($adminEmails)) {
+                    Mail::to($adminEmails)->send(new DisbursementFailedMail(
+                        payoutId:          $payoutId,
+                        transId:           $transId,
+                        cagnotteReference: $cagnotte->reference,
+                        montant:           $data['montant'],
+                        numeroBeneficiaire: $numeroBeneficiaireE164,
+                        idempotencyKey:    $idempotencyKey,
+                        errorMessage:      $e->getMessage(),
+                    ));
+                }
+            } catch (\Throwable $mailEx) {
+                Log::error('[reversement] impossible d\'envoyer l\'alerte email', [
+                    'mail_error' => $mailEx->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Le transfert a échoué. Les administrateurs ont été alertés.',
+            ], 502);
         }
 
         // ── PHASE 3 : confirmer le payout ────────────────────────────────────
