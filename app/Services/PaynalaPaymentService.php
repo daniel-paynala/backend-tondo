@@ -125,7 +125,6 @@ class PaynalaPaymentService
             ]);
 
             $response = Http::withToken($token)
-                ->withHeaders(['x-operator-key' => $this->operatorKey])
                 ->timeout(10)
                 ->post("{$this->baseUrl}/kyc", ['msisdn' => $msisdn]);
 
