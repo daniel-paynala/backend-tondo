@@ -7,8 +7,10 @@ use App\Models\TondoCagnotte;
 use App\Services\AirtelFeesCalculator;
 use App\Services\OneSignalService;
 use App\Services\TondoConfigService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -262,8 +264,22 @@ class CagnottesController extends Controller
                 ];
             });
 
+        // Cycles complétés = payouts confirmés sur cette cagnotte.
+        $cyclesCompletes = (int) DB::table('tondo_payout')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('statut', 'succes')
+            ->count();
+
+        $participantsArray = $participants->values()->all();
+
         return response()->json([
-            'cagnotte'     => $this->serialize($cagnotte),
+            'cagnotte'     => array_merge(
+                $this->serialize($cagnotte),
+                [
+                    'prochain_retrait'      => $this->calculerProchaineDate($cagnotte, $cyclesCompletes),
+                    'prochain_beneficiaire' => $this->calculerProchainBeneficiaire($participantsArray, $cyclesCompletes),
+                ]
+            ),
             'participants' => $participants,
         ]);
     }
@@ -479,7 +495,8 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Ajoutez au moins un participant avant de démarrer.'], 422);
         }
 
-        $cagnotte->statut = 'en_cours';
+        $cagnotte->statut        = 'en_cours';
+        $cagnotte->date_demarrage = now();
         $cagnotte->save();
 
         // Récupère tous les participants ayant un compte full pour les notifier.
@@ -745,28 +762,111 @@ class CagnottesController extends Controller
     private function serialize(TondoCagnotte $c): array
     {
         return [
-            'id' => $c->id,
-            'reference' => $c->reference,
-            'titre' => $c->titre,
-            'type' => $c->type,
-            'statut' => $c->statut,
+            'id'                    => $c->id,
+            'reference'             => $c->reference,
+            'titre'                 => $c->titre,
+            'type'                  => $c->type,
+            'statut'                => $c->statut,
             'numero_retrait_masque' => $c->numero_retrait_masque,
-            'montant_collecte' => (int) $c->montant_collecte,
-            'montant_beneficiaire' => $c->montant_beneficiaire,
-            'montant_avec_frais' => $c->montant_avec_frais,
-            'total_a_envoyer' => $c->total_a_envoyer,
-            'montant_cible' => $c->montant_cible,
-            'date_fin' => $c->date_fin?->toIso8601String(),
-            'montant_par_cycle' => $c->montant_par_cycle,
-            'periodicite' => $c->periodicite,
-            'intervalle' => $c->intervalle,
-            'jour_semaine' => $c->jour_semaine,
-            'jour_mois' => $c->jour_mois,
-            'nombre_participants' => $c->nombre_participants,
-            'nombre_inscrits' => (int) $c->nombre_inscrits,
-            'nombre_splits' => $c->nombre_splits,
-            'nombre_envois' => $c->nombre_envois,
-            'date_creation' => $c->date_creation?->toIso8601String(),
+            'montant_collecte'      => (int) $c->montant_collecte,
+            'montant_beneficiaire'  => $c->montant_beneficiaire,
+            'montant_avec_frais'    => $c->montant_avec_frais,
+            'total_a_envoyer'       => $c->total_a_envoyer,
+            'montant_cible'         => $c->montant_cible,
+            'date_fin'              => $c->date_fin?->toIso8601String(),
+            'montant_par_cycle'     => $c->montant_par_cycle,
+            'periodicite'           => $c->periodicite,
+            'intervalle'            => $c->intervalle,
+            'jour_semaine'          => $c->jour_semaine,
+            'jour_mois'             => $c->jour_mois,
+            'nombre_participants'   => $c->nombre_participants,
+            'nombre_inscrits'       => (int) $c->nombre_inscrits,
+            'nombre_splits'         => $c->nombre_splits,
+            'nombre_envois'         => $c->nombre_envois,
+            'date_creation'         => $c->date_creation?->toIso8601String(),
+            'date_demarrage'        => $c->date_demarrage?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Calcule la prochaine date de retrait pour une tontine en cours.
+     * Retourne null si les données sont insuffisantes.
+     */
+    private function calculerProchaineDate(TondoCagnotte $c, int $cyclesCompletes): ?string
+    {
+        if ($c->statut !== 'en_cours' || ! $c->date_demarrage || ! $c->periodicite) {
+            return null;
+        }
+
+        $debut      = Carbon::parse($c->date_demarrage);
+        $intervalle = (int) ($c->intervalle ?? 1);
+
+        if ($c->periodicite === 'hebdomadaire' && $c->jour_semaine) {
+            $dowMap = [
+                'lundi'    => Carbon::MONDAY,    'mardi'    => Carbon::TUESDAY,
+                'mercredi' => Carbon::WEDNESDAY, 'jeudi'    => Carbon::THURSDAY,
+                'vendredi' => Carbon::FRIDAY,    'samedi'   => Carbon::SATURDAY,
+                'dimanche' => Carbon::SUNDAY,
+            ];
+            $targetDow = $dowMap[$c->jour_semaine] ?? Carbon::FRIDAY;
+
+            // Premier retrait = premier $targetDow >= date_demarrage
+            $premierRetrait = $debut->copy();
+            if ($premierRetrait->dayOfWeek !== $targetDow) {
+                $premierRetrait->next($targetDow);
+            }
+
+            // Prochain retrait = premierRetrait + cyclesCompletes * intervalle semaines
+            $prochainRetrait = $premierRetrait->copy()->addWeeks($cyclesCompletes * $intervalle);
+
+            // Si déjà passé (cas théorique), avancer d'un cycle
+            if ($prochainRetrait->isPast()) {
+                $prochainRetrait->addWeeks($intervalle);
+            }
+
+            return $prochainRetrait->toDateString();
+        }
+
+        if ($c->periodicite === 'mensuelle' && $c->jour_mois) {
+            $jourMois = (int) $c->jour_mois;
+
+            // Premier retrait = première occurrence de $jourMois >= date_demarrage
+            $premierRetrait = $debut->copy()->setDay($jourMois);
+            if ($premierRetrait->lessThan($debut)) {
+                $premierRetrait->addMonths($intervalle);
+            }
+
+            // Prochain retrait = premierRetrait + cyclesCompletes * intervalle mois
+            $prochainRetrait = $premierRetrait->copy()->addMonths($cyclesCompletes * $intervalle);
+
+            if ($prochainRetrait->isPast()) {
+                $prochainRetrait->addMonths($intervalle);
+            }
+
+            return $prochainRetrait->toDateString();
+        }
+
+        return null;
+    }
+
+    /**
+     * Retourne le prochain participant à recevoir la mise (cyclesCompletes + 1).
+     */
+    private function calculerProchainBeneficiaire(array $participants, int $cyclesCompletes): ?array
+    {
+        $prochainOrdre = $cyclesCompletes + 1;
+
+        foreach ($participants as $p) {
+            if ((int) ($p['ordre_passage'] ?? 0) === $prochainOrdre) {
+                return [
+                    'nom'    => $p['nom'],
+                    'prenom' => $p['prenom'],
+                    'ordre'  => $prochainOrdre,
+                    'is_me'  => (bool) ($p['is_me'] ?? false),
+                ];
+            }
+        }
+
+        return null;
     }
 }

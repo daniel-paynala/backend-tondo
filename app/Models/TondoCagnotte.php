@@ -27,8 +27,9 @@ class TondoCagnotte extends Model
         'nombre_envois' => 'integer',
         'intervalle' => 'integer',
         'jour_mois' => 'integer',
-        'date_creation' => 'datetime',
-        'date_fin' => 'datetime',
+        'date_creation'  => 'datetime',
+        'date_fin'       => 'datetime',
+        'date_demarrage' => 'datetime',
     ];
 
     public function gerant(): BelongsTo
