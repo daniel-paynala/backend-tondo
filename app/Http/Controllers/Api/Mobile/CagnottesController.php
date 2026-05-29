@@ -7,6 +7,7 @@ use App\Models\TondoCagnotte;
 use App\Services\AirtelFeesCalculator;
 use App\Services\OneSignalService;
 use App\Services\TondoConfigService;
+use App\Services\TontineService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -278,7 +279,7 @@ class CagnottesController extends Controller
             'cagnotte'     => array_merge(
                 $this->serialize($cagnotte),
                 [
-                    'prochain_retrait'      => $this->calculerProchaineDate($cagnotte, $cyclesCompletes),
+                    'prochain_retrait'      => app(TontineService::class)->prochaineDate($cagnotte, $cyclesCompletes),
                     'prochain_beneficiaire' => $this->calculerProchainBeneficiaire($participantsArray, $cyclesCompletes),
                     'rotation_terminee'     => $cagnotte->statut === 'en_cours'
                         && $cagnotte->type === 'tontine_periodique'
@@ -794,17 +795,7 @@ class CagnottesController extends Controller
         ];
     }
 
-    /**
-     * Calcule la prochaine date de retrait pour une tontine en cours.
-     *
-     * Logique : toujours ancrer sur date_demarrage pour suivre les cycles
-     * de façon déterministe du début à la fin de la tontine.
-     *   prochain_retrait = premier_retrait + cyclesCompletes × intervalle
-     *
-     * Fallback (tontines sans date_demarrage — données avant migration) :
-     * prochaine occurrence de jour_semaine / jour_mois depuis aujourd'hui.
-     * Approximatif mais toujours lisible.
-     */
+    /** @deprecated Migré vers TontineService::prochaineDate(). */
     private function calculerProchaineDate(TondoCagnotte $c, int $cyclesCompletes): ?string
     {
         if ($c->statut !== 'en_cours' || ! $c->periodicite) {
