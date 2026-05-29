@@ -86,12 +86,14 @@ class ReversementsController extends Controller
         }
 
         // ── Résolution du numéro bénéficiaire ────────────────────────────────
+        $beneficiaireUserId = null;
+
         if (! empty($data['participant_id'])) {
             $participant = DB::table('tondo_participants')
                 ->join('users', 'tondo_participants.user_id', '=', 'users.id')
                 ->where('tondo_participants.id', $data['participant_id'])
                 ->where('tondo_participants.cagnotte_id', $cagnotte->id)
-                ->select('users.numero as numero_user')
+                ->select('users.id as user_id_benef', 'users.numero as numero_user')
                 ->first();
 
             if (! $participant || empty($participant->numero_user)) {
@@ -101,8 +103,14 @@ class ReversementsController extends Controller
             }
 
             $numeroBeneficiaireE164 = $participant->numero_user;
+            $beneficiaireUserId     = $participant->user_id_benef;
         } else {
             $numeroBeneficiaireE164 = '+241' . ltrim($data['numero_beneficiaire'], '0');
+            // Cherche si ce numéro correspond à un compte Tondo.
+            $benefUser          = DB::table('users')
+                ->where('numero', $numeroBeneficiaireE164)
+                ->value('id');
+            $beneficiaireUserId = $benefUser ?? null;
         }
 
         // Numéro local 9 chiffres requis par l'API Paynala disburse.
@@ -126,7 +134,7 @@ class ReversementsController extends Controller
         try {
             DB::transaction(function () use (
                 $cagnotte, $data, $payoutId, $transId, $idempotencyKey,
-                $reference, $numeroBeneficiaireE164, $user
+                $reference, $numeroBeneficiaireE164, $beneficiaireUserId, $user
             ) {
                 // Verrouillage exclusif de la ligne cagnotte.
                 $soldeActuel = DB::table('tondo_cagnottes')
@@ -146,7 +154,7 @@ class ReversementsController extends Controller
                     'id'            => $payoutId,
                     'project_id'    => $cagnotte->project_id,
                     'cagnotte_id'   => $cagnotte->id,
-                    'user_id'       => $user->id,
+                    'user_id'       => $beneficiaireUserId,  // bénéficiaire, pas le gérant
                     'trans_id'      => $transId,
                     'operateur_id'  => null,
                     'numero_tel'    => $numeroBeneficiaireE164,

@@ -272,12 +272,18 @@ class CagnottesController extends Controller
 
         $participantsArray = $participants->values()->all();
 
+        $nbInscrits = (int) $cagnotte->nombre_inscrits;
+
         return response()->json([
             'cagnotte'     => array_merge(
                 $this->serialize($cagnotte),
                 [
                     'prochain_retrait'      => $this->calculerProchaineDate($cagnotte, $cyclesCompletes),
                     'prochain_beneficiaire' => $this->calculerProchainBeneficiaire($participantsArray, $cyclesCompletes),
+                    'rotation_terminee'     => $cagnotte->statut === 'en_cours'
+                        && $cagnotte->type === 'tontine_periodique'
+                        && $nbInscrits > 0
+                        && $cyclesCompletes >= $nbInscrits,
                 ]
             ),
             'participants' => $participants,
