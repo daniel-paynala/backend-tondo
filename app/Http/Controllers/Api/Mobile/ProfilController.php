@@ -58,17 +58,12 @@ class ProfilController extends Controller
         $numero  = $user->numero; // E164 : +24177XXXXXX
 
         // Numéro local 9 chiffres pour l'API Paynala (077XXXXXX).
-        $numeroNet = preg_replace('/\s+/', '', $numero); // suppr. espaces éventuels
+        $numeroNet = preg_replace('/\s+/', '', $numero);
         $msisdn = str_starts_with($numeroNet, '+241')
             ? '0' . substr($numeroNet, 4)
             : (str_starts_with($numeroNet, '241')
                 ? '0' . substr($numeroNet, 3)
                 : ltrim($numeroNet, '+'));
-
-        \Illuminate\Support\Facades\Log::info('[recheck] msisdn calculé', [
-            'numero_db' => $numero,
-            'msisdn'    => $msisdn,
-        ]);
 
         // Effacer le cache pour forcer une nouvelle vérification.
         Cache::forget('paynala_kyc_' . $msisdn);

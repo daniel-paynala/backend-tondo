@@ -117,13 +117,6 @@ class PaynalaPaymentService
         try {
             $token = $this->getToken();
 
-            Log::debug('[paynala] checkKyc appel', [
-                'url'          => "{$this->baseUrl}/kyc",
-                'msisdn'       => $msisdn,
-                'client_id'    => $this->clientId,
-                'operator_key' => substr($this->operatorKey, 0, 6) . '…',
-            ]);
-
             $response = Http::withToken($token)
                 ->timeout(10)
                 ->post("{$this->baseUrl}/kyc", ['msisdn' => $msisdn]);
