@@ -145,8 +145,17 @@ class PaynalaPaymentService
 
             // Tout autre cas (merchant inactif, réponse inattendue…) :
             // service indisponible → on ne bloque pas.
+            Log::warning('[paynala] checkKyc réponse inattendue', [
+                'msisdn' => $msisdn,
+                'status' => $response->status(),
+                'body'   => $response->json() ?? $response->body(),
+            ]);
             return null;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Log::error('[paynala] checkKyc exception', [
+                'msisdn' => $msisdn,
+                'error'  => $e->getMessage(),
+            ]);
             return null;
         }
     }
