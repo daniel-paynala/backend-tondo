@@ -790,16 +790,20 @@ class CagnottesController extends Controller
 
     /**
      * Calcule la prochaine date de retrait pour une tontine en cours.
-     * Retourne null si les données sont insuffisantes.
+     *
+     * N'exige pas date_demarrage — la fréquence seule (periodicite +
+     * jour_semaine / jour_mois) suffit à déduire la prochaine occurrence.
+     * Si date_demarrage est disponible ET intervalle > 1, on s'en sert pour
+     * aligner précisément sur le bon cycle (ex : "toutes les 2 semaines").
      */
     private function calculerProchaineDate(TondoCagnotte $c, int $cyclesCompletes): ?string
     {
-        if ($c->statut !== 'en_cours' || ! $c->date_demarrage || ! $c->periodicite) {
+        if ($c->statut !== 'en_cours' || ! $c->periodicite) {
             return null;
         }
 
-        $debut      = Carbon::parse($c->date_demarrage);
         $intervalle = (int) ($c->intervalle ?? 1);
+        $now        = now()->startOfDay();
 
         if ($c->periodicite === 'hebdomadaire' && $c->jour_semaine) {
             $dowMap = [
@@ -810,40 +814,62 @@ class CagnottesController extends Controller
             ];
             $targetDow = $dowMap[$c->jour_semaine] ?? Carbon::FRIDAY;
 
-            // Premier retrait = premier $targetDow >= date_demarrage
-            $premierRetrait = $debut->copy();
-            if ($premierRetrait->dayOfWeek !== $targetDow) {
-                $premierRetrait->next($targetDow);
+            // Prochaine occurrence du jour cible à partir d'aujourd'hui.
+            $prochain = $now->copy();
+            if ($prochain->dayOfWeek === $targetDow) {
+                // Aujourd'hui est le jour de retrait — on considère que c'est
+                // la date courante (le retrait est ce jour ou ce soir).
+            } else {
+                $prochain->next($targetDow);
             }
 
-            // Prochain retrait = premierRetrait + cyclesCompletes * intervalle semaines
-            $prochainRetrait = $premierRetrait->copy()->addWeeks($cyclesCompletes * $intervalle);
-
-            // Si déjà passé (cas théorique), avancer d'un cycle
-            if ($prochainRetrait->isPast()) {
-                $prochainRetrait->addWeeks($intervalle);
+            // Avec date_demarrage + intervalle > 1 : on peut aligner exactement
+            // sur le cycle (ex : toutes les 2 semaines depuis le démarrage).
+            if ($c->date_demarrage && $intervalle > 1) {
+                $debut          = Carbon::parse($c->date_demarrage);
+                $premierRetrait = $debut->copy();
+                if ($premierRetrait->dayOfWeek !== $targetDow) {
+                    $premierRetrait->next($targetDow);
+                }
+                $prochainCycle = $premierRetrait->copy()
+                    ->addWeeks($cyclesCompletes * $intervalle);
+                if ($prochainCycle->isFuture() || $prochainCycle->isToday()) {
+                    return $prochainCycle->toDateString();
+                }
+                $prochainCycle->addWeeks($intervalle);
+                return $prochainCycle->toDateString();
             }
 
-            return $prochainRetrait->toDateString();
+            return $prochain->toDateString();
         }
 
         if ($c->periodicite === 'mensuelle' && $c->jour_mois) {
             $jourMois = (int) $c->jour_mois;
 
-            // Premier retrait = première occurrence de $jourMois >= date_demarrage
-            $premierRetrait = $debut->copy()->setDay($jourMois);
-            if ($premierRetrait->lessThan($debut)) {
-                $premierRetrait->addMonths($intervalle);
+            // Prochaine occurrence du jour du mois à partir d'aujourd'hui.
+            if ($now->day <= $jourMois) {
+                $prochain = $now->copy()->setDay($jourMois);
+            } else {
+                $prochain = $now->copy()->addMonths($intervalle)->setDay($jourMois);
             }
 
-            // Prochain retrait = premierRetrait + cyclesCompletes * intervalle mois
-            $prochainRetrait = $premierRetrait->copy()->addMonths($cyclesCompletes * $intervalle);
-
-            if ($prochainRetrait->isPast()) {
-                $prochainRetrait->addMonths($intervalle);
+            // Avec date_demarrage + intervalle > 1 : alignement précis sur le cycle.
+            if ($c->date_demarrage && $intervalle > 1) {
+                $debut          = Carbon::parse($c->date_demarrage);
+                $premierRetrait = $debut->copy()->setDay($jourMois);
+                if ($premierRetrait->lessThan($debut)) {
+                    $premierRetrait->addMonths($intervalle);
+                }
+                $prochainCycle = $premierRetrait->copy()
+                    ->addMonths($cyclesCompletes * $intervalle);
+                if ($prochainCycle->isFuture() || $prochainCycle->isToday()) {
+                    return $prochainCycle->toDateString();
+                }
+                $prochainCycle->addMonths($intervalle);
+                return $prochainCycle->toDateString();
             }
 
-            return $prochainRetrait->toDateString();
+            return $prochain->toDateString();
         }
 
         return null;
