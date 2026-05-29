@@ -791,10 +791,13 @@ class CagnottesController extends Controller
     /**
      * Calcule la prochaine date de retrait pour une tontine en cours.
      *
-     * N'exige pas date_demarrage — la fréquence seule (periodicite +
-     * jour_semaine / jour_mois) suffit à déduire la prochaine occurrence.
-     * Si date_demarrage est disponible ET intervalle > 1, on s'en sert pour
-     * aligner précisément sur le bon cycle (ex : "toutes les 2 semaines").
+     * Logique : toujours ancrer sur date_demarrage pour suivre les cycles
+     * de façon déterministe du début à la fin de la tontine.
+     *   prochain_retrait = premier_retrait + cyclesCompletes × intervalle
+     *
+     * Fallback (tontines sans date_demarrage — données avant migration) :
+     * prochaine occurrence de jour_semaine / jour_mois depuis aujourd'hui.
+     * Approximatif mais toujours lisible.
      */
     private function calculerProchaineDate(TondoCagnotte $c, int $cyclesCompletes): ?string
     {
@@ -814,61 +817,53 @@ class CagnottesController extends Controller
             ];
             $targetDow = $dowMap[$c->jour_semaine] ?? Carbon::FRIDAY;
 
-            // Prochaine occurrence du jour cible à partir d'aujourd'hui.
-            $prochain = $now->copy();
-            if ($prochain->dayOfWeek === $targetDow) {
-                // Aujourd'hui est le jour de retrait — on considère que c'est
-                // la date courante (le retrait est ce jour ou ce soir).
-            } else {
-                $prochain->next($targetDow);
-            }
-
-            // Avec date_demarrage + intervalle > 1 : on peut aligner exactement
-            // sur le cycle (ex : toutes les 2 semaines depuis le démarrage).
-            if ($c->date_demarrage && $intervalle > 1) {
-                $debut          = Carbon::parse($c->date_demarrage);
+            if ($c->date_demarrage) {
+                // Ancrage sur date_demarrage → suivi exact de tous les cycles.
+                $debut          = Carbon::parse($c->date_demarrage)->startOfDay();
                 $premierRetrait = $debut->copy();
                 if ($premierRetrait->dayOfWeek !== $targetDow) {
                     $premierRetrait->next($targetDow);
                 }
-                $prochainCycle = $premierRetrait->copy()
+                $prochainRetrait = $premierRetrait->copy()
                     ->addWeeks($cyclesCompletes * $intervalle);
-                if ($prochainCycle->isFuture() || $prochainCycle->isToday()) {
-                    return $prochainCycle->toDateString();
+                // Si ce retrait est déjà passé (payout non encore enregistré),
+                // avancer d'un cycle pour rester cohérent.
+                if ($prochainRetrait->lt($now)) {
+                    $prochainRetrait->addWeeks($intervalle);
                 }
-                $prochainCycle->addWeeks($intervalle);
-                return $prochainCycle->toDateString();
+                return $prochainRetrait->toDateString();
             }
 
+            // Fallback : prochaine occurrence depuis aujourd'hui.
+            $prochain = $now->copy();
+            if ($prochain->dayOfWeek !== $targetDow) {
+                $prochain->next($targetDow);
+            }
             return $prochain->toDateString();
         }
 
         if ($c->periodicite === 'mensuelle' && $c->jour_mois) {
             $jourMois = (int) $c->jour_mois;
 
-            // Prochaine occurrence du jour du mois à partir d'aujourd'hui.
-            if ($now->day <= $jourMois) {
-                $prochain = $now->copy()->setDay($jourMois);
-            } else {
-                $prochain = $now->copy()->addMonths($intervalle)->setDay($jourMois);
-            }
-
-            // Avec date_demarrage + intervalle > 1 : alignement précis sur le cycle.
-            if ($c->date_demarrage && $intervalle > 1) {
-                $debut          = Carbon::parse($c->date_demarrage);
+            if ($c->date_demarrage) {
+                // Ancrage sur date_demarrage → suivi exact de tous les cycles.
+                $debut          = Carbon::parse($c->date_demarrage)->startOfDay();
                 $premierRetrait = $debut->copy()->setDay($jourMois);
-                if ($premierRetrait->lessThan($debut)) {
+                if ($premierRetrait->lt($debut)) {
                     $premierRetrait->addMonths($intervalle);
                 }
-                $prochainCycle = $premierRetrait->copy()
+                $prochainRetrait = $premierRetrait->copy()
                     ->addMonths($cyclesCompletes * $intervalle);
-                if ($prochainCycle->isFuture() || $prochainCycle->isToday()) {
-                    return $prochainCycle->toDateString();
+                if ($prochainRetrait->lt($now)) {
+                    $prochainRetrait->addMonths($intervalle);
                 }
-                $prochainCycle->addMonths($intervalle);
-                return $prochainCycle->toDateString();
+                return $prochainRetrait->toDateString();
             }
 
+            // Fallback : prochaine occurrence depuis aujourd'hui.
+            $prochain = $now->day <= $jourMois
+                ? $now->copy()->setDay($jourMois)
+                : $now->copy()->addMonths($intervalle)->setDay($jourMois);
             return $prochain->toDateString();
         }
 
