@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Services\PaynalaPaymentService;
 use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Gestion du profil mobile. Les champs collectés à l'inscription
@@ -35,6 +37,74 @@ class ProfilController extends Controller
                 'sexe' => $user->sexe,
                 'adresse' => $user->adresse,
                 'email' => $user->email,
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/mobile/profil/kyc-recheck
+     *
+     * Re-vérifie si le numéro de l'utilisateur est bien un compte
+     * Airtel Money actif. Efface le cache KYC pour forcer un appel frais.
+     *
+     * Réponses :
+     *  200 + user     → KYC confirmé, kyc_valide mis à true.
+     *  422            → numéro introuvable sur Airtel Money.
+     *  503            → API Paynala indisponible, réessayer plus tard.
+     */
+    public function recheckKyc(Request $request): JsonResponse
+    {
+        $user    = $request->user();
+        $numero  = $user->numero; // E164 : +24177XXXXXX
+
+        // Numéro local 9 chiffres pour l'API Paynala (077XXXXXX).
+        $msisdn = str_starts_with($numero, '+241')
+            ? '0' . substr($numero, 4)
+            : ltrim($numero, '+');
+
+        // Effacer le cache pour forcer une nouvelle vérification.
+        Cache::forget('paynala_kyc_' . $msisdn);
+        Cache::forget('paynala_kyc_type_' . $msisdn);
+
+        $paynala = app(PaynalaPaymentService::class);
+        $result  = $paynala->checkKyc($msisdn);
+
+        if ($result === false) {
+            return response()->json([
+                'message' => 'Ce numéro ne possède pas de compte Airtel Money actif.',
+            ], 422);
+        }
+
+        if ($result === null) {
+            return response()->json([
+                'message' => 'Le service de vérification est temporairement indisponible. Réessayez dans quelques minutes.',
+            ], 503);
+        }
+
+        // KYC confirmé — mettre à jour l'utilisateur.
+        $user->kyc_valide = true;
+
+        // Profiter du type_client résolu par le KYC si disponible.
+        $typeFromKyc = $paynala->resolveTypeClientFromKyc($msisdn);
+        if ($typeFromKyc) {
+            $user->type_client = $typeFromKyc;
+        }
+
+        $user->save();
+
+        return response()->json([
+            'message' => 'Numéro Mobile Money vérifié avec succès.',
+            'user'    => [
+                'id'             => $user->id,
+                'nom'            => $user->nom,
+                'prenom'         => $user->prenom,
+                'numero'         => $user->numero,
+                'date_naissance' => $user->date_naissance?->toDateString(),
+                'type_client'    => $user->type_client,
+                'kyc_valide'     => $user->kyc_valide,
+                'sexe'           => $user->sexe,
+                'adresse'        => $user->adresse,
+                'email'          => $user->email,
             ],
         ]);
     }
