@@ -77,7 +77,7 @@ class ProfilController extends Controller
 
         if ($result === null) {
             return response()->json([
-                'message' => 'Le service de vérification est temporairement indisponible. Réessayez dans quelques minutes.',
+                'message' => 'La vérification Mobile Money est en cours d\'activation. Réessayez dans quelques heures ou contactez le support.',
             ], 503);
         }
 
