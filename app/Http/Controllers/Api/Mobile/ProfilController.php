@@ -113,6 +113,56 @@ class ProfilController extends Controller
     }
 
     /**
+     * POST /api/mobile/kyc/verifier-numero
+     * Body : { numero: '077XXXXXX' } — 9 chiffres format local.
+     *
+     * Détecte l'opérateur et vérifie le compte Mobile Money si Airtel.
+     * Réponse : { operateur, kyc_ok, message }
+     *   operateur : 'airtel' | 'moov' | 'inconnu'
+     *   kyc_ok    : true (Airtel vérifié) | false (pas de compte) | null (indispo/Moov)
+     */
+    public function verifierNumeroRetrait(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'numero' => ['required', 'string', 'regex:/^0\d{8}$/'],
+        ]);
+
+        $user   = $request->user();
+        $msisdn = $data['numero'];
+        $e164   = '+241' . substr($msisdn, 1);
+
+        $opInfo       = app(TondoConfigService::class)->detectOperateur($e164, $user->project_id);
+        $operateurSlug = strtolower($opInfo['operateur'] ?? 'inconnu');
+
+        if ($operateurSlug === 'airtel') {
+            $kycOk = app(PaynalaPaymentService::class)->checkKyc($msisdn);
+            return response()->json([
+                'operateur' => 'airtel',
+                'kyc_ok'    => $kycOk,
+                'message'   => match($kycOk) {
+                    true  => 'Compte Airtel Money vérifié.',
+                    false => 'Ce numéro ne possède pas de compte Airtel Money actif.',
+                    null  => 'Vérification indisponible pour l\'instant.',
+                },
+            ]);
+        }
+
+        if ($operateurSlug === 'moov') {
+            return response()->json([
+                'operateur' => 'moov',
+                'kyc_ok'    => null,
+                'message'   => 'Assurez-vous d\'avoir un compte Moov Money actif sur ce numéro.',
+            ]);
+        }
+
+        return response()->json([
+            'operateur' => $operateurSlug,
+            'kyc_ok'    => null,
+            'message'   => 'Opérateur non reconnu.',
+        ]);
+    }
+
+    /**
      * GET /api/mobile/users/lookup?numero=+24177xxxxxx
      *
      * Vérifie si un numéro est enregistré dans Tondo.

@@ -103,7 +103,8 @@ Route::prefix('mobile')->group(function () {
         // Profil
         Route::get('/profil',              [MobileProfilController::class, 'show']);
         Route::patch('/profil',            [MobileProfilController::class, 'update']);
-        Route::post('/profil/kyc-recheck', [MobileProfilController::class, 'recheckKyc']);
+        Route::post('/profil/kyc-recheck',        [MobileProfilController::class, 'recheckKyc']);
+        Route::post('/kyc/verifier-numero',        [MobileProfilController::class, 'verifierNumeroRetrait']);
 
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
