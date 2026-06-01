@@ -43,7 +43,7 @@ class ReversementsController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'cagnotte_reference'  => ['required', 'string', 'regex:/^\d{4,5}$/'],
+            'cagnotte_reference'  => ['required', 'string', 'regex:/^\d{6}$/'],
             'numero_beneficiaire' => ['nullable', 'string', 'regex:/^\d{9}$/'],
             'participant_id'      => ['nullable', 'string', 'uuid'],
             'montant'             => ['required', 'integer', 'min:100'],

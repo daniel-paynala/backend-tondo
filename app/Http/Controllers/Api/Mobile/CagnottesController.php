@@ -93,6 +93,21 @@ class CagnottesController extends Controller
     }
 
     /**
+     * GET /api/mobile/cagnottes/generate-reference
+     *
+     * Génère et retourne une référence unique à 6 chiffres à afficher
+     * dans le formulaire de création. Le client la renvoie ensuite dans
+     * le POST /cagnottes pour garantir que ce que l'utilisateur a vu
+     * correspond exactement à ce qui est enregistré en base.
+     */
+    public function generateReference(Request $request): JsonResponse
+    {
+        return response()->json([
+            'reference' => $this->doGenerateReference(),
+        ]);
+    }
+
+    /**
      * POST /api/mobile/cagnottes
      *
      * Tontine périodique :
@@ -114,8 +129,9 @@ class CagnottesController extends Controller
         }
 
         $base = $request->validate([
-            'titre' => ['required', 'string', 'max:120'],
+            'titre'         => ['required', 'string', 'max:120'],
             'numero_retrait' => ['required', 'string', 'regex:/^\+?\d{8,15}$/'],
+            'reference'     => ['nullable', 'string', 'regex:/^\d{6}$/'],
         ]);
 
         $user = $request->user();
@@ -185,8 +201,14 @@ class CagnottesController extends Controller
             }
         }
 
-        // Génère une référence 4-5 chiffres unique (retry si collision).
-        $cagnotte->reference = $this->generateReference();
+        // Référence : utilise celle pré-générée par le client (ce que l'utilisateur
+        // a vu) si elle est unique, sinon en génère une nouvelle (fallback).
+        $refDemandee = $base['reference'] ?? null;
+        if ($refDemandee && ! TondoCagnotte::where('reference', $refDemandee)->exists()) {
+            $cagnotte->reference = $refDemandee;
+        } else {
+            $cagnotte->reference = $this->doGenerateReference();
+        }
         $cagnotte->date_creation = now();
 
         $cagnotte->save();
@@ -685,21 +707,15 @@ class CagnottesController extends Controller
      * Démarre à 4 chiffres ; si collision après 5 tentatives, passe à 5.
      * Une fois plus de ~10k cagnottes, à étendre à 6 chiffres (à voir).
      */
-    private function generateReference(): string
+    private function doGenerateReference(): string
     {
-        for ($attempt = 0; $attempt < 5; $attempt++) {
-            $ref = (string) random_int(1000, 9999);
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            $ref = (string) random_int(100000, 999999);
             if (! TondoCagnotte::where('reference', $ref)->exists()) {
                 return $ref;
             }
         }
-        for ($attempt = 0; $attempt < 10; $attempt++) {
-            $ref = (string) random_int(10000, 99999);
-            if (! TondoCagnotte::where('reference', $ref)->exists()) {
-                return $ref;
-            }
-        }
-        throw new \RuntimeException("Impossible de générer une référence unique après 15 essais.");
+        throw new \RuntimeException("Impossible de générer une référence 6 chiffres unique après 20 essais.");
     }
 
     /**

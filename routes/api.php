@@ -113,6 +113,7 @@ Route::prefix('mobile')->group(function () {
         Route::get('/users/lookup', [MobileProfilController::class, 'lookup']);
 
         // Cagnottes (gérant)
+        Route::get('/cagnottes/generate-reference',           [MobileCagnottesController::class, 'generateReference']);
         Route::get('/cagnottes',                              [MobileCagnottesController::class, 'index']);
         Route::post('/cagnottes',                             [MobileCagnottesController::class, 'store']);
         Route::get('/cagnottes/{reference}',                  [MobileCagnottesController::class, 'show']);

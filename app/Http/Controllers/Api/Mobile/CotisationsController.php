@@ -56,7 +56,7 @@ class CotisationsController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'cagnotte_reference' => ['required', 'string', 'regex:/^\d{4,5}$/'],
+            'cagnotte_reference' => ['required', 'string', 'regex:/^\d{6}$/'],
             'montant'            => ['required', 'integer', 'min:100', 'max:500000'],
             'indicatif_payeur'   => ['nullable', 'string', 'regex:/^\+?\d{1,4}$/'],
             'numero_payeur'      => ['nullable', 'string', 'regex:/^\d{6,12}$/'],
