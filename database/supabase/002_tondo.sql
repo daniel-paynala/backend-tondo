@@ -61,13 +61,13 @@ end $$;
 --  2. tondo_cagnottes — la table principale (tontines + cotisations)
 -- ----------------------------------------------------------------------------
 --  PK = UUID interne (jamais montré à l'utilisateur).
---  reference = 4-5 chiffres unique, c'est CE QUE L'UTILISATEUR VOIT/PARTAGE
+--  reference = 6 chiffres unique, c'est CE QUE L'UTILISATEUR VOIT/PARTAGE
 --  (RÈGLE 4-bis : identifiant cagnotte numérique court, saisi en USSD).
 -- ----------------------------------------------------------------------------
 create table if not exists public.tondo_cagnottes (
   id                     uuid primary key default gen_random_uuid(),
   reference              text not null unique
-                         check (reference ~ '^\d{4,5}$'),  -- 4-5 chiffres exacts
+                         check (reference ~ '^\d{6}$'),  -- 6 chiffres exacts
   project_id             uuid not null references public.projects(id) on delete restrict,
   user_id                uuid not null references public.users(id) on delete restrict,
 
