@@ -90,22 +90,23 @@ class AuthController extends Controller
             ]);
         }
 
-        // KYC Airtel — uniquement au sign-up, avant d'envoyer l'OTP.
-        if ($intent === 'signup') {
-            $projectId = Project::tondoId();
-            $detected  = app(OperateurDetectorService::class)->detect($projectId, $phone);
-            if ($detected && $detected['operateur'] === 'airtel') {
-                $msisdn = '0' . ltrim($data['numero'], '0');
-                $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
-                // null = service indisponible → on laisse passer sans bloquer.
-                // false = numéro sans compte Airtel Money → on bloque.
-                if ($kycOk === false) {
-                    throw ValidationException::withMessages([
-                        'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif. Veuillez utiliser un numéro avec un compte Airtel Money pour vous inscrire.',
-                    ]);
-                }
-            }
-        }
+        // KYC Airtel — désactivé temporairement pour laisser tous les numéros
+        // s'inscrire. À réactiver quand le service sera stable côté Paynala.
+        // if ($intent === 'signup') {
+        //     $projectId = Project::tondoId();
+        //     $detected  = app(OperateurDetectorService::class)->detect($projectId, $phone);
+        //     if ($detected && $detected['operateur'] === 'airtel') {
+        //         $msisdn = '0' . ltrim($data['numero'], '0');
+        //         $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
+        //         // null = service indisponible → on laisse passer sans bloquer.
+        //         // false = numéro sans compte Airtel Money → on bloque.
+        //         if ($kycOk === false) {
+        //             throw ValidationException::withMessages([
+        //                 'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif. Veuillez utiliser un numéro avec un compte Airtel Money pour vous inscrire.',
+        //             ]);
+        //         }
+        //     }
+        // }
 
         $driver = config('services.otp.driver', 'dev');
 
