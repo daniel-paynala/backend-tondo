@@ -239,8 +239,9 @@ class CagnottesController extends Controller
     /**
      * GET /api/mobile/cagnottes/{reference}
      *
-     * Détail + participants + paiements (vue gérant). Renvoie 404 si
-     * la cagnotte n'appartient pas à l'user (RLS applicatif).
+     * Détail + participants. Accessible à tout utilisateur authentifié
+     * qui connaît la référence (flux "Rejoindre"). Le rôle est renvoyé
+     * dans la réponse pour que le client adapte son UI.
      */
     public function show(Request $request, string $reference): JsonResponse
     {
@@ -254,11 +255,7 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Cagnotte introuvable.'], 404);
         }
 
-        // Seul le gérant peut voir le détail (côté mobile). Participants
-        // accèderont à un endpoint /public/cagnottes/by-ref plus tard.
-        if ($cagnotte->user_id !== $user->id) {
-            return response()->json(['message' => 'Accès refusé.'], 403);
-        }
+        $estGerant = $cagnotte->user_id === $user->id;
 
         $configSvc    = app(TondoConfigService::class);
         $userMasque   = $this->maskPhone($user->numero);
@@ -301,6 +298,7 @@ class CagnottesController extends Controller
             'cagnotte'     => array_merge(
                 $this->serialize($cagnotte),
                 [
+                    'role_utilisateur'      => $estGerant ? 'gerant' : 'cotiseur',
                     'prochain_retrait'      => app(TontineService::class)->prochaineDate($cagnotte, $cyclesCompletes),
                     'prochain_beneficiaire' => $this->calculerProchainBeneficiaire($participantsArray, $cyclesCompletes),
                     'rotation_terminee'     => $cagnotte->statut === 'en_cours'
