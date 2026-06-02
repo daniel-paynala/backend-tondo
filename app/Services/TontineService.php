@@ -84,4 +84,49 @@ class TontineService
 
         return null;
     }
+
+    /**
+     * Calcule le montant de pénalité actuellement dû pour une tontine en retard.
+     *
+     * La deadline d'un cycle est : prochaineDate à 20h00 (Africa/Libreville).
+     * Si le participant paie après cette heure, la pénalité s'accumule par
+     * heure ou par jour selon `penalite_frequence`.
+     *
+     * La pénalité n'est pas soumise aux frais Paynala/Airtel — elle s'ajoute
+     * telle quelle au montant de base.
+     *
+     * @return int  Montant de pénalité en FCFA (0 si pas en retard ou pas de pénalité).
+     */
+    public function calculerPenalite(TondoCagnotte $c, int $cyclesCompletes): int
+    {
+        if (! $c->penalite_active || ! $c->penalite_montant || ! $c->penalite_frequence) {
+            return 0;
+        }
+
+        $prochaineDateStr = $this->prochaineDate($c, $cyclesCompletes);
+        if (! $prochaineDateStr) {
+            return 0;
+        }
+
+        // Deadline = jour du retrait à 20h00 heure de Libreville.
+        $deadline = Carbon::parse($prochaineDateStr)
+            ->timezone('Africa/Libreville')
+            ->setTime(20, 0, 0);
+
+        $now = now()->timezone('Africa/Libreville');
+
+        if ($now->lte($deadline)) {
+            return 0; // Pas encore en retard
+        }
+
+        $diffSeconds = $deadline->diffInSeconds($now);
+
+        $periodes = match ($c->penalite_frequence) {
+            'heure' => (int) ceil($diffSeconds / 3600),
+            'jour'  => (int) ceil($diffSeconds / 86400),
+            default => 0,
+        };
+
+        return $periodes * (int) $c->penalite_montant;
+    }
 }

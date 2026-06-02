@@ -107,13 +107,23 @@ class CotisationsController extends Controller
 
         $montantNet = $data['montant'];
 
+        // Pénalité de retard pour les tontines : calculée avant les frais.
+        // Les frais (2 % + Airtel) s'appliquent uniquement sur montantNet.
+        // La pénalité s'ajoute telle quelle au montant total final (sans frais).
+        $penalite = 0;
+        if ($cagnotte->type === 'tontine_periodique') {
+            $cyclesCompletes = (int) DB::table('tondo_payout')
+                ->where('cagnotte_id', $cagnotte->id)
+                ->where('statut', 'succes')
+                ->count();
+            $penalite = app(\App\Services\TontineService::class)->calculerPenalite($cagnotte, $cyclesCompletes);
+        }
+
         // Détecte l'opérateur depuis le numéro E.164 du payeur.
         $operateurInfo = $this->detector->detect($user->project_id, $numeroPayeurE164);
         $isAirtel      = $operateurInfo && $operateurInfo['operateur'] === 'airtel';
 
-        // Modèle A : cotisant absorbe 2 % Paynala + frais de retrait Airtel.
-        // Pour Airtel, on calcule le brut exact via AirtelFeesCalculator.
-        // Pour les autres opérateurs (mock), on applique uniquement les 2 %.
+        // Modèle A : frais calculés sur montantNet uniquement (pas sur la pénalité).
         if ($isAirtel) {
             $airtelConfig = app(TondoConfigService::class)->getOperatorConfig($user->project_id);
             $calc         = new AirtelFeesCalculator($airtelConfig);
@@ -126,6 +136,9 @@ class CotisationsController extends Controller
         }
         $frais = $montantBrut - $montantNet;
 
+        // Montant total débité = (base + frais) + pénalité
+        $montantTotal = $montantBrut + $penalite;
+
         if ($isAirtel) {
             return $this->storeAirtel(
                 user: $user,
@@ -134,7 +147,8 @@ class CotisationsController extends Controller
                 operateurIndicatif: $operateurInfo['indicatif'],
                 montantNet: $montantNet,
                 frais: $frais,
-                montantBrut: $montantBrut,
+                montantBrut: $montantTotal,
+                penalite: $penalite,
             );
         }
 
@@ -144,7 +158,8 @@ class CotisationsController extends Controller
             numeroPayeur: $numeroPayeurE164,
             montantNet: $montantNet,
             frais: $frais,
-            montantBrut: $montantBrut,
+            montantBrut: $montantTotal,
+            penalite: $penalite,
         );
     }
 
@@ -287,6 +302,7 @@ class CotisationsController extends Controller
         int    $montantNet,
         int    $frais,
         int    $montantBrut,
+        int    $penalite = 0,
     ): JsonResponse {
         // request_id alphanumérique uniquement (contrainte API Paynala — pas de tirets).
         $transId = 'TONDOPAYIN' . strtoupper(Str::random(10));
@@ -312,7 +328,7 @@ class CotisationsController extends Controller
         try {
             DB::transaction(function () use (
                 $user, $cagnotte, $numeroPayeurE164,
-                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData
+                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite
             ) {
                 // 1) Participant (placeholder en_attente).
                 $participant = DB::table('tondo_participants')
@@ -361,13 +377,15 @@ class CotisationsController extends Controller
                     'trans_id'      => $transId,
                     'operateur_id'  => $paymentData['paymentId'] ?? null,
                     'numero_tel'    => $numeroPayeurE164,
-                    'montant'       => $montantBrut,
-                    'statut'        => 'initie',
-                    'request'       => json_encode([
-                        'request_id' => $transId,
-                        'amount'     => $montantBrut,
-                        'montant_net' => $montantNet,
-                        'phone'      => $phoneAirtel,
+                    'montant'          => $montantBrut,
+                    'montant_penalite' => $penalite,
+                    'statut'           => 'initie',
+                    'request'          => json_encode([
+                        'request_id'         => $transId,
+                        'amount'             => $montantBrut,
+                        'montant_net'        => $montantNet,
+                        'montant_penalite'   => $penalite,
+                        'phone'              => $phoneAirtel,
                         'is_new_participant' => $isNew,
                         'cagnotte_type'      => $cagnotte->type,
                     ]),
@@ -382,12 +400,13 @@ class CotisationsController extends Controller
         }
 
         return response()->json([
-            'trans_id'     => $transId,
-            'statut'       => 'initie',
-            'montant_net'  => $montantNet,
-            'frais'        => $frais,
-            'montant_brut' => $montantBrut,
-            'message'      => 'Vérifiez votre téléphone et confirmez le paiement Airtel Money.',
+            'trans_id'        => $transId,
+            'statut'          => 'initie',
+            'montant_net'     => $montantNet,
+            'frais'           => $frais,
+            'penalite'        => $penalite,
+            'montant_brut'    => $montantBrut,
+            'message'         => 'Vérifiez votre téléphone et confirmez le paiement Airtel Money.',
         ], 201);
     }
 
@@ -401,12 +420,13 @@ class CotisationsController extends Controller
         int    $montantNet,
         int    $frais,
         int    $montantBrut,
+        int    $penalite = 0,
     ): JsonResponse {
         $transId = 'TONDOPAYIN' . strtoupper(Str::random(10));
 
         try {
             DB::transaction(function () use (
-                $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut
+                $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut, $penalite
             ) {
                 $participant = DB::table('tondo_participants')
                     ->where('cagnotte_id', $cagnotte->id)
@@ -467,10 +487,11 @@ class CotisationsController extends Controller
                     'trans_id'      => $transId,
                     'operateur_id'  => 'MOCK-' . substr($transId, -8),
                     'numero_tel'    => $numeroPayeur,
-                    'montant'       => $montantBrut,
-                    'statut'        => 'succes',
-                    'request'       => json_encode(['note' => 'mock — agrégateur non intégré']),
-                    'response'      => json_encode(['ok' => true, 'mocked' => true]),
+                    'montant'          => $montantBrut,
+                    'montant_penalite' => $penalite,
+                    'statut'           => 'succes',
+                    'request'          => json_encode(['note' => 'mock — agrégateur non intégré', 'penalite' => $penalite]),
+                    'response'         => json_encode(['ok' => true, 'mocked' => true]),
                     'date_creation' => now(),
                     'created_at'    => now(),
                     'updated_at'    => now(),
@@ -503,6 +524,7 @@ class CotisationsController extends Controller
             'statut'       => 'succes',
             'montant_net'  => $montantNet,
             'frais'        => $frais,
+            'penalite'     => $penalite,
             'montant_brut' => $montantBrut,
             'cagnotte'     => [
                 'reference'           => $cagnotte->reference,

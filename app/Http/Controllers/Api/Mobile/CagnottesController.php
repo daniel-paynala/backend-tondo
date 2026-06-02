@@ -164,18 +164,28 @@ class CagnottesController extends Controller
                 ],
                 'jour_mois' => ['nullable', 'integer', 'min:1', 'max:28'],
                 'nombre_participants' => ['required', 'integer', 'min:2', 'max:200'],
+                // Pénalité de retard (optionnel — active par défaut si non précisé)
+                'penalite_active'    => ['nullable', 'boolean'],
+                'penalite_montant'   => ['nullable', 'integer', 'min:100', 'max:500000'],
+                'penalite_frequence' => ['nullable', Rule::in(['heure', 'jour'])],
             ]);
 
             $cashBack = $extra['montant_par_cycle'];
             $plan = $calc->plan($cashBack);
             $this->appliquerPlan($cagnotte, $plan, $cashBack, $commission);
 
-            $cagnotte->montant_par_cycle = $cashBack;
-            $cagnotte->periodicite = $extra['periodicite'];
-            $cagnotte->intervalle = $extra['intervalle'] ?? 1;
-            $cagnotte->jour_semaine = $extra['jour_semaine'] ?? null;
-            $cagnotte->jour_mois = $extra['jour_mois'] ?? null;
+            $cagnotte->montant_par_cycle  = $cashBack;
+            $cagnotte->periodicite        = $extra['periodicite'];
+            $cagnotte->intervalle         = $extra['intervalle'] ?? 1;
+            $cagnotte->jour_semaine       = $extra['jour_semaine'] ?? null;
+            $cagnotte->jour_mois          = $extra['jour_mois'] ?? null;
             $cagnotte->nombre_participants = $extra['nombre_participants'];
+
+            // Pénalité : active par défaut (null = non précisé → true).
+            $penaliteActive = $extra['penalite_active'] ?? true;
+            $cagnotte->penalite_active    = $penaliteActive;
+            $cagnotte->penalite_montant   = $penaliteActive ? ($extra['penalite_montant'] ?? null) : null;
+            $cagnotte->penalite_frequence = $penaliteActive ? ($extra['penalite_frequence'] ?? 'jour') : null;
         } else {
             $extra = $request->validate([
                 'montant_cible' => ['nullable', 'integer', 'min:100', 'max:2500000'],
@@ -367,6 +377,7 @@ class CagnottesController extends Controller
                         && $cagnotte->type === 'tontine_periodique'
                         && $nbInscrits > 0
                         && $cyclesCompletes >= $nbInscrits,
+                    'penalite_courante'     => app(TontineService::class)->calculerPenalite($cagnotte, $cyclesCompletes),
                 ]
             ),
             'participants' => $participants,
@@ -1051,6 +1062,9 @@ class CagnottesController extends Controller
             'nombre_envois'         => $c->nombre_envois,
             'date_creation'         => $c->date_creation?->toIso8601String(),
             'date_demarrage'        => $c->date_demarrage?->toIso8601String(),
+            'penalite_active'       => (bool) ($c->penalite_active ?? true),
+            'penalite_montant'      => $c->penalite_montant,
+            'penalite_frequence'    => $c->penalite_frequence,
         ];
     }
 
