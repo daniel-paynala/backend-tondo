@@ -259,28 +259,40 @@ class CagnottesController extends Controller
 
         $configSvc    = app(TondoConfigService::class);
         $userMasque   = $this->maskPhone($user->numero);
+        // Montants déjà reçus par participant via payout (pour transparence reversements).
+        $montantsRecusParParticipant = DB::table('tondo_payout')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('statut', 'succes')
+            ->whereNotNull('user_id')
+            ->select('user_id', DB::raw('SUM(montant) as total_recu'))
+            ->groupBy('user_id')
+            ->pluck('total_recu', 'user_id');
+
         $participants = DB::table('tondo_participants')
             ->where('cagnotte_id', $cagnotte->id)
             ->orderBy('created_at', 'asc')
             ->get()
-            ->map(function ($p) use ($user, $userMasque, $configSvc) {
+            ->map(function ($p) use ($user, $userMasque, $configSvc, $montantsRecusParParticipant) {
                 $opInfo = $configSvc->detectOperateur($p->numero_masque, $user->project_id);
-                // is_me : via user_id si disponible, sinon par numéro masqué
-                // (fallback pour les participants ajoutés avant l'introduction du user_id).
                 $isMe = ($p->user_id !== null && $p->user_id === $user->id)
                     || $p->numero_masque === $userMasque;
                 return [
-                    'id'                    => $p->id,
-                    'nom'                   => $p->nom,
-                    'prenom'                => $p->prenom,
-                    'numero_masque'         => $p->numero_masque,
-                    'statut_paiement'       => $p->statut_paiement,
-                    'montant_paye'          => $p->montant_paye,
-                    'date_dernier_paiement' => $p->date_dernier_paiement,
-                    'is_me'                 => $isMe,
-                    'operateur'             => $opInfo['operateur'],
-                    'operateur_logo'        => $opInfo['operateur_logo'],
-                    'ordre_passage'         => (int) ($p->ordre_passage ?? 0),
+                    'id'                        => $p->id,
+                    'nom'                       => $p->nom,
+                    'prenom'                    => $p->prenom,
+                    'numero_masque'             => $p->numero_masque,
+                    'numero_retrait_masque'     => $p->numero_retrait_masque ?? null,
+                    'est_compte_light'          => (bool) ($p->est_compte_light ?? false),
+                    'statut_paiement'           => $p->statut_paiement,
+                    'montant_paye'              => $p->montant_paye,
+                    'date_dernier_paiement'     => $p->date_dernier_paiement,
+                    'is_me'                     => $isMe,
+                    'operateur'                 => $opInfo['operateur'],
+                    'operateur_logo'            => $opInfo['operateur_logo'],
+                    'ordre_passage'             => (int) ($p->ordre_passage ?? 0),
+                    'montant_recu_reversement'  => (int) ($p->user_id
+                        ? ($montantsRecusParParticipant[$p->user_id] ?? 0)
+                        : 0),
                 ];
             });
 
@@ -291,8 +303,58 @@ class CagnottesController extends Controller
             ->count();
 
         $participantsArray = $participants->values()->all();
-
         $nbInscrits = (int) $cagnotte->nombre_inscrits;
+
+        // Historique des cotisations reçues (entrées).
+        $historiqueQuery = DB::table('tondo_paiements')
+            ->join('tondo_participants', 'tondo_paiements.participant_id', '=', 'tondo_participants.id')
+            ->where('tondo_paiements.cagnotte_id', $cagnotte->id)
+            ->orderBy('tondo_paiements.date', 'desc')
+            ->limit(50)
+            ->select(
+                'tondo_paiements.id',
+                'tondo_paiements.participant_id',
+                'tondo_paiements.montant',
+                'tondo_paiements.date',
+                DB::raw("CONCAT(tondo_participants.prenom, ' ', tondo_participants.nom) as participant_nom")
+            );
+
+        // Cotiseur : filtre sur ses propres paiements uniquement (privacy).
+        if (! $estGerant) {
+            $historiqueQuery->where('tondo_paiements.user_id', $user->id);
+        }
+
+        $historique = $historiqueQuery->get()->map(fn ($h) => [
+            'id'             => $h->id,
+            'participant_id' => $h->participant_id,
+            'participant_nom'=> $h->participant_nom,
+            'montant'        => $h->montant,
+            'date'           => $h->date,
+        ]);
+
+        // Sorties (reversements effectués) — visibles par tous (transparence).
+        $sorties = DB::table('tondo_payout')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('statut', 'succes')
+            ->orderBy('date_creation', 'desc')
+            ->limit(50)
+            ->get()
+            ->map(function ($r) {
+                // Résout le nom du bénéficiaire si user_id connu.
+                $nomBenef = 'Bénéficiaire';
+                if ($r->user_id) {
+                    $u = DB::table('users')->where('id', $r->user_id)
+                        ->select('nom', 'prenom')->first();
+                    if ($u) $nomBenef = trim("{$u->prenom} {$u->nom}");
+                }
+                return [
+                    'id'                  => $r->id,
+                    'beneficiaire_nom'    => $nomBenef,
+                    'beneficiaire_numero' => $r->numero_tel ?? '',
+                    'montant'             => $r->montant,
+                    'date'                => $r->date_creation,
+                ];
+            });
 
         return response()->json([
             'cagnotte'     => array_merge(
@@ -308,6 +370,8 @@ class CagnottesController extends Controller
                 ]
             ),
             'participants' => $participants,
+            'historique'   => $historique,
+            'sorties'      => $sorties,
         ]);
     }
 
