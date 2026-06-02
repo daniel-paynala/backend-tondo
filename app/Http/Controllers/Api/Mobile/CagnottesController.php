@@ -694,6 +694,187 @@ class CagnottesController extends Controller
         return response()->json(['cagnotte' => $this->serialize($cagnotte)]);
     }
 
+    /**
+     * POST /api/mobile/cagnottes/{reference}/fermer
+     *
+     * Ferme définitivement une cotisation ouverte (alias de cloturer avec
+     * vérification supplémentaire : le solde doit être à 0 — le gérant
+     * doit avoir effectué le reversement intégral avant de fermer).
+     */
+    public function fermer(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+
+        if ($cagnotte->statut === 'cloturee') {
+            return response()->json(['message' => 'Déjà clôturée.'], 422);
+        }
+
+        if ((int) $cagnotte->montant_collecte > 0) {
+            return response()->json([
+                'message' => 'Des fonds restent dans la cotisation. Effectuez le reversement intégral avant de fermer.',
+            ], 422);
+        }
+
+        $cagnotte->statut = 'cloturee';
+        $cagnotte->save();
+
+        return response()->json(['cagnotte' => $this->serialize($cagnotte)]);
+    }
+
+    /**
+     * POST /api/mobile/cagnottes/{reference}/rejoindre
+     *
+     * Ajoute l'utilisateur courant comme participant à la cagnotte identifiée
+     * par sa référence. L'utilisateur doit avoir un compte full (JWT valide).
+     * Pour une tontine : impossible si déjà démarrée ou pleine.
+     */
+    public function rejoindre(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        // La cagnotte est accessible à tout utilisateur authentifié (rejoindre
+        // via lien d'invitation). On ne filtre pas sur user_id ici.
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+
+        if ($cagnotte->statut === 'cloturee') {
+            return response()->json(['message' => 'Cette cotisation est clôturée.'], 422);
+        }
+
+        // Le gérant ne peut pas "rejoindre" sa propre cagnotte (il est déjà gérant).
+        if ($cagnotte->user_id === $user->id) {
+            return response()->json(['message' => 'Vous êtes le gérant de cette cagnotte.'], 409);
+        }
+
+        // Tontine démarrée : impossible de rejoindre.
+        if ($cagnotte->type === 'tontine_periodique' && $cagnotte->statut === 'en_cours') {
+            return response()->json(['message' => 'Cette tontine est déjà démarrée.'], 422);
+        }
+
+        // Tontine pleine.
+        if ($cagnotte->type === 'tontine_periodique' && (int) $cagnotte->nombre_participants > 0) {
+            if ((int) $cagnotte->nombre_inscrits + 1 >= (int) $cagnotte->nombre_participants) {
+                return response()->json([
+                    'message' => 'Tontine complète — le nombre maximum de participants est atteint.',
+                ], 422);
+            }
+        }
+
+        // Déjà participant (via user_id).
+        $dejaInscrit = DB::table('tondo_participants')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('user_id', $user->id)
+            ->exists();
+
+        if ($dejaInscrit) {
+            return response()->json(['message' => 'Vous participez déjà à cette cagnotte.'], 409);
+        }
+
+        $numeroMasque = $this->maskPhone($user->numero);
+        $opInfo = app(TondoConfigService::class)->detectOperateur($user->numero, $user->project_id);
+
+        $participantId = (string) Str::uuid();
+        DB::table('tondo_participants')->insert([
+            'id'               => $participantId,
+            'project_id'       => $user->project_id,
+            'cagnotte_id'      => $cagnotte->id,
+            'user_id'          => $user->id,
+            'nom'              => $user->nom,
+            'prenom'           => $user->prenom,
+            'numero_masque'    => $numeroMasque,
+            'est_compte_light' => false,
+            'statut_paiement'  => 'en_attente',
+            'montant_paye'     => 0,
+            'created_at'       => now(),
+        ]);
+
+        $cagnotte->increment('nombre_inscrits');
+
+        // Notifie le gérant.
+        app(OneSignalService::class)->notifyOne(
+            userId:  $cagnotte->user_id,
+            titleFr: 'Nouveau participant',
+            bodyFr:  "{$user->prenom} {$user->nom} a rejoint « {$cagnotte->titre} ».",
+            data:    ['type' => 'nouveau_participant', 'cagnotte_id' => $cagnotte->id],
+        );
+
+        return response()->json([
+            'participant' => [
+                'id'             => $participantId,
+                'nom'            => $user->nom,
+                'prenom'         => $user->prenom,
+                'numero_masque'  => $numeroMasque,
+                'statut_paiement'=> 'en_attente',
+                'operateur'      => $opInfo['operateur'],
+                'operateur_logo' => $opInfo['operateur_logo'],
+            ],
+        ], 201);
+    }
+
+    /**
+     * DELETE /api/mobile/cagnottes/{reference}/participants/moi
+     *
+     * Retire l'utilisateur courant de la liste des participants.
+     * Règles :
+     *  – Tontine : uniquement si statut = active (pas encore démarrée).
+     *  – Cotisation ouverte : à tout moment.
+     *  – Le gérant ne peut jamais quitter sa propre cagnotte.
+     */
+    public function quitter(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable.'], 404);
+        }
+
+        // Le gérant ne peut pas quitter.
+        if ($cagnotte->user_id === $user->id) {
+            return response()->json(['message' => 'Le gérant ne peut pas quitter sa propre cagnotte.'], 403);
+        }
+
+        // Tontine démarrée : quitter impossible.
+        if ($cagnotte->type === 'tontine_periodique' && $cagnotte->statut === 'en_cours') {
+            return response()->json([
+                'message' => 'Impossible de quitter une tontine déjà démarrée.',
+            ], 422);
+        }
+
+        $deleted = DB::table('tondo_participants')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('user_id', $user->id)
+            ->delete();
+
+        if ($deleted === 0) {
+            return response()->json(['message' => 'Vous ne participez pas à cette cagnotte.'], 404);
+        }
+
+        // Décrémente le compteur (ne peut pas descendre en dessous de 0).
+        if ((int) $cagnotte->nombre_inscrits > 0) {
+            $cagnotte->decrement('nombre_inscrits');
+        }
+
+        return response()->json(['message' => 'Vous avez quitté la cagnotte.']);
+    }
+
     // ─────────────────────────────────────────────────────────────────
 
     /**
