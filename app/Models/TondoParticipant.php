@@ -15,8 +15,10 @@ class TondoParticipant extends Model
     protected $guarded = ['id'];
 
     protected $casts = [
-        'montant_paye' => 'integer',
+        'montant_paye'          => 'integer',
+        'ordre_passage'         => 'integer',
         'date_dernier_paiement' => 'datetime',
-        'created_at' => 'datetime',
+        'created_at'            => 'datetime',
+        'est_compte_light'      => 'boolean',
     ];
 }

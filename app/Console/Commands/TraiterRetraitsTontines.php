@@ -294,6 +294,46 @@ class TraiterRetraitsTontines extends Command
                 );
             }
 
+            // Notifier le PROCHAIN bénéficiaire (cycle + 1) qu'il sera le suivant.
+            $prochainOrdre = $cycleActuel + 1;
+            $prochainBenef = DB::table('tondo_participants')
+                ->join('users', 'tondo_participants.user_id', '=', 'users.id')
+                ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+                ->where('tondo_participants.ordre_passage', $prochainOrdre)
+                ->where('users.compte_type', 'full')
+                ->select('users.id as user_id', 'tondo_participants.prenom', 'tondo_participants.nom')
+                ->first();
+
+            if ($prochainBenef && $prochainBenef->user_id) {
+                $prochaineDateStr = $tontineService->prochaineDate($cagnotte, $cycleActuel);
+                $corps = $prochaineDateStr
+                    ? "Vous êtes le prochain bénéficiaire de « {$cagnotte->titre} ». Votre mise vous sera versée le {$prochaineDateStr}."
+                    : "Vous êtes le prochain bénéficiaire de « {$cagnotte->titre} » — préparez-vous !";
+
+                $notif->notifyOne(
+                    userId:  $prochainBenef->user_id,
+                    titleFr: "C'est bientôt votre tour !",
+                    bodyFr:  $corps,
+                    data:    ['type' => 'prochain_beneficiaire', 'cagnotte_id' => $cagnotte->id],
+                );
+            } elseif ($prochainOrdre > (int) $cagnotte->nombre_inscrits) {
+                // Dernier cycle terminé — notifier tout le groupe.
+                $tousIds = DB::table('tondo_participants')
+                    ->join('users', 'tondo_participants.user_id', '=', 'users.id')
+                    ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+                    ->where('users.compte_type', 'full')
+                    ->pluck('users.id')->filter()->values()->all();
+
+                if (! empty($tousIds)) {
+                    $notif->notify(
+                        userIds: $tousIds,
+                        titleFr: 'Rotation terminée 🎉',
+                        bodyFr:  "Tous les participants de « {$cagnotte->titre} » ont reçu leur mise. Merci à tous !",
+                        data:    ['type' => 'rotation_terminee', 'cagnotte_id' => $cagnotte->id],
+                    );
+                }
+            }
+
             $this->info("    ✓ {$montant} FCFA versés à {$beneficiaire->prenom} {$beneficiaire->nom}");
             $traites++;
         }

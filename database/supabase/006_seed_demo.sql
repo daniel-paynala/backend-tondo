@@ -109,14 +109,21 @@ begin
   p1 := gen_random_uuid(); p2 := gen_random_uuid(); p3 := gen_random_uuid();
   p4 := gen_random_uuid(); p5 := gen_random_uuid(); p6 := gen_random_uuid();
 
-  insert into public.tondo_participants (id, project_id, cagnotte_id, user_id, nom, prenom, numero_masque, statut_paiement, montant_paye)
+  insert into public.tondo_participants (
+    id, project_id, cagnotte_id, user_id,
+    nom, prenom, numero_masque, numero_retrait_masque, est_compte_light,
+    statut_paiement, ordre_passage, montant_paye
+  )
   values
-    (p1, proj_id, c_mboula, u_mboula, 'Mboula', 'Sylvain', '+241 XX XX XX 12', 'paye', 75000),
-    (p2, proj_id, c_mboula, u_ondo, 'Ondo', 'Joachim', '+241 XX XX XX 81', 'paye', 75000),
-    (p3, proj_id, c_mboula, u_bekale, 'Bekale', 'Marina', '+241 XX XX XX 09', 'paye', 75000),
-    (p4, proj_id, c_mboula, u_mba, 'Mba', 'Léontine', '+241 XX XX XX 23', 'en_attente', 0),
-    (p5, proj_id, c_anniv, u_koumba, 'Koumba', 'Jean', '+241 XX XX XX 17', 'paye', 15000),
-    (p6, proj_id, c_anniv, u_eyenga, 'Eyenga', 'Solange', '+241 XX XX XX 88', 'paye', 50000);
+    -- Tontine Mboula : comptes Tondo (user_id présent → est_compte_light = false)
+    (p1, proj_id, c_mboula, u_mboula, 'Mboula',   'Sylvain',  '+241 XX XX XX 12', null,               false, 'paye',      1, 75000),
+    (p2, proj_id, c_mboula, u_ondo,   'Ondo',     'Joachim',  '+241 XX XX XX 81', null,               false, 'paye',      2, 75000),
+    (p3, proj_id, c_mboula, u_bekale, 'Bekale',   'Marina',   '+241 XX XX XX 09', '+241 XX XX XX 55', false, 'paye',      3, 75000),  -- numéro retrait différent
+    (p4, proj_id, c_mboula, u_mba,   'Mba',      'Léontine', '+241 XX XX XX 23', null,               false, 'en_attente', 4, 0),
+    -- Cotisation Anniv : un compte Tondo + un invité (est_compte_light = true)
+    (p5, proj_id, c_anniv,  u_koumba, 'Koumba',   'Jean',     '+241 XX XX XX 17', null,               false, 'paye',      0, 15000),
+    (p6, proj_id, c_anniv,  null,     'Nguema',   'Patrice',  '+241 XX XX XX 88', null,               true,  'paye',      0, 50000)  -- compte light (invité)
+  on conflict do nothing;
 
   -- ── Historique de paiements (pour total_cotise) ────────────────────────
   insert into public.tondo_paiements (project_id, cagnotte_id, participant_id, user_id, montant, date)
@@ -125,8 +132,9 @@ begin
     (proj_id, c_mboula, p2, u_ondo, 75000, now() - interval '14 days 6 hours'),
     (proj_id, c_mboula, p3, u_bekale, 75000, now() - interval '13 days'),
     (proj_id, c_anniv, p5, u_koumba, 15000, now() - interval '5 days'),
-    (proj_id, c_anniv, p6, u_eyenga, 50000, now() - interval '4 days'),
-    (proj_id, c_anniv, p6, u_eyenga, 25000, now() - interval '2 days');
+    -- p6 = Nguema Patrice (compte light, user_id null) — paiements faits via le gérant
+    (proj_id, c_anniv, p6, null,     50000, now() - interval '4 days'),
+    (proj_id, c_anniv, p6, null,     25000, now() - interval '2 days');
 
   -- ── Transactions Payin ─────────────────────────────────────────────────
   insert into public.tondo_payin (

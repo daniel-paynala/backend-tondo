@@ -79,7 +79,9 @@ create table if not exists public.tondo_cagnottes (
   montant_collecte       bigint not null default 0,    -- cumul des paiements reçus à ce jour
   montant_beneficiaire   bigint,                       -- net que le bénéficiaire doit recevoir
   montant_avec_frais     bigint,                       -- brut que le cotisant paie (net + frais 2 % + frais opérateur)
-  nombre_participants    int not null default 0,
+  total_a_envoyer        bigint,                       -- somme brute des envois Airtel (cash + frais retrait), avant commission Paynala
+  nombre_participants    int not null default 0,        -- nombre déclaré à la création (cible tontine)
+  nombre_inscrits        int not null default 0,        -- participants effectivement inscrits (hors créateur)
   nombre_splits          int,                          -- nombre de parts / groupes (tontine)
   nombre_envois          int,                          -- nombre d'envois prévus au bénéficiaire (tontine)
   numero_retrait_masque  text,                         -- immutable après création (RÈGLE non négociable)
@@ -94,6 +96,7 @@ create table if not exists public.tondo_cagnottes (
   intervalle             int not null default 1,
   jour_semaine           public.tondo_jour_semaine,
   jour_mois              int check (jour_mois between 1 and 28),
+  date_demarrage         timestamptz,                  -- quand la tontine a officiellement démarré (statut → en_cours)
 
   date_creation          timestamptz not null default now(),
   created_at             timestamptz not null default now(),
@@ -138,8 +141,11 @@ create table if not exists public.tondo_participants (
 
   nom                    text not null,
   prenom                 text not null,
-  numero_masque          text not null,
+  numero_masque          text not null,                -- numéro d'inscription (Mobile Money de contact)
+  numero_retrait_masque  text,                         -- numéro de réception des fonds, NULL = identique à numero_masque
+  est_compte_light       boolean not null default false, -- true = invité sans compte Tondo (ajouté manuellement par le gérant)
   statut_paiement        public.tondo_statut_paiement not null default 'en_attente',
+  ordre_passage          smallint not null default 0,  -- ordre de réception (tontine) ; 0 = non défini
   montant_paye           bigint not null default 0,
   date_dernier_paiement  timestamptz,
 

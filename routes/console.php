@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -17,8 +18,22 @@ Artisan::command('inspire', function () {
  *   crontab -e
  *   * * * * * php /var/www/html/artisan schedule:run >> /dev/null 2>&1
  */
+/*
+ * Retrait automatique des tontines périodiques — 20h heure de Libreville.
+ */
 Schedule::command(TraiterRetraitsTontines::class)
     ->dailyAt('20:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
+/*
+ * Rappels de cotisation — 09h heure de Libreville.
+ * Envoie des notifications aux participants qui n'ont pas cotisé à :
+ *   J-5, J-2, J (jour du retrait), J+1 (retard).
+ */
+Schedule::command(TontineRappelsCommand::class)
+    ->dailyAt('09:00')
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();
