@@ -174,7 +174,8 @@ class PaynalaPaymentService
      * @param  string $idempotencyKey  Clé unique (ex : TONDOPAYOUT-XXXXXXXXX) — évite les doublons.
      * @param  int    $amount          Montant en XAF.
      * @param  string $msisdn          Numéro local 9 chiffres (ex : 074577473).
-     * @param  string $reference       Courte référence lisible (titre cagnotte tronqué).
+     * @param  string $reference       Courte référence lisible.
+     * @param  string $type            'B2C' (particulier) ou 'B2B' (entreprise) — requis par Paynala.
      * @return array  Données retournées par l'API (airtel_money_id, status, …).
      * @throws \RuntimeException  Si l'API retourne une erreur.
      */
@@ -183,6 +184,7 @@ class PaynalaPaymentService
         int    $amount,
         string $msisdn,
         string $reference,
+        string $type = 'B2C',
     ): array {
         // Toujours un token frais pour disburse : l'endpoint est plus strict
         // que KYC/payment et rejette les tokens mis en cache trop longtemps.
@@ -197,6 +199,7 @@ class PaynalaPaymentService
                 'amount'          => $amount,
                 'reference'       => $reference,
                 'idempotency_key' => $idempotencyKey,
+                'type'            => $type,
             ]);
 
         if (! $response->successful() || ! ($response->json('success') ?? false)) {
@@ -205,6 +208,7 @@ class PaynalaPaymentService
                 'body'     => $response->body(),
                 'msisdn'   => $msisdn,
                 'amount'   => $amount,
+                'type'     => $type,
             ]);
 
             $msg = $response->json('error.message')
@@ -216,6 +220,58 @@ class PaynalaPaymentService
         }
 
         return $response->json();
+    }
+
+    /**
+     * Résout le type de décaissement (B2C / B2B) pour un numéro donné.
+     *
+     * Ordre de résolution :
+     *  1. Compte Tondo existant → type_client (particulier = B2C, entreprise = B2B).
+     *  2. Cache KYC existant (grade Airtel mémorisé lors du sign-up).
+     *  3. Appel KYC live si rien en cache.
+     *  4. Défaut B2C si KYC indisponible.
+     *
+     * @param  string      $msisdnLocal  Numéro local 9 chiffres (ex : 077730634).
+     * @param  string|null $msisdnE164   Numéro E.164 correspondant (ex : +24177730634).
+     * @param  string|null $userId       UUID du compte Tondo du bénéficiaire, si connu.
+     */
+    public function resolveDisburseType(
+        string  $msisdnLocal,
+        ?string $msisdnE164 = null,
+        ?string $userId     = null,
+    ): string {
+        // 1. Compte Tondo → type_client persisté en base.
+        if ($userId) {
+            $typeClient = \Illuminate\Support\Facades\DB::table('users')
+                ->where('id', $userId)
+                ->value('type_client');
+
+            if ($typeClient) {
+                return $typeClient === 'entreprise' ? 'B2B' : 'B2C';
+            }
+        }
+
+        // 2. Cache KYC issu du grade Airtel (mémorisé à la vérification du numéro).
+        $cacheType = Cache::get('paynala_kyc_type_' . $msisdnLocal)
+            ?? ($msisdnE164 ? Cache::get('paynala_kyc_type_' . $msisdnE164) : null);
+
+        if ($cacheType) {
+            return $cacheType === 'entreprise' ? 'B2B' : 'B2C';
+        }
+
+        // 3. Appel KYC live pour résoudre le grade Airtel.
+        try {
+            $this->checkKyc($msisdnLocal);
+            $cacheType = Cache::get('paynala_kyc_type_' . $msisdnLocal);
+            if ($cacheType) {
+                return $cacheType === 'entreprise' ? 'B2B' : 'B2C';
+            }
+        } catch (\Throwable) {
+            // KYC indisponible — on ne bloque pas le payout.
+        }
+
+        // 4. Défaut sécurisé : particulier.
+        return 'B2C';
     }
 
     // ─────────────────────────────────────────────────────────────────

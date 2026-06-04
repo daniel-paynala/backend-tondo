@@ -191,12 +191,19 @@ class ReversementsController extends Controller
         }
 
         // ── PHASE 2 : appel Paynala (hors transaction DB) ────────────────────
+        $disburseType = $this->paynala->resolveDisburseType(
+            msisdnLocal: $msisdnLocal,
+            msisdnE164:  $numeroBeneficiaireE164,
+            userId:      $beneficiaireUserId,
+        );
+
         try {
             $disburseData = $this->paynala->disburse(
                 idempotencyKey: $idempotencyKey,
                 amount:         $data['montant'],
                 msisdn:         $msisdnLocal,
                 reference:      $reference,
+                type:           $disburseType,
             );
         } catch (\RuntimeException $e) {
             // Paynala a échoué APRÈS la réservation des fonds.

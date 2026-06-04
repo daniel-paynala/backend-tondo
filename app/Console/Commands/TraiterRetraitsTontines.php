@@ -214,12 +214,19 @@ class TraiterRetraitsTontines extends Command
             }
 
             // ── Phase 2 : appel Paynala ───────────────────────────────────────
+            $disburseType = $paynala->resolveDisburseType(
+                msisdnLocal: $msisdnLocal,
+                msisdnE164:  $numeroE164,
+                userId:      $beneficiaire->user_id,
+            );
+
             try {
                 $disburseData = $paynala->disburse(
                     idempotencyKey: $idempotencyKey,
                     amount:         $montant,
                     msisdn:         $msisdnLocal,
                     reference:      $reference,
+                    type:           $disburseType,
                 );
             } catch (\RuntimeException $e) {
                 // Paynala KO — NE PAS restaurer le solde, alerter les admins.

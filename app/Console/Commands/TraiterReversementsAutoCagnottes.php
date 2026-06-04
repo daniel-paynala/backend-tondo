@@ -206,12 +206,19 @@ class TraiterReversementsAutoCagnottes extends Command
         }
 
         // ── Phase 2 : appel Paynala ───────────────────────────────────────────
+        $disburseType = $paynala->resolveDisburseType(
+            msisdnLocal: $msisdnLocal,
+            msisdnE164:  $numeroE164,
+            userId:      $beneficiaireUserId,
+        );
+
         try {
             $disburseData = $paynala->disburse(
                 idempotencyKey: $idempotencyKey,
                 amount:         $montant,
                 msisdn:         $msisdnLocal,
                 reference:      $reference,
+                type:           $disburseType,
             );
         } catch (\RuntimeException $e) {
             DB::table('tondo_payout')
