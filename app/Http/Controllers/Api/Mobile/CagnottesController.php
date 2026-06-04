@@ -188,14 +188,22 @@ class CagnottesController extends Controller
             $cagnotte->penalite_frequence = $penaliteActive ? ($extra['penalite_frequence'] ?? 'jour') : null;
         } else {
             $extra = $request->validate([
-                'montant_cible' => ['nullable', 'integer', 'min:100', 'max:2500000'],
-                'montant_min' => ['nullable', 'integer', 'min:100'],
-                'date_fin' => ['nullable', 'date', 'after:today'],
+                'montant_cible'                   => ['nullable', 'integer', 'min:100', 'max:2500000'],
+                'montant_min'                     => ['nullable', 'integer', 'min:100'],
+                'date_fin'                        => ['nullable', 'date', 'after:today'],
+                'reversement_auto'                => ['nullable', 'boolean'],
+                'reversement_auto_frequence_mois' => ['nullable', 'integer', 'min:1', 'max:24'],
             ]);
 
             $cagnotte->montant_cible = $extra['montant_cible'] ?? null;
             $cagnotte->date_fin = $extra['date_fin'] ?? null;
             $cagnotte->nombre_participants = 0;
+            $cagnotte->reversement_auto = (bool) ($extra['reversement_auto'] ?? false);
+            // Fréquence uniquement en mode libre (pas d'échéance configurée).
+            $cagnotte->reversement_auto_frequence_mois =
+                $cagnotte->reversement_auto && empty($extra['montant_cible']) && empty($extra['date_fin'])
+                    ? ($extra['reversement_auto_frequence_mois'] ?? null)
+                    : null;
 
             if (! empty($extra['montant_cible'])) {
                 $plan = $calc->plan($extra['montant_cible']);
@@ -1062,9 +1070,11 @@ class CagnottesController extends Controller
             'nombre_envois'         => $c->nombre_envois,
             'date_creation'         => $c->date_creation?->toIso8601String(),
             'date_demarrage'        => $c->date_demarrage?->toIso8601String(),
-            'penalite_active'       => (bool) ($c->penalite_active ?? true),
-            'penalite_montant'      => $c->penalite_montant,
-            'penalite_frequence'    => $c->penalite_frequence,
+            'penalite_active'                  => (bool) ($c->penalite_active ?? true),
+            'penalite_montant'                 => $c->penalite_montant,
+            'penalite_frequence'               => $c->penalite_frequence,
+            'reversement_auto'                 => (bool) ($c->reversement_auto ?? false),
+            'reversement_auto_frequence_mois'  => $c->reversement_auto_frequence_mois,
         ];
     }
 

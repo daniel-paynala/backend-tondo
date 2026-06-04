@@ -30,6 +30,8 @@ class TondoCagnotte extends Model
         'date_creation'  => 'datetime',
         'date_fin'       => 'datetime',
         'date_demarrage' => 'datetime',
+        'reversement_auto' => 'boolean',
+        'reversement_auto_frequence_mois' => 'integer',
     ];
 
     public function gerant(): BelongsTo
