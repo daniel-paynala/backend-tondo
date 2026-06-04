@@ -2,6 +2,7 @@
 
 use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
+use App\Console\Commands\TraiterReversementsAutoCagnottes;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -23,6 +24,17 @@ Artisan::command('inspire', function () {
  */
 Schedule::command(TraiterRetraitsTontines::class)
     ->dailyAt('20:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
+/*
+ * Reversements automatiques cotisations ouvertes — 08h heure de Libreville.
+ * Vérifie chaque jour si une échéance (date, montant cible) est atteinte
+ * ou si le délai de fréquence libre (N mois) est écoulé.
+ */
+Schedule::command(TraiterReversementsAutoCagnottes::class)
+    ->dailyAt('08:00')
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();

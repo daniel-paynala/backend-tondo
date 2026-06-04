@@ -144,6 +144,9 @@ class CagnottesController extends Controller
         $cagnotte->type = $type;
         $cagnotte->statut = 'active';
         $cagnotte->numero_retrait_masque = $this->maskPhone($base['numero_retrait']);
+        // Stocké en clair pour le scheduler de reversement automatique.
+        // Non exposé dans les réponses API mobiles.
+        $cagnotte->numero_retrait = $base['numero_retrait'];
 
         $airtelConfig = app(TondoConfigService::class)->getOperatorConfig(
             $user->project_id,
