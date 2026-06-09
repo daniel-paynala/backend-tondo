@@ -57,9 +57,23 @@ class WebhookController extends Controller
                 'message' => $e->getMessage(),
                 'file'    => $e->getFile(),
                 'line'    => $e->getLine(),
+                'trace'   => $e->getTraceAsString(),
             ]);
-            // Retourner le menu plutôt que du vide
-            $reponse = "Bonjour 👋\n\nTapez *1* Cotiser · *2* Rejoindre · *3* Créer · *4* Gérer · *5* Aide";
+            $reponse = <<<TXT
+            🎉 *Bienvenue sur Tondo !*
+
+            Bonjour cher client 👋
+
+            Que souhaitez-vous faire ?
+
+            1️⃣  *Cotiser*
+            2️⃣  *Rejoindre* une cagnotte
+            3️⃣  *Créer* une cagnotte
+            4️⃣  *Gérer* mes cagnottes
+            5️⃣  *Aide* & support
+
+            _Tapez le numéro de votre choix._
+            TXT;
         }
 
         if (is_array($reponse)) {
