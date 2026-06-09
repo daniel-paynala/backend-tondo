@@ -114,7 +114,7 @@ class WebhookController extends Controller
             return true;
         }
 
-        $authToken = config('services.twilio.auth_token');
+        $authToken = config('services.twilio.wa_auth_token');
         $signature = $request->header('X-Twilio-Signature', '');
 
         if (! $authToken || ! $signature) {

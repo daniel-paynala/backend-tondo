@@ -83,10 +83,18 @@ return [
     ],
 
     'twilio' => [
-        'account_sid' => env('TWILIO_ACCOUNT_SID'),
-        'auth_token' => env('TWILIO_AUTH_TOKEN'),
+        // Compte SMS / OTP (Verify)
+        'account_sid'        => env('TWILIO_ACCOUNT_SID'),
+        'auth_token'         => env('TWILIO_AUTH_TOKEN'),
         'verify_service_sid' => env('TWILIO_VERIFY_SERVICE_SID'),
-        'skip_signature' => env('TWILIO_SKIP_SIGNATURE', false),
+        'override_recipient' => env('TWILIO_OVERRIDE_RECIPIENT'),
+
+        // Compte WhatsApp (peut être différent du compte SMS)
+        'wa_account_sid'     => env('TWILIO_WA_ACCOUNT_SID',  env('TWILIO_ACCOUNT_SID')),
+        'wa_auth_token'      => env('TWILIO_WA_AUTH_TOKEN',   env('TWILIO_AUTH_TOKEN')),
+        'wa_number'          => env('TWILIO_WA_NUMBER'),       // whatsapp:+14155238886
+
+        'skip_signature'     => env('TWILIO_SKIP_SIGNATURE', false),
         // Si défini, tous les OTP Twilio sont envoyés à ce numéro
         // (au lieu du numéro saisi). Workaround pour le compte trial
         // qui n'autorise que les Verified Caller IDs. L'user qui tape
