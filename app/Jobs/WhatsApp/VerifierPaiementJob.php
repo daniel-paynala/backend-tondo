@@ -145,7 +145,7 @@ class VerifierPaiementJob implements ShouldQueue
 
         ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tondo.ga. Nous traiterons votre remboursement sous 24h._
 
-        _Tapez_ *#* _pour revenir au menu._
+        _Tapez_ *#️⃣* _pour revenir au menu._
         TXT);
     }
 
@@ -158,7 +158,7 @@ class VerifierPaiementJob implements ShouldQueue
 
         ⚠️ _Si vous avez bien validé sur votre Mobile Money et qu'un prélèvement a eu lieu, contactez-nous à support@tondo.ga._
 
-        _Tapez_ *#* _pour revenir au menu ou *1* pour réessayer._
+        _Tapez_ *#️⃣* _pour revenir au menu ou *1* pour réessayer._
         TXT);
     }
 }
