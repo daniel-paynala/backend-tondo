@@ -254,35 +254,34 @@ class BotService
         // Chercher l'utilisateur par ce numéro
         $user = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
-        // ── Tontine : vérifier que c'est bien un participant ──────────────────
+        // ── Tontine : vérifier participant + tontine démarrée ────────────────
         if ($type === 'tontine_periodique') {
-            if (! $user) {
-                // Pas de compte = pas inscrit à la tontine
-                $this->session->reset($numero);
-                return <<<TXT
-                ❌ *Vous n'êtes pas inscrit à cette tontine.*
-
-                Demandez à l'organisateur de vous ajouter en tant que participant.
-
-                TXT . "\n" . $this->afficherMenu($numero);
-            }
-
-            $estParticipant = DB::table('tondo_participants')
+            $estParticipant = $user && DB::table('tondo_participants')
                 ->where('cagnotte_id', $data['cagnotte_id'])
                 ->where('user_id', $user->id)
                 ->exists();
 
             if (! $estParticipant) {
-                $this->session->reset($numero);
-                return <<<TXT
-                ❌ *Vous n'êtes pas inscrit à cette tontine.*
+                return $this->erreurEtMenu($numero, <<<TXT
+                ❌ *Vous n'êtes pas encore inscrit à cette tontine.*
 
-                Demandez à l'organisateur de vous ajouter en tant que participant.
-
-                TXT . "\n" . $this->afficherMenu($numero);
+                Rejoignez-la d'abord en choisissant l'option *2️⃣* du menu.
+                TXT);
             }
 
-            // Participant confirmé → push
+            // Tontine non démarrée : attendre tous les participants
+            $cagnotte = TondoCagnotte::find($data['cagnotte_id']);
+            if ($cagnotte && ($cagnotte->nombre_inscrits < $cagnotte->nombre_participants)) {
+                $manquants = $cagnotte->nombre_participants - $cagnotte->nombre_inscrits;
+                return $this->erreurEtMenu($numero, <<<TXT
+                ⏳ *La tontine n'a pas encore démarré.*
+
+                Il manque encore *{$manquants} participant(s)* avant le lancement.
+                La cotisation sera ouverte une fois tous les membres inscrits.
+                TXT);
+            }
+
+            // Participant confirmé + tontine complète → push
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
