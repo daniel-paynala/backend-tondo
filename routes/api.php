@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
+use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================================================
@@ -25,6 +26,16 @@ Route::get('/health', fn () => response()->json([
     'service' => 'tondo-backend',
     'time' => now()->toIso8601String(),
 ]));
+
+// ============================================================================
+//  Canal WhatsApp — préfixe /api/whatsapp/
+//  Public (pas d'auth Sanctum) — sécurisé par validation de la signature
+//  X-Twilio-Signature à l'intérieur du controller.
+//  URL à saisir dans la console Twilio > Messaging > WhatsApp Senders > Webhook URL
+// ============================================================================
+Route::prefix('whatsapp')->group(function () {
+    Route::post('/webhook', [WhatsAppWebhookController::class, 'recevoir']);
+});
 
 // ============================================================================
 //  API Dashboard — préfixe /api/admin/
