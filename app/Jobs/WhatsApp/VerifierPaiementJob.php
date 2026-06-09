@@ -27,8 +27,8 @@ class VerifierPaiementJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    private const INTERVALLE_SECONDES = 30;
-    private const MAX_TENTATIVES      = 6;   // 6 × 30s = 3 min
+    private const INTERVALLE_SECONDES = 10;
+    private const MAX_TENTATIVES      = 18;  // 18 × 10s = 3 min
 
     public function __construct(
         private readonly string $transId,

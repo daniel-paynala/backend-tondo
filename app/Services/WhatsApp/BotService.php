@@ -487,13 +487,23 @@ class BotService
      * Génère le PDF et retourne [message_texte, pdf_url].
      * Le WebhookController inclura le PDF en <Media> dans le TwiML.
      */
-    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): array
+    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): string|array
     {
-        $pdfUrl  = $this->receiptSvc->generer($user, $cagnotte, $resultat, $canal);
+        $pdfUrl = null;
+        try {
+            $pdfUrl = $this->receiptSvc->generer($user, $cagnotte, $resultat, $canal);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('BotService: échec génération PDF reçu', [
+                'err' => $e->getMessage(),
+            ]);
+        }
+
         $montant = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
         $titre   = $cagnotte ? $cagnotte->titre : '—';
         $ref     = $cagnotte ? '#' . $cagnotte->reference : '';
         $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
+
+        $avecPdf = $pdfUrl !== null;
 
         $texte = <<<TXT
         ✅ *Paiement confirmé !*
@@ -501,12 +511,11 @@ class BotService
         Merci {$prenom} 🙏
         Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        📄 Votre reçu PDF Tondo est joint à ce message.
+        TXT . ($avecPdf
+            ? "📄 Votre reçu PDF Tondo est joint à ce message.\n\n"
+            : "") . "_Tapez_ *#* _pour revenir au menu._";
 
-        _Tapez_ *#* _pour revenir au menu._
-        TXT;
-
-        return [$texte, $pdfUrl];
+        return $avecPdf ? [$texte, $pdfUrl] : $texte;
     }
 
     // ── 2 — Rejoindre ─────────────────────────────────────────────────────────
