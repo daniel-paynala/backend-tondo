@@ -1566,8 +1566,9 @@ class BotService
 
         1️⃣  *Historique* des transactions
         2️⃣  *Initier* un reversement
+        3️⃣  Retour à la liste
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        _Tapez_ *#️⃣* _pour revenir au menu principal._
         TXT;
     }
 
@@ -1580,16 +1581,23 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
         }
 
+        if ($texte === '3') {
+            return $this->retourListeCagnottes($numero, $data);
+        }
+
         if ($texte === '1') {
             $paiements = $this->gererCagnotteSvc->historiquePaiements($cagnotte);
 
             if ($paiements->isEmpty()) {
+                $this->session->set($numero, 'gerer.cagnotte', $data);
                 return <<<TXT
                 📊 *Historique — {$cagnotte->titre}*
 
                 Aucune transaction confirmée pour le moment.
 
-                _Tapez_ *#️⃣* _pour revenir au menu._
+                1️⃣  *Historique* des transactions
+                2️⃣  *Initier* un reversement
+                3️⃣  Retour à la liste
                 TXT;
             }
 
@@ -1641,7 +1649,7 @@ class BotService
             TXT;
         }
 
-        return "⚠️ Tapez *1* pour Historique ou *2* pour Reversement.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour revenir au menu principal._";
     }
 
     // ── 4 — Gérer > Tontine ───────────────────────────────────────────────────
@@ -1969,8 +1977,9 @@ class BotService
 
             1️⃣  *Historique* des transactions
             2️⃣  *Initier* un reversement
+            3️⃣  Retour à la liste
 
-            _Tapez_ *#️⃣* _pour revenir au menu._
+            _Tapez_ *#️⃣* _pour revenir au menu principal._
             TXT;
         }
 
