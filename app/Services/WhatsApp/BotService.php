@@ -611,12 +611,13 @@ class BotService
         // Utilisateur connu → inscrire directement
         if ($user) {
             $this->inscrireParticipant($user, $cagnotte);
-            $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+            $prenom = ucfirst(mb_strtolower($user->prenom));
+            $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
 
             return <<<TXT
             ✅ *Inscription confirmée !*
 
-            Vous avez rejoint la {$type} *{$cagnotte->titre}* (#{$ref}).
+            Bienvenue *{$prenom}* ! Vous avez rejoint la {$type} *{$cagnotte->titre}* (#{$ref}).
 
             TXT . "\n" . $this->afficherMenu($numero);
         }
