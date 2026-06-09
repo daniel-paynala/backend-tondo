@@ -58,14 +58,20 @@ class VerifierPaiementJob implements ShouldQueue
         $statut = $cotisationSvc->verifierStatut($this->transId, $this->projectId);
 
         if ($statut === 'succes') {
-            $sessionSvc->reset($this->numeroWa);
-            $this->envoyerSucces($twilio, $receiptSvc);
+            $sent = $this->envoyerSucces($twilio, $receiptSvc);
+            if ($sent) {
+                $sessionSvc->reset($this->numeroWa);
+            }
+            // Si la notification échoue, on laisse la session active :
+            // l'utilisateur peut toujours taper "Ok" pour confirmer via TwiML.
             return;
         }
 
         if ($statut === 'echec') {
-            $sessionSvc->reset($this->numeroWa);
-            $this->envoyerEchec($twilio);
+            $sent = $this->envoyerEchec($twilio);
+            if ($sent) {
+                $sessionSvc->reset($this->numeroWa);
+            }
             return;
         }
 
@@ -91,7 +97,7 @@ class VerifierPaiementJob implements ShouldQueue
 
     // ── Notifications sortantes ───────────────────────────────────────────────
 
-    private function envoyerSucces(TwilioSenderService $twilio, ReceiptService $receiptSvc): void
+    private function envoyerSucces(TwilioSenderService $twilio, ReceiptService $receiptSvc): bool
     {
         $user     = TondoUser::find($this->userId);
         $cagnotte = TondoCagnotte::where('reference', $this->cagnotteRef)->first();
@@ -109,27 +115,24 @@ class VerifierPaiementJob implements ShouldQueue
             $pdfUrl = null;
         }
 
+        $avecPdf = $pdfUrl !== null;
         $texte = <<<TXT
         ✅ *Paiement confirmé !*
 
         Merci {$this->prenom} 🙏
         Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        📄 Votre reçu PDF Tondo est joint à ce message.
+        TXT . ($avecPdf ? "📄 Votre reçu PDF Tondo est joint à ce message.\n\n" : "")
+        . "_Tapez_ *#* _pour revenir au menu._";
 
-        _Tapez_ *#* _pour revenir au menu._
-        TXT;
-
-        if ($pdfUrl) {
-            $twilio->envoyerAvecPdf($this->numeroWa, $texte, $pdfUrl);
-        } else {
-            $twilio->envoyer($this->numeroWa, $texte);
-        }
+        return $avecPdf
+            ? $twilio->envoyerAvecPdf($this->numeroWa, $texte, $pdfUrl)
+            : $twilio->envoyer($this->numeroWa, $texte);
     }
 
-    private function envoyerEchec(TwilioSenderService $twilio): void
+    private function envoyerEchec(TwilioSenderService $twilio): bool
     {
-        $twilio->envoyer($this->numeroWa, <<<TXT
+        return $twilio->envoyer($this->numeroWa, <<<TXT
         ❌ *Paiement échoué ou refusé.*
 
         ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tondo.ga. Nous traiterons votre remboursement sous 24h._
