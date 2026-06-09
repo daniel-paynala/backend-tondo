@@ -2077,32 +2077,35 @@ class BotService
             return "⚠️ Solde insuffisant. Disponible : *{$dispo} FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
         }
 
-        // Générer OTP (simulé en dev = 123456)
-        $otp = app()->isProduction()
-            ? (string) random_int(100000, 999999)
-            : '123456';
+        $numeroGerant = $data['numero_payeur'] ?? '';
+
+        try {
+            $this->twilioVerify->sendOtp($numeroGerant);
+        } catch (\Throwable $e) {
+            Log::warning('handleGererReversementMontant: échec envoi OTP', [
+                'numero' => $numeroGerant,
+                'err'    => $e->getMessage(),
+            ]);
+            return "⚠️ Impossible d'envoyer le code de confirmation.\nVérifiez votre numéro ou réessayez.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
 
         $this->session->set($numero, 'gerer.revers.otp', array_merge($data, [
             'revers_montant' => $montant,
-            'otp'            => $otp,
-            'otp_expires_at' => now()->addMinutes(5)->timestamp,
-            'otp_attempts'   => 0,
         ]));
 
-        $masque      = $this->maskPhoneNum($data['revers_numero'] ?? '');
-        $montantFmt  = number_format($montant, 0, ',', ' ');
-        $gerantNum   = $this->maskPhoneNum($data['numero_payeur'] ?? '');
+        $masque     = $this->maskPhoneNum($data['revers_numero'] ?? '');
+        $montantFmt = number_format($montant, 0, ',', ' ');
+        $gerantNum  = $this->maskPhoneNum($numeroGerant);
 
-        // En prod, on enverrait le SMS ; ici le bot lui-même affiche le code (sandbox)
         return <<<TXT
         🔐 *Confirmation requise*
 
         Reversement de *{$montantFmt} FCFA* vers *{$masque}*
 
-        Un code de confirmation a été envoyé au *{$gerantNum}*.
+        Un code de confirmation a été envoyé par SMS au *{$gerantNum}*.
         Entrez le code à 6 chiffres pour valider :
 
-        _(Code valable 5 minutes — 3 essais max)_
+        _(Code valable 10 minutes)_
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
@@ -2111,25 +2114,23 @@ class BotService
     private function handleGererReversementOtp(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
+        $code = trim($texte);
 
-        $otp        = $data['otp'] ?? '';
-        $expiresAt  = (int) ($data['otp_expires_at'] ?? 0);
-        $attempts   = (int) ($data['otp_attempts'] ?? 0);
-
-        if (now()->timestamp > $expiresAt) {
-            return $this->erreurEtMenu($numero, "⏰ Code expiré. Recommencez le reversement.");
+        if (! preg_match('/^\d{6}$/', $code)) {
+            return "⚠️ Entrez le code à *6 chiffres* reçu par SMS.\n\n_Tapez_ *#️⃣* _pour annuler._";
         }
 
-        $attempts++;
+        $numeroGerant = $data['numero_payeur'] ?? '';
 
-        if (trim($texte) !== $otp) {
-            if ($attempts >= 3) {
-                return $this->erreurEtMenu($numero, "❌ Code incorrect 3 fois. Reversement annulé pour sécurité.");
-            }
+        try {
+            $approuve = $this->twilioVerify->checkOtp($numeroGerant, $code);
+        } catch (\Throwable $e) {
+            Log::error('handleGererReversementOtp: erreur checkOtp', ['err' => $e->getMessage()]);
+            return $this->erreurEtMenu($numero, "❌ Erreur technique lors de la vérification. Réessayez.");
+        }
 
-            $this->session->set($numero, 'gerer.revers.otp', array_merge($data, ['otp_attempts' => $attempts]));
-            $restants = 3 - $attempts;
-            return "❌ Code incorrect. *{$restants} essai(s) restant(s).*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        if (! $approuve) {
+            return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
         }
 
         // OTP valide → exécuter le reversement
