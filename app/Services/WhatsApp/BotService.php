@@ -167,6 +167,19 @@ class BotService
             'montant_par_cycle' => $cagnotte->montant_par_cycle,
         ]);
 
+        // Tontine : bloquer si pas encore complète
+        if ($cagnotte->type === 'tontine_periodique') {
+            $manquants = ($cagnotte->nombre_participants ?? 0) - ($cagnotte->nombre_inscrits ?? 0);
+            if ($manquants > 0) {
+                return $this->erreurEtMenu($numero, <<<TXT
+                ⏳ *La tontine n'a pas encore démarré.*
+
+                Il manque encore *{$manquants} participant(s)* avant le lancement.
+                La cotisation sera ouverte une fois tous les membres inscrits.
+                TXT);
+            }
+        }
+
         // Tontine → montant fixe, pas besoin de le demander
         if ($cagnotte->type === 'tontine_periodique' && $cagnotte->montant_par_cycle) {
             $fmt = number_format((int) $cagnotte->montant_par_cycle, 0, ',', ' ');
@@ -270,19 +283,7 @@ class BotService
                 TXT);
             }
 
-            // Tontine non démarrée : attendre tous les participants
-            $cagnotte = TondoCagnotte::find($data['cagnotte_id']);
-            if ($cagnotte && ($cagnotte->nombre_inscrits < $cagnotte->nombre_participants)) {
-                $manquants = $cagnotte->nombre_participants - $cagnotte->nombre_inscrits;
-                return $this->erreurEtMenu($numero, <<<TXT
-                ⏳ *La tontine n'a pas encore démarré.*
-
-                Il manque encore *{$manquants} participant(s)* avant le lancement.
-                La cotisation sera ouverte une fois tous les membres inscrits.
-                TXT);
-            }
-
-            // Participant confirmé + tontine complète → push
+            // Participant confirmé → push
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
