@@ -2175,15 +2175,12 @@ class BotService
         return <<<TXT
         ❓ *Aide & support Tondo*
 
-        *Cotiser* → Tapez *1*, entrez la référence et suivez les instructions.
-        *Rejoindre* → Tapez *2* et entrez la référence communiquée par l'organisateur.
-        *Créer* → Tapez *3* pour accéder à l'application.
-        *Gérer* → Tapez *4* pour voir vos cagnottes actives.
+        Pour toute question, problème ou réclamation, notre équipe est disponible :
 
-        *Les frais* (2 % Tondo + frais opérateur) sont à la charge du cotisant.
+        📧 *Email* : support@tondo.ga
+        _(Réponse sous 24h, jours ouvrables)_
 
-        *Une question ?* support@tondo.ga
-
+        ————————————————
         _Tapez_ *#️⃣* _pour revenir au menu principal._
         TXT;
     }
