@@ -130,8 +130,8 @@ class BotService
         return <<<TXT
         💰 *Cotiser*
 
-        Entrez la *référence* de la cagnotte
-        (numéro à 4-6 chiffres fourni par l'organisateur).
+        Entrez la *référence* de la tontine
+        (numéro à 6 chiffres fourni par l'organisateur).
 
         _Tapez_ *0* _pour revenir au menu._
         TXT;
