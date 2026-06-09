@@ -4,27 +4,40 @@ namespace App\Services\WhatsApp;
 
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Moteur conversationnel du bot WhatsApp Tondo.
  *
- * Chaque méthode publique reçoit ($numero, $texte) et retourne
- * une chaîne de caractères (le message à envoyer en réponse).
- *
  * Machine à états pilotée par SessionService :
  *
- *   [aucune session]
- *        │ premier message
- *        ▼
- *      MENU ──► 1 ──► cotiser.ref ──► cotiser.montant ──► [fin]
- *               2 ──► rejoindre.ref ──► [fin]
- *               3 ──► creer.type ──► ...
- *               4 ──► gerer.menu ──► ...
- *               5 ──► aide
+ *  [aucune session] ──► MENU
+ *
+ *  MENU ──► 1 ──► cotiser.ref
+ *                     │
+ *                     ├─ tontine ──► cotiser.numero
+ *                     │                  │
+ *                     │                  ├─ non-participant ──► "pas inscrit" + menu
+ *                     │                  └─ participant ──► [push] ──► cotiser.attente
+ *                     │
+ *                     └─ cotisation ──► cotiser.montant ──► cotiser.numero
+ *                                                               │
+ *                                                               ├─ connu ──► [push] ──► cotiser.attente
+ *                                                               └─ inconnu ──► cotiser.nom_prenom ──► [push] ──► cotiser.attente
+ *
+ *        ──► 2 ──► rejoindre.ref ──► lien
+ *        ──► 3 ──► lien app web
+ *        ──► 4 ──► liste cagnottes
+ *        ──► 5 ──► aide
+ *
+ *  cotiser.attente ──► OK ──► vérif statut ──► reçu / échec / toujours en cours
  */
 class BotService
 {
-    public function __construct(private SessionService $session) {}
+    public function __construct(
+        private SessionService    $session,
+        private CotisationService $cotisationSvc,
+    ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────
 
@@ -33,32 +46,30 @@ class BotService
         $texte = trim($texte);
         $etape = $this->session->etape($numero);
 
-        // Commande universelle de reset / retour menu
         if ($this->estRetourMenu($texte)) {
             $this->session->reset($numero);
             return $this->afficherMenu($numero);
         }
 
-        // Pas de session → première arrivée
         if ($etape === null) {
-            return $this->premiereArrivee($numero, $texte);
+            return $this->premiereArrivee($numero);
         }
 
-        // Dispatcher selon l'étape courante
         return match (true) {
-            $etape === 'menu'              => $this->handleMenu($numero, $texte),
-            $etape === 'cotiser.ref'       => $this->handleCotiserRef($numero, $texte),
-            $etape === 'cotiser.montant'   => $this->handleCotiserMontant($numero, $texte),
-            $etape === 'rejoindre.ref'     => $this->handleRejoindreRef($numero, $texte),
-            $etape === 'creer.type'        => $this->handleCreerType($numero, $texte),
-            $etape === 'gerer.menu'        => $this->handleGererMenu($numero, $texte),
-            default                        => $this->afficherMenu($numero),
+            $etape === 'menu'                  => $this->handleMenu($numero, $texte),
+            $etape === 'cotiser.ref'            => $this->handleCotiserRef($numero, $texte),
+            $etape === 'cotiser.montant'        => $this->handleCotiserMontant($numero, $texte),
+            $etape === 'cotiser.numero'         => $this->handleCotiserNumero($numero, $texte),
+            $etape === 'cotiser.nom_prenom'     => $this->handleCotiserNomPrenom($numero, $texte),
+            $etape === 'cotiser.attente'        => $this->handleCotiserAttente($numero, $texte),
+            $etape === 'rejoindre.ref'          => $this->handleRejoindreRef($numero, $texte),
+            default                             => $this->afficherMenu($numero),
         };
     }
 
     // ── Première arrivée ──────────────────────────────────────────────────────
 
-    private function premiereArrivee(string $numero, string $texte): string
+    private function premiereArrivee(string $numero): string
     {
         $this->session->set($numero, 'menu');
         return $this->afficherMenu($numero);
@@ -68,8 +79,8 @@ class BotService
 
     private function afficherMenu(string $numero): string
     {
-        $user    = $this->utilisateur($numero);
-        $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : 'cher client';
+        $user   = $this->utilisateur($numero);
+        $prenom = $user ? ucfirst(mb_strtolower($user->prenom)) : 'cher client';
         $this->session->set($numero, 'menu');
 
         return <<<TXT
@@ -97,17 +108,17 @@ class BotService
             '3'     => $this->demarrerCreer($numero),
             '4'     => $this->demarrerGerer($numero),
             '5'     => $this->afficherAide(),
-            default => $this->optionInvalide(),
+            default => "⚠️ Option non reconnue.\nTapez un chiffre entre *1* et *5*.\n\n_Tapez_ *0* _pour revenir au menu._",
         };
     }
 
-    // ── 1 — Cotiser ───────────────────────────────────────────────────────────
+    // ── 1 — Cotiser : référence ───────────────────────────────────────────────
 
     private function demarrerCotiser(string $numero): string
     {
         $this->session->set($numero, 'cotiser.ref');
         return <<<TXT
-        💰 *Cotiser à une cagnotte*
+        💰 *Cotiser*
 
         Entrez la *référence* de la cagnotte
         (numéro à 4-6 chiffres fourni par l'organisateur).
@@ -118,80 +129,346 @@ class BotService
 
     private function handleCotiserRef(string $numero, string $texte): string
     {
-        $ref = preg_replace('/\D/', '', $texte);
-
-        if (! $ref) {
-            return "⚠️ Référence invalide. Entrez un numéro à 4-6 chiffres.\n_Tapez_ *0* _pour revenir au menu._";
-        }
-
-        $cagnotte = TondoCagnotte::where('reference', $ref)->first();
+        $ref      = preg_replace('/\D/', '', $texte);
+        $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return "❌ Aucune cagnotte trouvée avec la référence *#{$ref}*.\nVérifiez et réessayez.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.\n\n_Tapez_ *0* _pour revenir au menu._";
         }
 
         if ($cagnotte->statut === 'cloturee') {
-            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\nLes paiements ne sont plus acceptés.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n_Tapez_ *0* _pour revenir au menu._";
         }
 
+        // Stocker les infos cagnotte dans la session
         $this->session->set($numero, 'cotiser.montant', [
-            'reference' => $ref,
-            'titre'     => $cagnotte->titre,
-            'type'      => $cagnotte->type,
+            'reference'         => $ref,
+            'cagnotte_id'       => $cagnotte->id,
+            'cagnotte_titre'    => $cagnotte->titre,
+            'type'              => $cagnotte->type,
+            'project_id'        => $cagnotte->project_id,
             'montant_par_cycle' => $cagnotte->montant_par_cycle,
         ]);
 
-        // Tontine → montant fixe, pas besoin de demander
+        // Tontine → montant fixe, pas besoin de le demander
         if ($cagnotte->type === 'tontine_periodique' && $cagnotte->montant_par_cycle) {
-            $montant = number_format($cagnotte->montant_par_cycle, 0, ',', ' ');
-            return $this->confirmerCotisation($numero, $ref, $cagnotte->titre, (int) $cagnotte->montant_par_cycle);
+            $fmt = number_format((int) $cagnotte->montant_par_cycle, 0, ',', ' ');
+            // Passer directement à la demande de numéro
+            $this->session->set($numero, 'cotiser.numero', [
+                'reference'      => $ref,
+                'cagnotte_id'    => $cagnotte->id,
+                'cagnotte_titre' => $cagnotte->titre,
+                'type'           => $cagnotte->type,
+                'project_id'     => $cagnotte->project_id,
+                'montant'        => (int) $cagnotte->montant_par_cycle,
+            ]);
+
+            return <<<TXT
+            ✅ *{$cagnotte->titre}* · #{$ref}
+            Type : Tontine · Montant fixe : *{$fmt} FCFA*
+
+            Entrez votre *numéro de téléphone* Mobile Money
+            (format : 077XXXXXX ou +241077XXXXXX).
+
+            _Tapez_ *0* _pour revenir au menu._
+            TXT;
         }
 
-        $appUrl = config('app.url', 'http://51.44.254.213');
+        // Cotisation → demander le montant
+        $this->session->set($numero, 'cotiser.montant', [
+            'reference'      => $ref,
+            'cagnotte_id'    => $cagnotte->id,
+            'cagnotte_titre' => $cagnotte->titre,
+            'type'           => $cagnotte->type,
+            'project_id'     => $cagnotte->project_id,
+        ]);
+
         return <<<TXT
         ✅ *{$cagnotte->titre}* · #{$ref}
+        Type : Cotisation
 
-        Quel montant souhaitez-vous cotiser ?
-        _(minimum 100 FCFA)_
-
-        Ou payez directement via ce lien :
-        👉 {$appUrl}/cagnottes/{$ref}
+        Quel *montant* souhaitez-vous cotiser ?
+        _(minimum 100 FCFA — maximum 500 000 FCFA)_
 
         _Tapez_ *0* _pour revenir au menu._
         TXT;
     }
 
+    // ── 1 — Cotiser : montant (cotisation uniquement) ─────────────────────────
+
     private function handleCotiserMontant(string $numero, string $texte): string
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
-        $data    = $this->session->data($numero);
 
         if ($montant < 100) {
-            return "⚠️ Le montant minimum est *100 FCFA*.\nEntrez un montant valide.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide.\n\n_Tapez_ *0* _pour revenir au menu._";
         }
 
         if ($montant > 500_000) {
-            return "⚠️ Le montant maximum par transaction est *500 000 FCFA*.\nEntrez un montant valide.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "⚠️ Montant maximum par transaction : *500 000 FCFA*.\n\n_Tapez_ *0* _pour revenir au menu._";
         }
 
-        return $this->confirmerCotisation($numero, $data['reference'], $data['titre'], $montant);
-    }
-
-    private function confirmerCotisation(string $numero, string $ref, string $titre, int $montant): string
-    {
-        $appUrl  = config('app.url', 'http://51.44.254.213');
-        $fmt     = number_format($montant, 0, ',', ' ');
-        $this->session->reset($numero);
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'cotiser.numero', array_merge($data, ['montant' => $montant]));
 
         return <<<TXT
-        ✅ *Paiement — {$titre}*
+        💵 Montant : *{$montant} FCFA*
 
-        Montant : *{$fmt} FCFA* _(+ frais opérateur)_
+        Entrez votre *numéro de téléphone* Mobile Money
+        (format : 077XXXXXX ou +241077XXXXXX).
 
-        Cliquez sur ce lien pour finaliser le paiement via Mobile Money :
-        👉 {$appUrl}/cagnottes/{$ref}
+        _Tapez_ *0* _pour revenir au menu._
+        TXT;
+    }
 
-        ℹ️ _Les frais sont appliqués au moment du paiement._
+    // ── 1 — Cotiser : numéro de téléphone ────────────────────────────────────
+
+    private function handleCotiserNumero(string $numero, string $texte): string
+    {
+        $numeroSaisi = $this->normaliserNumero($texte);
+
+        if (! $numeroSaisi) {
+            return "⚠️ Numéro invalide.\nFormat attendu : *077XXXXXX* ou *+241077XXXXXX*\n\n_Tapez_ *0* _pour annuler._";
+        }
+
+        $data     = $this->session->data($numero);
+        $type     = $data['type'] ?? '';
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+
+        // Chercher l'utilisateur par ce numéro
+        $user = $this->utilisateurParNumero($numeroSaisi, $projectId);
+
+        // ── Tontine : vérifier que c'est bien un participant ──────────────────
+        if ($type === 'tontine_periodique') {
+            if (! $user) {
+                // Pas de compte = pas inscrit à la tontine
+                $this->session->reset($numero);
+                return <<<TXT
+                ❌ *Vous n'êtes pas inscrit à cette tontine.*
+
+                Demandez à l'organisateur de vous ajouter en tant que participant.
+
+                TXT . "\n" . $this->afficherMenu($numero);
+            }
+
+            $estParticipant = DB::table('tondo_participants')
+                ->where('cagnotte_id', $data['cagnotte_id'])
+                ->where('user_id', $user->id)
+                ->exists();
+
+            if (! $estParticipant) {
+                $this->session->reset($numero);
+                return <<<TXT
+                ❌ *Vous n'êtes pas inscrit à cette tontine.*
+
+                Demandez à l'organisateur de vous ajouter en tant que participant.
+
+                TXT . "\n" . $this->afficherMenu($numero);
+            }
+
+            // Participant confirmé → push
+            return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
+        }
+
+        // ── Cotisation : utilisateur connu ────────────────────────────────────
+        if ($user) {
+            return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
+        }
+
+        // ── Cotisation : nouvel utilisateur → demander nom + prénom ──────────
+        $this->session->set($numero, 'cotiser.nom_prenom', array_merge($data, [
+            'numero_payeur' => $numeroSaisi,
+        ]));
+
+        return <<<TXT
+        👤 *Nouveau sur Tondo*
+
+        Vous n'avez pas encore de compte. On va en créer un rapidement.
+
+        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+        _Exemple :_
+        MBOULA
+        Jean
+
+        _Tapez_ *0* _pour annuler._
+        TXT;
+    }
+
+    // ── 1 — Cotiser : nom + prénom (nouveau compte light) ────────────────────
+
+    private function handleCotiserNomPrenom(string $numero, string $texte): string
+    {
+        $lignes = array_filter(array_map('trim', explode("\n", $texte)));
+
+        if (count($lignes) < 2) {
+            return <<<TXT
+            ⚠️ Format incorrect.
+            Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+            _Exemple :_
+            MBOULA
+            Jean
+
+            _Tapez_ *0* _pour annuler._
+            TXT;
+        }
+
+        $lignes  = array_values($lignes);
+        $nom     = mb_strtoupper(trim($lignes[0]));
+        $prenom  = ucfirst(mb_strtolower(trim($lignes[1])));
+        $data    = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+
+        // Créer le compte light
+        $user = $this->cotisationSvc->creerCompteLight(
+            nom: $nom,
+            prenom: $prenom,
+            numeroE164: $data['numero_payeur'],
+            projectId: $projectId,
+        );
+
+        return $this->lancerPaiement($numero, $user, $data, $data['numero_payeur']);
+    }
+
+    // ── 1 — Cotiser : initier le paiement et attendre ────────────────────────
+
+    private function lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string
+    {
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id']);
+
+        if (! $cagnotte) {
+            $this->session->reset($numero);
+            return "❌ Erreur : cagnotte introuvable.\n\n_Tapez_ *0* _pour revenir au menu._";
+        }
+
+        // Utiliser le numéro saisi comme numéro de paiement
+        $userPourPaiement        = clone $user;
+        $userPourPaiement->numero = $numeroPayeur;
+
+        $resultat = $this->cotisationSvc->initier($userPourPaiement, $cagnotte, (int) $data['montant']);
+
+        if ($resultat['statut'] === 'erreur') {
+            $this->session->reset($numero);
+            return "❌ Erreur lors de l'initiation du paiement : {$resultat['message']}\n\n_Tapez_ *0* _pour revenir au menu._";
+        }
+
+        $prenom   = ucfirst(mb_strtolower($user->prenom));
+        $montantFmt = number_format($data['montant'], 0, ',', ' ');
+
+        // Paiement immédiat (mock)
+        if ($resultat['statut'] === 'succes') {
+            $this->session->reset($numero);
+            return $this->recu($user, $cagnotte, $resultat);
+        }
+
+        // Paiement Airtel → en attente de confirmation
+        $this->session->set($numero, 'cotiser.attente', [
+            'trans_id'       => $resultat['trans_id'],
+            'project_id'     => $cagnotte->project_id,
+            'cagnotte_titre' => $cagnotte->titre,
+            'reference'      => $cagnotte->reference,
+            'montant'        => $data['montant'],
+            'prenom'         => $prenom,
+            'user_id'        => $user->id,
+        ]);
+
+        return <<<TXT
+        ⏳ Bonjour *{$prenom}* !
+
+        Un message de confirmation a été envoyé sur votre téléphone *{$numeroPayeur}*.
+
+        👉 *Validez le paiement de {$montantFmt} FCFA sur votre Mobile Money.*
+
+        Une fois validé, tapez *OK* pour vérifier le statut de votre paiement.
+
+        _Tapez_ *0* _pour annuler._
+        TXT;
+    }
+
+    // ── 1 — Cotiser : vérification après push ────────────────────────────────
+
+    private function handleCotiserAttente(string $numero, string $texte): string
+    {
+        $data    = $this->session->data($numero);
+        $transId = $data['trans_id'] ?? null;
+
+        if (! $transId) {
+            $this->session->reset($numero);
+            return $this->afficherMenu($numero);
+        }
+
+        if (strtolower(trim($texte)) !== 'ok') {
+            return <<<TXT
+            ⏳ Paiement en attente de confirmation.
+
+            Validez le paiement sur votre Mobile Money puis tapez *OK*.
+
+            _Tapez_ *0* _pour annuler._
+            TXT;
+        }
+
+        $statut = $this->cotisationSvc->verifierStatut($transId, $data['project_id']);
+
+        if ($statut === 'succes') {
+            $this->session->reset($numero);
+            $cagnotte = TondoCagnotte::where('reference', $data['reference'])->first();
+            $user     = TondoUser::find($data['user_id']);
+
+            return $this->recu($user, $cagnotte, [
+                'trans_id'    => $transId,
+                'montant_net' => $data['montant'],
+            ]);
+        }
+
+        if ($statut === 'echec') {
+            $this->session->reset($numero);
+            return <<<TXT
+            ❌ *Paiement échoué ou refusé.*
+
+            ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tondo.ga ou appelez le *+241 01 XX XX XX*. Nous traiterons votre remboursement sous 24h._
+
+            TXT . "\n" . $this->afficherMenu($numero);
+        }
+
+        // Toujours en cours
+        return <<<TXT
+        ⏳ Paiement toujours en cours de traitement.
+
+        Attendez quelques secondes et tapez *OK* à nouveau.
+
+        _Tapez_ *0* _pour annuler._
+        TXT;
+    }
+
+    // ── Reçu Tondo ────────────────────────────────────────────────────────────
+
+    private function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat): string
+    {
+        $nom        = $user  ? mb_strtoupper($user->nom) . ' ' . ucfirst(mb_strtolower($user->prenom)) : 'Client';
+        $titre      = $cagnotte ? $cagnotte->titre : '—';
+        $ref        = $cagnotte ? '#' . $cagnotte->reference : '';
+        $montant    = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
+        $transId    = $resultat['trans_id'] ?? '—';
+        $dateHeure  = now()->format('d/m/Y H:i');
+
+        return <<<TXT
+        ✅ *Paiement confirmé !*
+
+        ━━━━━━━━━━━━━━━━━━━━
+        🧾 *REÇU TONDO*
+        ━━━━━━━━━━━━━━━━━━━━
+        👤 {$nom}
+        📋 {$titre} {$ref}
+        💵 *{$montant} FCFA*
+        📅 {$dateHeure}
+        🔖 {$transId}
+        ━━━━━━━━━━━━━━━━━━━━
+        _Frais inclus — à la charge du cotisant_
+        _Tondo · Paynala · tondo.ga_
+        ━━━━━━━━━━━━━━━━━━━━
+
+        Merci pour votre cotisation 🙏
 
         _Tapez_ *0* _pour revenir au menu._
         TXT;
@@ -215,13 +492,8 @@ class BotService
     private function handleRejoindreRef(string $numero, string $texte): string
     {
         $ref      = preg_replace('/\D/', '', $texte);
+        $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
         $appUrl   = config('app.url', 'http://51.44.254.213');
-
-        if (! $ref) {
-            return "⚠️ Référence invalide.\n\n_Tapez_ *0* _pour revenir au menu._";
-        }
-
-        $cagnotte = TondoCagnotte::where('reference', $ref)->first();
 
         if (! $cagnotte) {
             return "❌ Référence *#{$ref}* introuvable.\n\n_Tapez_ *0* _pour revenir au menu._";
@@ -244,7 +516,7 @@ class BotService
     private function demarrerCreer(string $numero): string
     {
         $appUrl = config('app.url', 'http://51.44.254.213');
-        $this->session->set($numero, 'creer.type');
+        $this->session->reset($numero);
 
         return <<<TXT
         ✨ *Créer une cagnotte*
@@ -258,21 +530,16 @@ class BotService
         TXT;
     }
 
-    private function handleCreerType(string $numero, string $texte): string
-    {
-        $this->session->reset($numero);
-        return $this->afficherMenu($numero);
-    }
-
     // ── 4 — Gérer ─────────────────────────────────────────────────────────────
 
     private function demarrerGerer(string $numero): string
     {
-        $appUrl = config('app.url', 'http://51.44.254.213');
-        $user   = $this->utilisateur($numero);
-        $this->session->set($numero, 'gerer.menu');
+        $appUrl    = config('app.url', 'http://51.44.254.213');
+        $user      = $this->utilisateur($numero);
+        $projectId = $this->tondoProjectId();
 
         if (! $user) {
+            $this->session->reset($numero);
             return <<<TXT
             🔒 *Gérer mes cagnottes*
 
@@ -291,20 +558,13 @@ class BotService
 
         if ($cagnottes->isEmpty()) {
             $this->session->reset($numero);
-            return <<<TXT
-            📭 Vous n'avez aucune cagnotte active.
-
-            Tapez *3* pour en créer une.
-
-            _Tapez_ *0* _pour revenir au menu._
-            TXT;
+            return "📭 Vous n'avez aucune cagnotte active.\n\nTapez *3* pour en créer une.\n\n_Tapez_ *0* _pour revenir au menu._";
         }
 
         $lignes = $cagnottes->map(fn ($c, $i) =>
             ($i + 1) . ". *{$c->titre}* · #{$c->reference}"
         )->implode("\n");
 
-        $appUrl = config('app.url', 'http://51.44.254.213');
         $this->session->reset($numero);
 
         return <<<TXT
@@ -319,31 +579,21 @@ class BotService
         TXT;
     }
 
-    private function handleGererMenu(string $numero, string $texte): string
-    {
-        $this->session->reset($numero);
-        return $this->afficherMenu($numero);
-    }
-
     // ── 5 — Aide ──────────────────────────────────────────────────────────────
 
     private function afficherAide(): string
     {
-        $this->session->reset(func_get_args()[0] ?? '');
         return <<<TXT
         ❓ *Aide & support Tondo*
 
-        *Comment cotiser ?*
-        Tapez *1* depuis le menu, entrez la référence de la cagnotte, puis suivez le lien de paiement.
+        *Cotiser* → Tapez *1*, entrez la référence et suivez les instructions.
+        *Rejoindre* → Tapez *2* et entrez la référence communiquée par l'organisateur.
+        *Créer* → Tapez *3* pour accéder à l'application.
+        *Gérer* → Tapez *4* pour voir vos cagnottes actives.
 
-        *Comment rejoindre une cagnotte ?*
-        Demandez la référence à l'organisateur, puis tapez *2* depuis le menu.
+        *Les frais* (2 % Tondo + frais opérateur) sont à la charge du cotisant.
 
-        *Frais*
-        Les frais (2 % Tondo + frais opérateur) sont à la charge du cotisant et s'appliquent au moment du paiement.
-
-        *Une question ?*
-        Contactez-nous à support@tondo.ga ou via l'app Tondo.
+        *Une question ?* support@tondo.ga
 
         _Tapez_ *0* _pour revenir au menu principal._
         TXT;
@@ -351,20 +601,69 @@ class BotService
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
 
-    private function optionInvalide(): string
-    {
-        return "⚠️ Option non reconnue.\nTapez un chiffre entre *1* et *5*.\n\n_Tapez_ *0* _pour revenir au menu._";
-    }
-
     private function estRetourMenu(string $texte): bool
     {
-        return in_array(trim($texte), ['0', 'menu', 'retour', 'annuler', 'cancel'], true);
+        return in_array(mb_strtolower(trim($texte)), ['0', 'menu', 'retour', 'annuler', 'cancel'], true);
     }
 
     private function utilisateur(string $numero): ?TondoUser
     {
-        // Normalise : garde les 9 derniers chiffres pour matcher les formats variés
-        $suffixe = substr(preg_replace('/\D/', '', $numero), -9);
-        return TondoUser::where('telephone', 'like', "%{$suffixe}")->first();
+        $suffixe   = substr(preg_replace('/\D/', '', $numero), -9);
+        $projectId = $this->tondoProjectId();
+
+        return TondoUser::where('project_id', $projectId)
+            ->where(fn ($q) => $q
+                ->where('telephone', 'like', "%{$suffixe}")
+                ->orWhere('numero', 'like', "%{$suffixe}")
+            )
+            ->first();
+    }
+
+    private function utilisateurParNumero(string $numeroE164, string $projectId): ?TondoUser
+    {
+        $suffixe = substr(preg_replace('/\D/', '', $numeroE164), -9);
+
+        return TondoUser::where('project_id', $projectId)
+            ->where(fn ($q) => $q
+                ->where('telephone', 'like', "%{$suffixe}")
+                ->orWhere('numero', 'like', "%{$suffixe}")
+            )
+            ->first();
+    }
+
+    private function normaliserNumero(string $texte): ?string
+    {
+        $chiffres = preg_replace('/\D/', '', $texte);
+
+        // +24177XXXXXXX → conserver tel quel
+        if (str_starts_with($texte, '+')) {
+            return '+' . $chiffres;
+        }
+
+        // 077XXXXXX (9 chiffres commençant par 0) → +24177XXXXXX
+        if (strlen($chiffres) === 9 && str_starts_with($chiffres, '0')) {
+            return '+241' . substr($chiffres, 1);
+        }
+
+        // 77XXXXXX (8 chiffres) → +24177XXXXXX
+        if (strlen($chiffres) === 8) {
+            return '+241' . $chiffres;
+        }
+
+        // Format complet sans + : 24177XXXXXX
+        if (strlen($chiffres) >= 11 && str_starts_with($chiffres, '241')) {
+            return '+' . $chiffres;
+        }
+
+        return null;
+    }
+
+    private function tondoProjectId(): string
+    {
+        static $id = null;
+        if ($id === null) {
+            $id = DB::table('projects')->where('slug', 'tondo')->value('id') ?? '';
+        }
+        return $id;
     }
 }
