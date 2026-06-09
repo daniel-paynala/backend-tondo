@@ -61,7 +61,7 @@ class BotService
             return $this->afficherMenu($numero);
         }
 
-        if ($etape === null) {
+        if ($etape === null || $texte === '') {
             return $this->premiereArrivee($numero);
         }
 
@@ -118,7 +118,7 @@ class BotService
             '3'     => $this->demarrerCreer($numero),
             '4'     => $this->demarrerGerer($numero),
             '5'     => $this->afficherAide(),
-            default => "⚠️ Option non reconnue.\nTapez un chiffre entre *1* et *5*.\n\n_Tapez_ *0* _pour revenir au menu._",
+            default => $this->afficherMenu($numero),
         };
     }
 
