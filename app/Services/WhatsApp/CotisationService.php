@@ -247,7 +247,7 @@ class CotisationService
                     'operateur_id'     => $paymentData['paymentId'] ?? null,
                     'numero_tel'       => $user->numero,
                     'montant'          => $montantBrut,
-                    'montant_penalite' => $penalite,
+
                     'statut'           => 'initie',
                     'request'          => json_encode([
                         'request_id'  => $transId,
@@ -344,7 +344,7 @@ class CotisationService
                     'operateur_id'  => 'MOCK-' . substr($transId, -8),
                     'numero_tel'    => $user->numero,
                     'montant'          => $montantBrut,
-                    'montant_penalite' => $penalite,
+
                     'statut'           => 'succes',
                     'request'          => json_encode(['note' => 'mock whatsapp', 'canal' => 'whatsapp']),
                     'response'         => json_encode(['ok' => true, 'mocked' => true]),
