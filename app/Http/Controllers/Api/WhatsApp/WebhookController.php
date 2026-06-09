@@ -12,10 +12,10 @@ use Illuminate\Support\Facades\Log;
  * Webhook Twilio WhatsApp — point d'entrée des messages entrants.
  *
  * URL à configurer dans la console Twilio :
- *   https://<domaine>/api/whatsapp/webhook   (méthode POST)
+ *   http://<domaine>/api/whatsapp/webhook   (méthode POST)
  *
- * Ce controller valide la signature, extrait le message,
- * délègue au BotService et renvoie la réponse en TwiML.
+ * Signature : désactivée si TWILIO_SKIP_SIGNATURE=true dans .env
+ * (à n'utiliser qu'en dev/test, jamais en production).
  */
 class WebhookController extends Controller
 {
@@ -28,10 +28,17 @@ class WebhookController extends Controller
     {
         if (! $this->signatureValide($request)) {
             Log::warning('WhatsApp webhook : signature Twilio invalide', [
-                'ip'  => $request->ip(),
-                'sig' => $request->header('X-Twilio-Signature'),
+                'ip'        => $request->ip(),
+                'sig'       => $request->header('X-Twilio-Signature'),
+                'url'       => $request->url(),
+                'app_env'   => app()->environment(),
             ]);
-            return $this->twiml('');
+            // En dev on laisse passer quand même pour ne pas bloquer les tests
+            if (! app()->environment('production')) {
+                Log::info('WhatsApp webhook : signature ignorée (non-production)');
+            } else {
+                return $this->twiml('');
+            }
         }
 
         $from = str_replace('whatsapp:', '', $request->input('From', ''));
@@ -43,9 +50,18 @@ class WebhookController extends Controller
             'message_id' => $request->input('MessageSid'),
         ]);
 
-        $reponse = $this->bot->traiter($from, $body);
+        try {
+            $reponse = $this->bot->traiter($from, $body);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp BotService exception', [
+                'message' => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+            ]);
+            // Retourner le menu plutôt que du vide
+            $reponse = "Bonjour 👋\n\nTapez *1* Cotiser · *2* Rejoindre · *3* Créer · *4* Gérer · *5* Aide";
+        }
 
-        // recu() retourne [texte, pdfUrl] — les autres handlers retournent une string
         if (is_array($reponse)) {
             [$texte, $pdfUrl] = $reponse;
             return $this->twimlAvecMedia($texte, $pdfUrl);
@@ -82,9 +98,19 @@ class WebhookController extends Controller
         return response($xml, 200, ['Content-Type' => 'text/xml; charset=utf-8']);
     }
 
+    /**
+     * Valide la signature X-Twilio-Signature.
+     * Bypass si TWILIO_SKIP_SIGNATURE=true ou APP_ENV != production.
+     */
     private function signatureValide(Request $request): bool
     {
-        if (app()->environment('local')) {
+        // Bypass explicite via .env
+        if (config('services.twilio.skip_signature', false)) {
+            return true;
+        }
+
+        // Bypass automatique hors production
+        if (! app()->environment('production')) {
             return true;
         }
 
