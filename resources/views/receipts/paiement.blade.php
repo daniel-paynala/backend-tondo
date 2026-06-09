@@ -14,10 +14,10 @@ html, body {
 /* ── Header pleine largeur ───────────────────────────── */
 .hdr {
   background: #0F4C5C;
-  padding: 24px 64px 20px;
+  padding: 12px 18px 10px;
 }
 .brand {
-  font-size: 24px;
+  font-size: 15px;
   font-weight: 700;
   color: #F4ECE0;
 }
@@ -25,85 +25,85 @@ html, body {
   display: inline-block;
   background: #C97B4A;
   color: #1A1F1E;
-  font-size: 15px;
+  font-size: 10px;
   font-weight: 700;
-  width: 26px;
-  height: 26px;
-  line-height: 26px;
+  width: 17px;
+  height: 17px;
+  line-height: 17px;
   text-align: center;
-  border-radius: 5px;
-  margin-right: 7px;
+  border-radius: 3px;
+  margin-right: 5px;
   vertical-align: middle;
 }
 .hdr-sub {
-  font-size: 8px;
+  font-size: 6px;
   color: rgba(244,236,224,0.5);
-  letter-spacing: 1.2px;
-  margin-top: 4px;
+  letter-spacing: 0.8px;
+  margin-top: 2px;
 }
 .hdr-status {
   display: inline-block;
   background: #6B8E4E;
   color: #fff;
-  font-size: 9px;
+  font-size: 7px;
   font-weight: 700;
-  padding: 3px 14px;
+  padding: 2px 8px;
   border-radius: 20px;
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
 /* ── Zone de contenu ─────────────────────────────────── */
 .wrap {
-  padding: 32px 64px 40px;
+  padding: 10px 18px 16px;
 }
 
 /* ── Bloc montant ────────────────────────────────────── */
 .amount {
   text-align: center;
-  padding: 22px 0 20px;
-  margin-bottom: 22px;
-  border-bottom: 2px dashed rgba(201,123,74,0.4);
+  padding: 10px 0 9px;
+  margin-bottom: 10px;
+  border-bottom: 1px dashed rgba(201,123,74,0.4);
 }
 .amount-lbl {
-  font-size: 8px;
+  font-size: 6px;
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   color: #0F4C5C;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .amount-num {
-  font-size: 56px;
+  font-size: 32px;
   font-weight: 700;
   color: #0F4C5C;
   line-height: 1;
 }
 .amount-cur {
-  font-size: 22px;
+  font-size: 13px;
   font-weight: 600;
   color: #C97B4A;
 }
 .amount-note {
-  font-size: 9px;
+  font-size: 7px;
   color: #bbb;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 /* ── Cards ───────────────────────────────────────────── */
 .card {
   background: #fff;
-  border-radius: 8px;
-  padding: 14px 20px;
-  margin-bottom: 12px;
+  border-radius: 5px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
   border: 1px solid rgba(15,76,92,0.07);
 }
 .card-title {
-  font-size: 8px;
+  font-size: 6px;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
+  letter-spacing: 1px;
   color: #0F4C5C;
   font-weight: 700;
-  padding-bottom: 8px;
-  margin-bottom: 4px;
+  padding-bottom: 4px;
+  margin-bottom: 2px;
   border-bottom: 1px solid #f0ede8;
 }
 
@@ -116,17 +116,16 @@ table.rows {
   border-collapse: collapse;
 }
 table.rows td {
-  padding: 6px 0;
-  font-size: 11px;
+  padding: 3px 0;
+  font-size: 8px;
   border-bottom: 1px solid #f8f6f3;
   vertical-align: top;
 }
 table.rows tr:last-child td { border-bottom: none; }
 table.rows td.k {
   color: #888;
-  width: 36%;
-  padding-right: 16px;
-  font-size: 10px;
+  width: 38%;
+  padding-right: 8px;
 }
 table.rows td.v {
   font-weight: 600;
@@ -141,21 +140,21 @@ table.rows td.v.primary { color: #0F4C5C; }
   display: inline-block;
   background: #0F4C5C;
   color: #F4ECE0;
-  font-size: 9px;
+  font-size: 7px;
   font-weight: 700;
-  padding: 3px 10px;
-  border-radius: 12px;
+  padding: 1px 6px;
+  border-radius: 10px;
 }
 
 /* ── Footer ──────────────────────────────────────────── */
 .footer {
   text-align: center;
-  margin-top: 20px;
-  padding-top: 14px;
+  margin-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid rgba(15,76,92,0.12);
 }
-.footer-brand { font-size: 10px; font-weight: 700; color: #0F4C5C; }
-.footer-text  { font-size: 8px; color: #bbb; margin-top: 3px; line-height: 1.7; }
+.footer-brand { font-size: 7px; font-weight: 700; color: #0F4C5C; }
+.footer-text  { font-size: 6px; color: #bbb; margin-top: 2px; line-height: 1.6; }
 </style>
 </head>
 <body>

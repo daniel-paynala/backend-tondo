@@ -51,7 +51,7 @@ class ReceiptService
         ];
 
         $pdf = Pdf::loadView('receipts.paiement', $data)
-            ->setPaper('A4', 'portrait')
+            ->setPaper('A6', 'portrait')
             ->setOptions([
                 'defaultFont'     => 'DejaVu Sans',
                 'isRemoteEnabled' => false,
