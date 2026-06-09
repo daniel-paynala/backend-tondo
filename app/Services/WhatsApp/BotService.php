@@ -455,6 +455,15 @@ class BotService
             $cagnotte = TondoCagnotte::where('reference', $data['reference'])->first();
             $user     = TondoUser::find($data['user_id']);
 
+            // Reçu PDF envoyé en message séparé dès qu'il est prêt.
+            \App\Jobs\WhatsApp\EnvoyerRecuJob::dispatch(
+                numeroWa:    $numero,
+                userId:      $data['user_id'] ?? null,
+                cagnotteRef: $data['reference'] ?? null,
+                transId:     $transId,
+                montant:     (int) ($data['montant'] ?? 0),
+            )->delay(now()->addSeconds(4));
+
             return $this->recu($user, $cagnotte, [
                 'trans_id'    => $transId,
                 'montant_net' => $data['montant'],
@@ -489,23 +498,10 @@ class BotService
      */
     public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): string
     {
-        $pdfUrl = null;
-        try {
-            $pdfUrl = $this->receiptSvc->generer($user, $cagnotte, $resultat, $canal);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('BotService: échec génération PDF reçu', [
-                'err' => $e->getMessage(),
-            ]);
-        }
-
         $montant = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
         $titre   = $cagnotte ? $cagnotte->titre : '—';
         $ref     = $cagnotte ? '#' . $cagnotte->reference : '';
         $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
-
-        $ligneRecu = $pdfUrl
-            ? "📄 *Télécharger votre reçu :* {$pdfUrl}\n\n"
-            : "";
 
         return <<<TXT
         ✅ *Paiement confirmé !*
@@ -513,7 +509,6 @@ class BotService
         Merci {$prenom} 🙏
         Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        {$ligneRecu}
         ————————————————
         🎉 *Que souhaitez-vous faire ?*
 

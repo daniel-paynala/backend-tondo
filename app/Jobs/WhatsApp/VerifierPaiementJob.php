@@ -97,31 +97,18 @@ class VerifierPaiementJob implements ShouldQueue
 
     private function envoyerSucces(TwilioSenderService $twilio, ReceiptService $receiptSvc): bool
     {
-        $user     = TondoUser::find($this->userId);
-        $cagnotte = TondoCagnotte::where('reference', $this->cagnotteRef)->first();
+        $cagnotte   = TondoCagnotte::where('reference', $this->cagnotteRef)->first();
         $montantFmt = number_format($this->montant, 0, ',', ' ');
-        $titre    = $cagnotte?->titre ?? '—';
-        $ref      = $cagnotte ? '#' . $cagnotte->reference : '';
+        $titre      = $cagnotte?->titre ?? '—';
+        $ref        = $cagnotte ? '#' . $cagnotte->reference : '';
 
-        try {
-            $pdfUrl = $receiptSvc->generer($user, $cagnotte, [
-                'trans_id'    => $this->transId,
-                'montant_net' => $this->montant,
-            ], 'WhatsApp');
-        } catch (\Throwable $e) {
-            Log::error('VerifierPaiementJob: échec génération PDF', ['err' => $e->getMessage()]);
-            $pdfUrl = null;
-        }
-
-        $ligneRecu = $pdfUrl ? "📄 *Télécharger votre reçu :* {$pdfUrl}\n\n" : "";
-
+        // 1. Confirmation immédiate — sans PDF pour ne pas bloquer.
         $texte = <<<TXT
         ✅ *Paiement confirmé !*
 
         Merci {$this->prenom} 🙏
         Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        {$ligneRecu}
         ————————————————
         🎉 *Que souhaitez-vous faire ?*
 
@@ -134,7 +121,21 @@ class VerifierPaiementJob implements ShouldQueue
         _Tapez le numéro de votre choix._
         TXT;
 
-        return $twilio->envoyer($this->numeroWa, $texte);
+        $sent = $twilio->envoyer($this->numeroWa, $texte);
+        if (! $sent) {
+            return false;
+        }
+
+        // 2. PDF en message séparé dès qu'il est généré.
+        EnvoyerRecuJob::dispatch(
+            numeroWa:    $this->numeroWa,
+            userId:      $this->userId,
+            cagnotteRef: $this->cagnotteRef,
+            transId:     $this->transId,
+            montant:     $this->montant,
+        )->delay(now()->addSeconds(4));
+
+        return true;
     }
 
     private function envoyerEchec(TwilioSenderService $twilio): bool
