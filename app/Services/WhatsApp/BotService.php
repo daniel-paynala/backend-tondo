@@ -129,7 +129,7 @@ class BotService
         Entrez la *référence* de la cagnotte
         (numéro à 6 chiffres fourni par l'organisateur).
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -139,11 +139,11 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         if ($cagnotte->statut === 'cloturee') {
-            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         // Stocker les infos cagnotte dans la session
@@ -174,9 +174,9 @@ class BotService
             Type : Tontine · Montant fixe : *{$fmt} FCFA*
 
             Entrez votre *numéro de téléphone* Mobile Money
-            (format : 077XXXXXX ou +241077XXXXXX).
+            (format : *0XXXXXXXX*).
 
-            _Tapez_ *0* _pour revenir au menu._
+            _Tapez_ *#* _pour revenir au menu._
             TXT;
         }
 
@@ -196,7 +196,7 @@ class BotService
         Quel *montant* souhaitez-vous cotiser ?
         _(minimum 100 FCFA — maximum 500 000 FCFA)_
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -207,11 +207,11 @@ class BotService
         $montant = (int) preg_replace('/\D/', '', $texte);
 
         if ($montant < 100) {
-            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         if ($montant > 500_000) {
-            return "⚠️ Montant maximum par transaction : *500 000 FCFA*.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "⚠️ Montant maximum par transaction : *500 000 FCFA*.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         $data = $this->session->data($numero);
@@ -221,9 +221,9 @@ class BotService
         💵 Montant : *{$montant} FCFA*
 
         Entrez votre *numéro de téléphone* Mobile Money
-        (format : 077XXXXXX ou +241077XXXXXX).
+        (format : *0XXXXXXXX*).
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -234,7 +234,7 @@ class BotService
         $numeroSaisi = $this->normaliserNumero($texte);
 
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide.\nFormat attendu : *077XXXXXX* ou *+241077XXXXXX*\n\n_Tapez_ *0* _pour annuler._";
+            return "⚠️ Numéro invalide.\nFormat attendu : *0XXXXXXXX*\n\n_Tapez_ *#* _pour annuler._";
         }
 
         $data     = $this->session->data($numero);
@@ -297,7 +297,7 @@ class BotService
         MBOULA
         Jean
 
-        _Tapez_ *0* _pour annuler._
+        _Tapez_ *#* _pour annuler._
         TXT;
     }
 
@@ -316,7 +316,7 @@ class BotService
             MBOULA
             Jean
 
-            _Tapez_ *0* _pour annuler._
+            _Tapez_ *#* _pour annuler._
             TXT;
         }
 
@@ -350,7 +350,7 @@ class BotService
                 'file'    => $e->getFile(),
             ]);
             $this->session->reset($numero);
-            return "❌ Une erreur technique est survenue. Veuillez réessayer.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ Une erreur technique est survenue. Veuillez réessayer.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
     }
 
@@ -360,7 +360,7 @@ class BotService
 
         if (! $cagnotte) {
             $this->session->reset($numero);
-            return "❌ Erreur : cagnotte introuvable.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ Erreur : cagnotte introuvable.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         // Utiliser le numéro saisi comme numéro de paiement
@@ -371,7 +371,7 @@ class BotService
 
         if ($resultat['statut'] === 'erreur') {
             $this->session->reset($numero);
-            return "❌ Erreur lors de l'initiation du paiement : {$resultat['message']}\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ Erreur lors de l'initiation du paiement : {$resultat['message']}\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         $prenom   = ucfirst(mb_strtolower($user->prenom));
@@ -403,7 +403,7 @@ class BotService
 
         Une fois validé, tapez *OK* pour vérifier le statut de votre paiement.
 
-        _Tapez_ *0* _pour annuler._
+        _Tapez_ *#* _pour annuler._
         TXT;
     }
 
@@ -425,7 +425,7 @@ class BotService
 
             Validez le paiement sur votre Mobile Money puis tapez *OK*.
 
-            _Tapez_ *0* _pour annuler._
+            _Tapez_ *#* _pour annuler._
             TXT;
         }
 
@@ -458,7 +458,7 @@ class BotService
 
         Attendez quelques secondes et tapez *OK* à nouveau.
 
-        _Tapez_ *0* _pour annuler._
+        _Tapez_ *#* _pour annuler._
         TXT;
     }
 
@@ -484,7 +484,7 @@ class BotService
 
         📄 Votre reçu PDF Tondo est joint à ce message.
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
 
         return [$texte, $pdfUrl];
@@ -501,7 +501,7 @@ class BotService
         Entrez la *référence* de la cagnotte
         (numéro à 4-6 chiffres fourni par l'organisateur).
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -512,7 +512,7 @@ class BotService
         $appUrl   = config('app.url', 'http://51.44.254.213');
 
         if (! $cagnotte) {
-            return "❌ Référence *#{$ref}* introuvable.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "❌ Référence *#{$ref}* introuvable.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         $this->session->reset($numero);
@@ -523,7 +523,7 @@ class BotService
         Rejoignez cette cagnotte en cliquant ici :
         👉 {$appUrl}/cagnottes/{$ref}
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -542,7 +542,7 @@ class BotService
 
         Connectez-vous avec votre numéro et suivez les étapes.
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -562,7 +562,7 @@ class BotService
             Connectez-vous d'abord depuis l'app Tondo :
             👉 {$appUrl}/connexion
 
-            _Tapez_ *0* _pour revenir au menu._
+            _Tapez_ *#* _pour revenir au menu._
             TXT;
         }
 
@@ -574,7 +574,7 @@ class BotService
 
         if ($cagnottes->isEmpty()) {
             $this->session->reset($numero);
-            return "📭 Vous n'avez aucune cagnotte active.\n\nTapez *3* pour en créer une.\n\n_Tapez_ *0* _pour revenir au menu._";
+            return "📭 Vous n'avez aucune cagnotte active.\n\nTapez *3* pour en créer une.\n\n_Tapez_ *#* _pour revenir au menu._";
         }
 
         $lignes = $cagnottes->map(fn ($c, $i) =>
@@ -591,7 +591,7 @@ class BotService
         Gérez-les depuis l'app :
         👉 {$appUrl}/dashboard
 
-        _Tapez_ *0* _pour revenir au menu._
+        _Tapez_ *#* _pour revenir au menu._
         TXT;
     }
 
@@ -611,7 +611,7 @@ class BotService
 
         *Une question ?* support@tondo.ga
 
-        _Tapez_ *0* _pour revenir au menu principal._
+        _Tapez_ *#* _pour revenir au menu principal._
         TXT;
     }
 
@@ -619,7 +619,7 @@ class BotService
 
     private function estRetourMenu(string $texte): bool
     {
-        return in_array(mb_strtolower(trim($texte)), ['0', 'menu', 'retour', 'annuler', 'cancel'], true);
+        return in_array(mb_strtolower(trim($texte)), ['#', 'menu', 'retour', 'annuler', 'cancel', 'stop'], true);
     }
 
     private function utilisateur(string $numero): ?TondoUser
@@ -666,8 +666,8 @@ class BotService
             return '+' . substr($chiffres, 2);
         }
 
-        // Gabon 077XXXXXX ou 066XXXXXX (9 chiffres, commence par 0)
-        if (strlen($chiffres) === 9 && str_starts_with($chiffres, '0')) {
+        // Gabon local commençant par 0 : 0XXXXXXXX (9 à 11 chiffres)
+        if (str_starts_with($chiffres, '0') && strlen($chiffres) >= 9 && strlen($chiffres) <= 11) {
             return '+241' . substr($chiffres, 1);
         }
 
