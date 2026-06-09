@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\CleanReceiptsCommand;
 use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
 use App\Console\Commands\TraiterReversementsAutoCagnottes;
@@ -49,3 +50,11 @@ Schedule::command(TontineRappelsCommand::class)
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();
+
+/*
+ * Nettoyage des PDFs de receipts/ vieux de plus de 24h — 02h chaque nuit.
+ */
+Schedule::command(CleanReceiptsCommand::class)
+    ->dailyAt('02:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping();

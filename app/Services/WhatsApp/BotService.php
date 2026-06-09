@@ -44,6 +44,7 @@ class BotService
         private CotisationService    $cotisationSvc,
         private ReceiptService       $receiptSvc,
         private CreerCagnotteService $creerCagnotteSvc,
+        private GererCagnotteService $gererCagnotteSvc,
     ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────
@@ -81,6 +82,7 @@ class BotService
             $etape === 'rejoindre.numero'       => $this->handleRejoindreNumero($numero, $texte),
             $etape === 'rejoindre.nom_prenom'   => $this->handleRejoindreNomPrenom($numero, $texte),
             str_starts_with($etape, 'creer.')  => $this->routerCreer($numero, $etape, $texte),
+            str_starts_with($etape, 'gerer.')  => $this->routerGerer($numero, $etape, $texte),
             default                             => $this->afficherMenu($numero),
         };
     }
@@ -1330,49 +1332,780 @@ class BotService
 
     private function demarrerGerer(string $numero): string
     {
-        $appUrl    = config('app.url', 'http://51.44.254.213');
-        $user      = $this->utilisateur($numero);
-        $projectId = $this->tondoProjectId();
+        $this->session->set($numero, 'gerer.numero', [
+            'project_id' => $this->tondoProjectId(),
+        ]);
 
-        if (! $user) {
-            $this->session->reset($numero);
+        return <<<TXT
+        📋 *Gérer mes cagnottes*
+
+        Votre *numéro Mobile Money* ?
+        _(format : *0XXXXXXXX*)_
+
+        _Tapez_ *#️⃣* _pour revenir au menu._
+        TXT;
+    }
+
+    private function routerGerer(string $numero, string $etape, string $texte): string
+    {
+        return match ($etape) {
+            'gerer.numero'           => $this->handleGererNumero($numero, $texte),
+            'gerer.nom_prenom'       => $this->handleGererNomPrenom($numero, $texte),
+            'gerer.date_naissance'   => $this->handleGererDateNaissance($numero, $texte),
+            'gerer.liste'            => $this->handleGererListe($numero, $texte),
+            'gerer.cagnotte'         => $this->handleGererCagnotte($numero, $texte),
+            'gerer.historique'       => $this->handleGererHistorique($numero, $texte),
+            'gerer.revers.dest'      => $this->handleGererReversementDest($numero, $texte),
+            'gerer.revers.num'       => $this->handleGererReversementNum($numero, $texte),
+            'gerer.revers.mont'      => $this->handleGererReversementMontant($numero, $texte),
+            'gerer.revers.otp'       => $this->handleGererReversementOtp($numero, $texte),
+            'gerer.tontine'          => $this->handleGererTontine($numero, $texte),
+            'gerer.tontine.ordre'    => $this->handleGererTontineOrdre($numero, $texte),
+            'gerer.tontine.hist'     => $this->handleGererTontineHistorique($numero, $texte),
+            default                  => $this->afficherMenu($numero),
+        };
+    }
+
+    private function handleGererNumero(string $numero, string $texte): string
+    {
+        $numeroSaisi = $this->normaliserNumero($texte);
+        if (! $numeroSaisi) {
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data      = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+        $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
+
+        if ($user) {
+            return $this->afficherListeCagnottes($numero, $user, array_merge($data, [
+                'user_id'       => $user->id,
+                'numero_payeur' => $numeroSaisi,
+            ]));
+        }
+
+        $this->session->set($numero, 'gerer.nom_prenom', array_merge($data, [
+            'numero_payeur' => $numeroSaisi,
+        ]));
+
+        return <<<TXT
+        👤 *Nouveau sur Tondo*
+
+        Vous n'avez pas encore de compte. On va en créer un rapidement.
+
+        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+        _Exemple :_
+        MBOULA
+        Jean
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleGererNomPrenom(string $numero, string $texte): string
+    {
+        $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
+
+        if (count($lignes) < 2) {
+            return "⚠️ Format incorrect. Entrez *nom* puis *prénom*, chacun sur une ligne.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'gerer.date_naissance', array_merge($data, [
+            'nom'    => mb_strtoupper(trim($lignes[0])),
+            'prenom' => ucfirst(mb_strtolower(trim($lignes[1]))),
+        ]));
+
+        return "📅 Date de *naissance* ?\n_(format : *JJ/MM/AAAA*)_\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    private function handleGererDateNaissance(string $numero, string $texte): string
+    {
+        $dt = $this->parseDate(trim($texte));
+        if (! $dt) {
+            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+        if (! $this->estMajeur($dt)) {
+            return $this->erreurEtMenu($numero, "❌ Vous devez avoir *18 ans ou plus*.");
+        }
+
+        $data      = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+
+        $user = $this->cotisationSvc->creerCompteFull(
+            nom:           $data['nom'],
+            prenom:        $data['prenom'],
+            numeroE164:    $data['numero_payeur'],
+            projectId:     $projectId,
+            dateNaissance: $dt->format('Y-m-d'),
+        );
+
+        return $this->afficherListeCagnottes($numero, $user, array_merge($data, [
+            'user_id' => $user->id,
+        ]));
+    }
+
+    private function afficherListeCagnottes(string $numero, TondoUser $user, array $data): string
+    {
+        $cagnottes = $this->gererCagnotteSvc->cagnottesGerees($user);
+
+        if ($cagnottes->isEmpty()) {
+            return $this->erreurEtMenu($numero,
+                "📭 Vous n'avez aucune cagnotte active.\nTapez *3* pour en créer une."
+            );
+        }
+
+        $liste    = $cagnottes->values();
+        $index    = $liste->map(fn ($c, $i) => ($i + 1) . ". *{$c->titre}* · #{$c->reference} · "
+            . ($c->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation')
+        )->implode("\n");
+
+        $refs = $liste->pluck('reference')->toArray();
+
+        $this->session->set($numero, 'gerer.liste', array_merge($data, ['refs' => $refs]));
+
+        return <<<TXT
+        📋 *Vos cagnottes actives*
+
+        {$index}
+
+        Quelle cagnotte souhaitez-vous gérer ?
+        _(tapez le numéro correspondant)_
+
+        _Tapez_ *#️⃣* _pour revenir au menu._
+        TXT;
+    }
+
+    private function handleGererListe(string $numero, string $texte): string
+    {
+        $data  = $this->session->data($numero);
+        $refs  = $data['refs'] ?? [];
+        $choix = (int) trim($texte);
+
+        if ($choix < 1 || $choix > count($refs)) {
+            return "⚠️ Tapez un chiffre entre *1* et *" . count($refs) . "*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $ref      = $refs[$choix - 1];
+        $cagnotte = TondoCagnotte::where('reference', $ref)->first();
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Cagnotte introuvable. Recommencez.");
+        }
+
+        $newData = array_merge($data, [
+            'cagnotte_id'  => $cagnotte->id,
+            'cagnotte_ref' => $ref,
+        ]);
+
+        if ($cagnotte->type === 'tontine_periodique') {
+            return $this->afficherMenuTontine($numero, $cagnotte, $newData);
+        }
+
+        $collecte = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+
+        $this->session->set($numero, 'gerer.cagnotte', $newData);
+
+        return <<<TXT
+        💼 *{$cagnotte->titre}* · #{$ref}
+        Solde disponible : *{$collecte} FCFA*
+
+        Que souhaitez-vous faire ?
+
+        1️⃣  *Historique* des transactions
+        2️⃣  *Initier* un reversement
+
+        _Tapez_ *#️⃣* _pour revenir au menu._
+        TXT;
+    }
+
+    private function handleGererCagnotte(string $numero, string $texte): string
+    {
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        if ($texte === '1') {
+            $paiements = $this->gererCagnotteSvc->historiquePaiements($cagnotte);
+
+            if ($paiements->isEmpty()) {
+                return <<<TXT
+                📊 *Historique — {$cagnotte->titre}*
+
+                Aucune transaction confirmée pour le moment.
+
+                _Tapez_ *#️⃣* _pour revenir au menu._
+                TXT;
+            }
+
+            $total  = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
+            $lignes = $paiements->map(fn ($p) =>
+                \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
+                ' · ' . $p->cotisant .
+                ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*'
+            )->implode("\n");
+
+            $nb = $paiements->count();
+
+            $this->session->set($numero, 'gerer.historique', $data);
+
             return <<<TXT
-            🔒 *Gérer mes cagnottes*
+            📊 *Historique — {$cagnotte->titre}*
+            Total collecté : *{$total} FCFA* · {$nb} transaction(s)
 
-            Connectez-vous d'abord depuis l'app Tondo :
-            👉 {$appUrl}/connexion
+            {$lignes}
+
+            ————————————————
+            Exporter en *PDF* ?
+
+            1️⃣  Oui — recevoir le lien
+            0️⃣  Non — retour menu
+            TXT;
+        }
+
+        if ($texte === '2') {
+            $collecte = (int) $cagnotte->montant_collecte;
+
+            if ($collecte <= 0) {
+                return $this->erreurEtMenu($numero, "❌ Solde nul — aucun reversement possible.");
+            }
+
+            $collecteFmt = number_format($collecte, 0, ',', ' ');
+            $this->session->set($numero, 'gerer.revers.dest', $data);
+
+            return <<<TXT
+            💸 *Initier un reversement*
+            Solde disponible : *{$collecteFmt} FCFA*
+
+            Vers quel numéro ?
+
+            1️⃣  *Mon numéro* Mobile Money
+            2️⃣  *Autre numéro*
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        return "⚠️ Tapez *1* pour Historique ou *2* pour Reversement.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    // ── 4 — Gérer > Tontine ───────────────────────────────────────────────────
+
+    private function afficherMenuTontine(string $numero, TondoCagnotte $cagnotte, array $data): string
+    {
+        $inscrits = (int) $cagnotte->nombre_inscrits;
+        $max      = (int) $cagnotte->nombre_participants;
+        $lancee   = ! is_null($cagnotte->date_debut) || (int) $cagnotte->montant_collecte > 0;
+
+        $etat = $lancee ? 'demarree' : ($inscrits >= $max ? 'pleine' : 'attente');
+
+        $this->session->set($numero, 'gerer.tontine', array_merge($data, [
+            'tontine_etat' => $etat,
+        ]));
+
+        $titre = $cagnotte->titre;
+        $ref   = $cagnotte->reference;
+
+        if ($lancee) {
+            return <<<TXT
+            🔄 *{$titre}* · #{$ref}
+            Participants : {$inscrits}/{$max} · Tontine en cours
+
+            Que souhaitez-vous faire ?
+
+            1️⃣  Historique des transactions
+            2️⃣  Retour au menu précédant
+            3️⃣  Menu principal
+
+            _Tapez le numéro de votre choix._
+            TXT;
+        }
+
+        if ($inscrits >= $max) {
+            return <<<TXT
+            ⏳ *{$titre}* · #{$ref}
+            Participants : {$inscrits}/{$max} ✅ Complet — Prête à démarrer !
+
+            Que souhaitez-vous faire ?
+
+            1️⃣  Démarrer la tontine
+            2️⃣  Éditer l'ordre des participants
+            3️⃣  Supprimer la tontine
+            4️⃣  Retour au menu précédant
+            5️⃣  Menu principal
+
+            _Tapez le numéro de votre choix._
+            TXT;
+        }
+
+        $manquants = $max - $inscrits;
+        return <<<TXT
+        ⏳ *{$titre}* · #{$ref}
+        Participants : {$inscrits}/{$max} _(il manque {$manquants})_
+
+        Que souhaitez-vous faire ?
+
+        1️⃣  Supprimer la tontine
+        2️⃣  Retour au menu précédant
+        3️⃣  Menu principal
+
+        _Tapez le numéro de votre choix._
+        TXT;
+    }
+
+    private function handleGererTontine(string $numero, string $texte): string
+    {
+        $data     = $this->session->data($numero);
+        $etat     = $data['tontine_etat'] ?? 'attente';
+        $choix    = trim($texte);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        if ($etat === 'demarree') {
+            return match ($choix) {
+                '1' => $this->demarrerHistoriqueTontine($numero, $cagnotte, $data),
+                '2' => $this->retourListeCagnottes($numero, $data),
+                '3' => $this->afficherMenu($numero),
+                default => "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._",
+            };
+        }
+
+        if ($etat === 'pleine') {
+            return match ($choix) {
+                '1' => $this->executerDemarrerTontine($numero, $cagnotte),
+                '2' => $this->demarrerEditionOrdre($numero, $cagnotte, $data),
+                '3' => $this->executerSupprimerTontine($numero, $cagnotte),
+                '4' => $this->retourListeCagnottes($numero, $data),
+                '5' => $this->afficherMenu($numero),
+                default => "⚠️ Tapez un chiffre de *1* à *5*.\n\n_Tapez_ *#️⃣* _pour annuler._",
+            };
+        }
+
+        // etat 'attente' (pas pleine)
+        return match ($choix) {
+            '1' => $this->executerSupprimerTontine($numero, $cagnotte),
+            '2' => $this->retourListeCagnottes($numero, $data),
+            '3' => $this->afficherMenu($numero),
+            default => "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._",
+        };
+    }
+
+    private function executerDemarrerTontine(string $numero, TondoCagnotte $cagnotte): string
+    {
+        DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+            'date_debut' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return <<<TXT
+        🎉 *Tontine lancée !*
+
+        La tontine *{$cagnotte->titre}* est maintenant active.
+
+        TXT . "\n" . $this->afficherMenu($numero);
+    }
+
+    private function executerSupprimerTontine(string $numero, TondoCagnotte $cagnotte): string
+    {
+        DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+            'statut'     => 'annulee',
+            'updated_at' => now(),
+        ]);
+
+        return <<<TXT
+        ✅ *Tontine supprimée.*
+
+        La tontine *{$cagnotte->titre}* a bien été supprimée.
+
+        TXT . "\n" . $this->afficherMenu($numero);
+    }
+
+    private function demarrerEditionOrdre(string $numero, TondoCagnotte $cagnotte, array $data): string
+    {
+        $participants = DB::table('tondo_participants')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->orderByRaw('COALESCE(ordre, 9999)')
+            ->orderBy('created_at')
+            ->select(['id', 'nom', 'prenom'])
+            ->get();
+
+        $ids   = $participants->pluck('id')->toArray();
+        $liste = $participants->values()->map(fn ($p, $i) =>
+            ($i + 1) . '. ' . mb_strtoupper($p->nom) . ' ' . ucfirst(mb_strtolower($p->prenom))
+        )->implode("\n");
+
+        $n = count($ids);
+
+        $this->session->set($numero, 'gerer.tontine.ordre', array_merge($data, [
+            'participant_ids' => $ids,
+        ]));
+
+        return <<<TXT
+        📋 *Ordre actuel des participants*
+
+        {$liste}
+
+        Envoyez les paires *position actuelle - nouvelle position* (une par ligne) :
+        _Exemple :_
+        5-1
+        2-3
+        4-2
+        1-4
+        3-5
+
+        _(Toutes les {$n} positions doivent être couvertes.)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleGererTontineOrdre(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+        $ids  = $data['participant_ids'] ?? [];
+        $n    = count($ids);
+
+        $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
+        $pairs  = [];
+
+        foreach ($lignes as $ligne) {
+            if (! preg_match('/^(\d+)-(\d+)$/', $ligne, $m)) {
+                return "⚠️ Format invalide : *{$ligne}*\nUtilisez *X-Y* (ex: `3-1`).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            }
+            $ancien  = (int) $m[1];
+            $nouveau = (int) $m[2];
+            if ($ancien < 1 || $ancien > $n || $nouveau < 1 || $nouveau > $n) {
+                return "⚠️ Position hors plage dans *{$ligne}* (1 à {$n}).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            }
+            $pairs[$ancien] = $nouveau;
+        }
+
+        if (count($pairs) !== $n) {
+            return "⚠️ Envoyez exactement *{$n}* paires (une par participant).\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        // Vérifier que chaque position source et destination est unique
+        $sources = array_keys($pairs);
+        $dests   = array_values($pairs);
+        if (count(array_unique($sources)) !== $n || count(array_unique($dests)) !== $n) {
+            return "⚠️ Chaque position doit apparaître exactement *une fois* en source et en destination.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        foreach ($pairs as $ancien => $nouveau) {
+            $id = $ids[$ancien - 1] ?? null;
+            if ($id) {
+                DB::table('tondo_participants')
+                    ->where('id', $id)
+                    ->update(['ordre' => $nouveau, 'updated_at' => now()]);
+            }
+        }
+
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        return "✅ *Ordre mis à jour !*\n\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
+    }
+
+    private function demarrerHistoriqueTontine(string $numero, TondoCagnotte $cagnotte, array $data): string
+    {
+        $paiements = $this->gererCagnotteSvc->historiquePaiements($cagnotte);
+
+        if ($paiements->isEmpty()) {
+            $this->session->set($numero, 'gerer.tontine', $data);
+            return <<<TXT
+            📊 *Historique — {$cagnotte->titre}*
+
+            Aucune transaction confirmée pour le moment.
+
+            1️⃣  Retour au menu précédant
+            2️⃣  Menu principal
+
+            _Tapez le numéro de votre choix._
+            TXT;
+        }
+
+        $total  = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
+        $lignes = $paiements->map(fn ($p) =>
+            \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
+            ' · ' . $p->cotisant .
+            ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*'
+        )->implode("\n");
+
+        $nb = $paiements->count();
+
+        $this->session->set($numero, 'gerer.tontine.hist', $data);
+
+        return <<<TXT
+        📊 *Historique — {$cagnotte->titre}*
+        Total : *{$total} FCFA* · {$nb} transaction(s)
+
+        {$lignes}
+
+        ————————————————
+        1️⃣  Exporter en PDF _(lien valable 24h)_
+        2️⃣  Retour au menu précédant
+        3️⃣  Menu principal
+        TXT;
+    }
+
+    private function handleGererTontineHistorique(string $numero, string $texte): string
+    {
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        if ($texte === '1') {
+            try {
+                $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
+                return <<<TXT
+                📄 *Historique PDF*
+
+                {$pdfUrl}
+
+                _(Ce lien expire dans 24h.)_
+
+                TXT . "\n" . $this->afficherMenu($numero);
+            } catch (\Throwable $e) {
+                Log::error('handleGererTontineHistorique: échec PDF', ['err' => $e->getMessage()]);
+                return $this->erreurEtMenu($numero, "❌ Impossible de générer le PDF. Réessayez plus tard.");
+            }
+        }
+
+        if ($texte === '2') {
+            return $this->retourListeCagnottes($numero, $data);
+        }
+
+        if ($texte === '3') {
+            return $this->afficherMenu($numero);
+        }
+
+        return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    private function retourListeCagnottes(string $numero, array $data): string
+    {
+        $user = TondoUser::find($data['user_id'] ?? null);
+        if (! $user) {
+            return $this->afficherMenu($numero);
+        }
+        return $this->afficherListeCagnottes($numero, $user, $data);
+    }
+
+    private function handleGererHistorique(string $numero, string $texte): string
+    {
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if ($texte === '0') {
+            // Retour au menu cagnotte
+            $this->session->set($numero, 'gerer.cagnotte', $data);
+            $collecte = number_format((int) ($cagnotte?->montant_collecte ?? 0), 0, ',', ' ');
+            $titre    = $cagnotte?->titre ?? '—';
+            $ref      = $data['cagnotte_ref'] ?? '—';
+
+            return <<<TXT
+            💼 *{$titre}* · #{$ref}
+            Solde disponible : *{$collecte} FCFA*
+
+            1️⃣  *Historique* des transactions
+            2️⃣  *Initier* un reversement
 
             _Tapez_ *#️⃣* _pour revenir au menu._
             TXT;
         }
 
-        $cagnottes = TondoCagnotte::where('user_id', $user->id)
-            ->where('statut', '!=', 'cloturee')
-            ->orderBy('date_creation', 'desc')
-            ->limit(5)
-            ->get();
+        if ($texte === '1') {
+            if (! $cagnotte) {
+                return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+            }
 
-        if ($cagnottes->isEmpty()) {
-            $this->session->reset($numero);
-            return "📭 Vous n'avez aucune cagnotte active.\n\nTapez *3* pour en créer une.\n\n_Tapez_ *#️⃣* _pour revenir au menu._";
+            try {
+                $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
+                $this->session->reset($numero);
+                return <<<TXT
+                📄 *Historique PDF*
+
+                {$pdfUrl}
+
+                _(Ce lien expire dans 24h.)_
+
+                TXT . "\n" . $this->afficherMenu($numero);
+            } catch (\Throwable $e) {
+                Log::error('handleGererHistorique: échec PDF', ['err' => $e->getMessage()]);
+                return $this->erreurEtMenu($numero, "❌ Impossible de générer le PDF. Réessayez plus tard.");
+            }
         }
 
-        $lignes = $cagnottes->map(fn ($c, $i) =>
-            ($i + 1) . ". *{$c->titre}* · #{$c->reference}"
-        )->implode("\n");
+        return "⚠️ Tapez *1* pour le PDF ou *0* pour revenir.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
 
-        $this->session->reset($numero);
+    private function handleGererReversementDest(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+
+        if ($texte === '1') {
+            $this->session->set($numero, 'gerer.revers.mont', array_merge($data, [
+                'revers_numero' => $data['numero_payeur'],
+            ]));
+            $masque = $this->maskPhoneNum($data['numero_payeur'] ?? '');
+            return $this->demanderMontantReversement($masque);
+        }
+
+        if ($texte === '2') {
+            $this->session->set($numero, 'gerer.revers.num', $data);
+            return "Entrez le *numéro* Mobile Money du bénéficiaire :\n_(format : *0XXXXXXXX*)_\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        return "⚠️ Tapez *1* pour Mon numéro ou *2* pour Autre numéro.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    private function handleGererReversementNum(string $numero, string $texte): string
+    {
+        $numeroSaisi = $this->normaliserNumero($texte);
+        if (! $numeroSaisi) {
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'gerer.revers.mont', array_merge($data, [
+            'revers_numero' => $numeroSaisi,
+        ]));
+
+        $masque = $this->maskPhoneNum($numeroSaisi);
+        return $this->demanderMontantReversement($masque);
+    }
+
+    private function demanderMontantReversement(string $masque): string
+    {
+        return <<<TXT
+        Bénéficiaire : *{$masque}*
+
+        Quel *montant* souhaitez-vous reverser ? (en FCFA)
+        _(min 100 — ne peut pas dépasser le solde disponible)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleGererReversementMontant(string $numero, string $texte): string
+    {
+        $montant = (int) preg_replace('/\D/', '', $texte);
+        if ($montant < 100) {
+            return "⚠️ Montant minimum : *100 FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        if ((int) $cagnotte->montant_collecte < $montant) {
+            $dispo = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+            return "⚠️ Solde insuffisant. Disponible : *{$dispo} FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        // Générer OTP (simulé en dev = 123456)
+        $otp = app()->isProduction()
+            ? (string) random_int(100000, 999999)
+            : '123456';
+
+        $this->session->set($numero, 'gerer.revers.otp', array_merge($data, [
+            'revers_montant' => $montant,
+            'otp'            => $otp,
+            'otp_expires_at' => now()->addMinutes(5)->timestamp,
+            'otp_attempts'   => 0,
+        ]));
+
+        $masque      = $this->maskPhoneNum($data['revers_numero'] ?? '');
+        $montantFmt  = number_format($montant, 0, ',', ' ');
+        $gerantNum   = $this->maskPhoneNum($data['numero_payeur'] ?? '');
+
+        // En prod, on enverrait le SMS ; ici le bot lui-même affiche le code (sandbox)
+        return <<<TXT
+        🔐 *Confirmation requise*
+
+        Reversement de *{$montantFmt} FCFA* vers *{$masque}*
+
+        Un code de confirmation a été envoyé au *{$gerantNum}*.
+        Entrez le code à 6 chiffres pour valider :
+
+        _(Code valable 5 minutes — 3 essais max)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleGererReversementOtp(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+
+        $otp        = $data['otp'] ?? '';
+        $expiresAt  = (int) ($data['otp_expires_at'] ?? 0);
+        $attempts   = (int) ($data['otp_attempts'] ?? 0);
+
+        if (now()->timestamp > $expiresAt) {
+            return $this->erreurEtMenu($numero, "⏰ Code expiré. Recommencez le reversement.");
+        }
+
+        $attempts++;
+
+        if (trim($texte) !== $otp) {
+            if ($attempts >= 3) {
+                return $this->erreurEtMenu($numero, "❌ Code incorrect 3 fois. Reversement annulé pour sécurité.");
+            }
+
+            $this->session->set($numero, 'gerer.revers.otp', array_merge($data, ['otp_attempts' => $attempts]));
+            $restants = 3 - $attempts;
+            return "❌ Code incorrect. *{$restants} essai(s) restant(s).*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        // OTP valide → exécuter le reversement
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+        $gerant   = TondoUser::find($data['user_id'] ?? null);
+
+        if (! $cagnotte || ! $gerant) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $numeroRetrait = $data['revers_numero'] ?? '';
+        $montant       = (int) ($data['revers_montant'] ?? 0);
+        $masque        = $this->maskPhoneNum($numeroRetrait);
+
+        try {
+            $result = $this->gererCagnotteSvc->initierReversement(
+                cagnotte:   $cagnotte,
+                gerant:     $gerant,
+                numeroE164: $numeroRetrait,
+                montant:    $montant,
+            );
+        } catch (\RuntimeException $e) {
+            return $this->erreurEtMenu($numero, "❌ " . $e->getMessage());
+        } catch (\Throwable $e) {
+            Log::error('handleGererReversementOtp: erreur inattendue', ['err' => $e->getMessage()]);
+            return $this->erreurEtMenu($numero, "❌ Erreur technique. Contactez support@tondo.ga.");
+        }
+
+        $montantFmt = number_format($result['montant'], 0, ',', ' ');
 
         return <<<TXT
-        📋 *Vos cagnottes actives*
+        ✅ *Reversement effectué !*
 
-        {$lignes}
+        Montant : *{$montantFmt} FCFA*
+        Bénéficiaire : *{$masque}*
+        Référence : `{$result['trans_id']}`
 
-        Gérez-les depuis l'app :
-        👉 {$appUrl}/dashboard
-
-        _Tapez_ *#️⃣* _pour revenir au menu._
-        TXT;
+        TXT . "\n" . $this->afficherMenu($numero);
     }
 
     // ── 5 — Aide ──────────────────────────────────────────────────────────────
