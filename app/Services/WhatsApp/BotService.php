@@ -176,7 +176,8 @@ class BotService
 
         // Tontine : bloquer si pas encore complète
         if ($cagnotte->type === 'tontine_periodique') {
-            $manquants = ($cagnotte->nombre_participants ?? 0) - ($cagnotte->nombre_inscrits ?? 0);
+            // +1 car le créateur est dans tondo_participants mais pas dans nombre_inscrits
+            $manquants = ($cagnotte->nombre_participants ?? 0) - (($cagnotte->nombre_inscrits ?? 0) + 1);
             if ($manquants > 0) {
                 return $this->erreurEtMenu($numero, <<<TXT
                 ⏳ *La tontine n'a pas encore démarré.*
@@ -608,9 +609,9 @@ class BotService
             }
         }
 
-        // Tontine : vérifier places libres
+        // Tontine : vérifier places libres (+1 créateur non compté dans nombre_inscrits)
         if ($cagnotte->type === 'tontine_periodique') {
-            if (($cagnotte->nombre_inscrits ?? 0) >= ($cagnotte->nombre_participants ?? 0)) {
+            if (($cagnotte->nombre_inscrits ?? 0) + 1 >= ($cagnotte->nombre_participants ?? 0)) {
                 return $this->erreurEtMenu($numero, "❌ *{$cagnotte->titre}* est complet.\nPlus aucune place disponible.");
             }
         }
@@ -1656,7 +1657,8 @@ class BotService
 
     private function afficherMenuTontine(string $numero, TondoCagnotte $cagnotte, array $data): string
     {
-        $inscrits = (int) $cagnotte->nombre_inscrits;
+        // +1 car le créateur est dans tondo_participants mais pas compté dans nombre_inscrits
+        $inscrits = (int) $cagnotte->nombre_inscrits + 1;
         $max      = (int) $cagnotte->nombre_participants;
         $lancee   = ! is_null($cagnotte->date_debut) || (int) $cagnotte->montant_collecte > 0;
 
