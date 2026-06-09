@@ -60,10 +60,8 @@ class VerifierPaiementJob implements ShouldQueue
         if ($statut === 'succes') {
             $sent = $this->envoyerSucces($twilio, $receiptSvc);
             if ($sent) {
-                $sessionSvc->reset($this->numeroWa);
+                $sessionSvc->set($this->numeroWa, 'menu');
             }
-            // Si la notification échoue, on laisse la session active :
-            // l'utilisateur peut toujours taper "Ok" pour confirmer via TwiML.
             return;
         }
 
@@ -123,7 +121,17 @@ class VerifierPaiementJob implements ShouldQueue
         Merci {$this->prenom} 🙏
         Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        {$ligneRecu}_Tapez_ *#* _pour revenir au menu._
+        {$ligneRecu}
+        ————————————————
+        🎉 *Que souhaitez-vous faire ?*
+
+        1️⃣  *Cotiser*
+        2️⃣  *Rejoindre* une cagnotte
+        3️⃣  *Créer* une cagnotte
+        4️⃣  *Gérer* mes cagnottes
+        5️⃣  *Aide* & support
+
+        _Tapez le numéro de votre choix._
         TXT;
 
         return $twilio->envoyer($this->numeroWa, $texte);

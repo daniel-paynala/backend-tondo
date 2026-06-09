@@ -386,8 +386,8 @@ class BotService
 
         // Paiement immédiat (mock)
         if ($resultat['statut'] === 'succes') {
-            $this->session->reset($numero);
-            return $this->recu($user, $cagnotte, $resultat);  // retourne [texte, pdfUrl]
+            $this->session->set($numero, 'menu');
+            return $this->recu($user, $cagnotte, $resultat);
         }
 
         // Paiement Airtel → en attente de confirmation
@@ -451,11 +451,11 @@ class BotService
         $statut = $this->cotisationSvc->verifierStatut($transId, $data['project_id']);
 
         if ($statut === 'succes') {
-            $this->session->reset($numero);
+            $this->session->set($numero, 'menu');
             $cagnotte = TondoCagnotte::where('reference', $data['reference'])->first();
             $user     = TondoUser::find($data['user_id']);
 
-            return $this->recu($user, $cagnotte, [   // retourne [texte, pdfUrl]
+            return $this->recu($user, $cagnotte, [
                 'trans_id'    => $transId,
                 'montant_net' => $data['montant'],
             ]);
@@ -513,7 +513,17 @@ class BotService
         Merci {$prenom} 🙏
         Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        {$ligneRecu}_Tapez_ *#* _pour revenir au menu._
+        {$ligneRecu}
+        ————————————————
+        🎉 *Que souhaitez-vous faire ?*
+
+        1️⃣  *Cotiser*
+        2️⃣  *Rejoindre* une cagnotte
+        3️⃣  *Créer* une cagnotte
+        4️⃣  *Gérer* mes cagnottes
+        5️⃣  *Aide* & support
+
+        _Tapez le numéro de votre choix._
         TXT;
     }
 

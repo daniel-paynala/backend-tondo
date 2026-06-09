@@ -65,12 +65,24 @@ class ReceiptService
             mkdir($dir, 0755, true);
         }
 
+        $this->nettoyerAnciensRecus($dir);
+
         file_put_contents($dir . '/' . $filename, $pdf->output());
 
         return url('receipts/' . $filename);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private function nettoyerAnciensRecus(string $dir): void
+    {
+        $limite = time() - 86400; // 24h
+        foreach (glob($dir . '/recu-tondo-*.pdf') ?: [] as $fichier) {
+            if (filemtime($fichier) < $limite) {
+                @unlink($fichier);
+            }
+        }
+    }
 
     private function maskPhone(string $phone): string
     {
