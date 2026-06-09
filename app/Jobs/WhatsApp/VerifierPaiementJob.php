@@ -115,19 +115,18 @@ class VerifierPaiementJob implements ShouldQueue
             $pdfUrl = null;
         }
 
-        $avecPdf = $pdfUrl !== null;
+        $ligneRecu = $pdfUrl ? "📄 *Télécharger votre reçu :* {$pdfUrl}\n\n" : "";
+
         $texte = <<<TXT
         ✅ *Paiement confirmé !*
 
         Merci {$this->prenom} 🙏
         Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        TXT . ($avecPdf ? "📄 Votre reçu PDF Tondo est joint à ce message.\n\n" : "")
-        . "_Tapez_ *#* _pour revenir au menu._";
+        {$ligneRecu}_Tapez_ *#* _pour revenir au menu._
+        TXT;
 
-        return $avecPdf
-            ? $twilio->envoyerAvecPdf($this->numeroWa, $texte, $pdfUrl)
-            : $twilio->envoyer($this->numeroWa, $texte);
+        return $twilio->envoyer($this->numeroWa, $texte);
     }
 
     private function envoyerEchec(TwilioSenderService $twilio): bool

@@ -487,7 +487,7 @@ class BotService
      * Génère le PDF et retourne [message_texte, pdf_url].
      * Le WebhookController inclura le PDF en <Media> dans le TwiML.
      */
-    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): string|array
+    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): string
     {
         $pdfUrl = null;
         try {
@@ -503,19 +503,18 @@ class BotService
         $ref     = $cagnotte ? '#' . $cagnotte->reference : '';
         $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
 
-        $avecPdf = $pdfUrl !== null;
+        $ligneRecu = $pdfUrl
+            ? "📄 *Télécharger votre reçu :* {$pdfUrl}\n\n"
+            : "";
 
-        $texte = <<<TXT
+        return <<<TXT
         ✅ *Paiement confirmé !*
 
         Merci {$prenom} 🙏
         Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        TXT . ($avecPdf
-            ? "📄 Votre reçu PDF Tondo est joint à ce message.\n\n"
-            : "") . "_Tapez_ *#* _pour revenir au menu._";
-
-        return $avecPdf ? [$texte, $pdfUrl] : $texte;
+        {$ligneRecu}_Tapez_ *#* _pour revenir au menu._
+        TXT;
     }
 
     // ── 2 — Rejoindre ─────────────────────────────────────────────────────────
