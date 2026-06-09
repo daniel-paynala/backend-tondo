@@ -45,6 +45,12 @@ class WebhookController extends Controller
 
         $reponse = $this->bot->traiter($from, $body);
 
+        // recu() retourne [texte, pdfUrl] — les autres handlers retournent une string
+        if (is_array($reponse)) {
+            [$texte, $pdfUrl] = $reponse;
+            return $this->twimlAvecMedia($texte, $pdfUrl);
+        }
+
         return $this->twiml($reponse);
     }
 
@@ -56,6 +62,22 @@ class WebhookController extends Controller
         $xml  = $message === ''
             ? '<?xml version="1.0" encoding="UTF-8"?><Response/>'
             : "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Message>{$safe}</Message></Response>";
+
+        return response($xml, 200, ['Content-Type' => 'text/xml; charset=utf-8']);
+    }
+
+    private function twimlAvecMedia(string $message, string $mediaUrl): Response
+    {
+        $safe = htmlspecialchars($message, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $xml  = <<<XML
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+          <Message>
+            {$safe}
+            <Media>{$mediaUrl}</Media>
+          </Message>
+        </Response>
+        XML;
 
         return response($xml, 200, ['Content-Type' => 'text/xml; charset=utf-8']);
     }

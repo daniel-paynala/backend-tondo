@@ -4,6 +4,7 @@ namespace App\Services\WhatsApp;
 
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
+use App\Services\ReceiptService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -37,11 +38,20 @@ class BotService
     public function __construct(
         private SessionService    $session,
         private CotisationService $cotisationSvc,
+        private ReceiptService    $receiptSvc,
     ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────
 
-    public function traiter(string $numero, string $texte): string
+    /**
+     * Traite un message entrant et retourne la réponse.
+     * Retourne soit :
+     *   - string                → message texte simple
+     *   - [string, string]      → [message texte, url PDF à joindre en Media]
+     *
+     * @return string|array{0:string,1:string}
+     */
+    public function traiter(string $numero, string $texte): string|array
     {
         $texte = trim($texte);
         $etape = $this->session->etape($numero);
@@ -359,7 +369,7 @@ class BotService
         // Paiement immédiat (mock)
         if ($resultat['statut'] === 'succes') {
             $this->session->reset($numero);
-            return $this->recu($user, $cagnotte, $resultat);
+            return $this->recu($user, $cagnotte, $resultat);  // retourne [texte, pdfUrl]
         }
 
         // Paiement Airtel → en attente de confirmation
@@ -415,7 +425,7 @@ class BotService
             $cagnotte = TondoCagnotte::where('reference', $data['reference'])->first();
             $user     = TondoUser::find($data['user_id']);
 
-            return $this->recu($user, $cagnotte, [
+            return $this->recu($user, $cagnotte, [   // retourne [texte, pdfUrl]
                 'trans_id'    => $transId,
                 'montant_net' => $data['montant'],
             ]);
@@ -441,37 +451,32 @@ class BotService
         TXT;
     }
 
-    // ── Reçu Tondo ────────────────────────────────────────────────────────────
+    // ── Reçu Tondo (PDF) ─────────────────────────────────────────────────────
 
-    private function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat): string
+    /**
+     * Génère le PDF et retourne [message_texte, pdf_url].
+     * Le WebhookController inclura le PDF en <Media> dans le TwiML.
+     */
+    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): array
     {
-        $nom        = $user  ? mb_strtoupper($user->nom) . ' ' . ucfirst(mb_strtolower($user->prenom)) : 'Client';
-        $titre      = $cagnotte ? $cagnotte->titre : '—';
-        $ref        = $cagnotte ? '#' . $cagnotte->reference : '';
-        $montant    = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
-        $transId    = $resultat['trans_id'] ?? '—';
-        $dateHeure  = now()->format('d/m/Y H:i');
+        $pdfUrl  = $this->receiptSvc->generer($user, $cagnotte, $resultat, $canal);
+        $montant = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
+        $titre   = $cagnotte ? $cagnotte->titre : '—';
+        $ref     = $cagnotte ? '#' . $cagnotte->reference : '';
+        $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
 
-        return <<<TXT
+        $texte = <<<TXT
         ✅ *Paiement confirmé !*
 
-        ━━━━━━━━━━━━━━━━━━━━
-        🧾 *REÇU TONDO*
-        ━━━━━━━━━━━━━━━━━━━━
-        👤 {$nom}
-        📋 {$titre} {$ref}
-        💵 *{$montant} FCFA*
-        📅 {$dateHeure}
-        🔖 {$transId}
-        ━━━━━━━━━━━━━━━━━━━━
-        _Frais inclus — à la charge du cotisant_
-        _Tondo · Paynala · tondo.ga_
-        ━━━━━━━━━━━━━━━━━━━━
+        Merci {$prenom} 🙏
+        Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
-        Merci pour votre cotisation 🙏
+        📄 Votre reçu PDF Tondo est joint à ce message.
 
         _Tapez_ *0* _pour revenir au menu._
         TXT;
+
+        return [$texte, $pdfUrl];
     }
 
     // ── 2 — Rejoindre ─────────────────────────────────────────────────────────
