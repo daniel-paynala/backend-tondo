@@ -89,14 +89,10 @@ class BotService
 
     private function afficherMenu(string $numero): string
     {
-        $user   = $this->utilisateur($numero);
-        $prenom = $user ? ucfirst(mb_strtolower($user->prenom)) : 'cher client';
         $this->session->set($numero, 'menu');
 
         return <<<TXT
         🎉 *Bienvenue sur Tondo !*
-
-        Bonjour {$prenom} 👋
 
         Que souhaitez-vous faire ?
 
@@ -345,6 +341,21 @@ class BotService
 
     private function lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string
     {
+        try {
+            return $this->_lancerPaiement($numero, $user, $data, $numeroPayeur);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('WhatsApp lancerPaiement exception', [
+                'message' => $e->getMessage(),
+                'line'    => $e->getLine(),
+                'file'    => $e->getFile(),
+            ]);
+            $this->session->reset($numero);
+            return "❌ Une erreur technique est survenue. Veuillez réessayer.\n\n_Tapez_ *0* _pour revenir au menu._";
+        }
+    }
+
+    private function _lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string
+    {
         $cagnotte = TondoCagnotte::find($data['cagnotte_id']);
 
         if (! $cagnotte) {
@@ -353,7 +364,7 @@ class BotService
         }
 
         // Utiliser le numéro saisi comme numéro de paiement
-        $userPourPaiement        = clone $user;
+        $userPourPaiement         = clone $user;
         $userPourPaiement->numero = $numeroPayeur;
 
         $resultat = $this->cotisationSvc->initier($userPourPaiement, $cagnotte, (int) $data['montant']);
@@ -638,25 +649,35 @@ class BotService
 
     private function normaliserNumero(string $texte): ?string
     {
+        $texte    = trim($texte);
         $chiffres = preg_replace('/\D/', '', $texte);
 
-        // +24177XXXXXXX → conserver tel quel
+        if (strlen($chiffres) < 6) {
+            return null;
+        }
+
+        // Numéro international avec + → on garde tel quel
         if (str_starts_with($texte, '+')) {
             return '+' . $chiffres;
         }
 
-        // 077XXXXXX (9 chiffres commençant par 0) → +24177XXXXXX
+        // 00XXXXXXXXXXX → traiter comme international
+        if (str_starts_with($chiffres, '00')) {
+            return '+' . substr($chiffres, 2);
+        }
+
+        // Gabon 077XXXXXX ou 066XXXXXX (9 chiffres, commence par 0)
         if (strlen($chiffres) === 9 && str_starts_with($chiffres, '0')) {
             return '+241' . substr($chiffres, 1);
         }
 
-        // 77XXXXXX (8 chiffres) → +24177XXXXXX
+        // Gabon sans 0 : 77XXXXXX (8 chiffres)
         if (strlen($chiffres) === 8) {
             return '+241' . $chiffres;
         }
 
-        // Format complet sans + : 24177XXXXXX
-        if (strlen($chiffres) >= 11 && str_starts_with($chiffres, '241')) {
+        // Numéro complet sans + (ex: 24177XXXXXX ou 221XXXXXXXXX)
+        if (strlen($chiffres) >= 10) {
             return '+' . $chiffres;
         }
 
