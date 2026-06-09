@@ -7,198 +7,193 @@
 
 html, body {
   font-family: DejaVu Sans, sans-serif;
-  font-size: 11px;
   color: #1A1F1E;
-  /* Pas de background : évite que DomPDF colorie les pages vierges */
-}
-
-.page {
-  width: 100%;
-  padding: 40px 100px;
   background: #F4ECE0;
-  overflow: hidden;
 }
 
-/* En-tête */
-.header {
+/* ── Header pleine largeur ───────────────────────────── */
+.hdr {
   background: #0F4C5C;
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
+  padding: 24px 64px 20px;
 }
 .brand {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 700;
   color: #F4ECE0;
-  letter-spacing: -0.5px;
 }
-.brand-icon {
+.brand-badge {
   display: inline-block;
   background: #C97B4A;
   color: #1A1F1E;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 700;
-  width: 19px;
-  height: 19px;
-  line-height: 19px;
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
   text-align: center;
-  border-radius: 4px;
-  margin-right: 5px;
+  border-radius: 5px;
+  margin-right: 7px;
+  vertical-align: middle;
 }
-.subtitle {
+.hdr-sub {
   font-size: 8px;
-  color: rgba(244,236,224,0.6);
-  letter-spacing: 0.5px;
-  margin-top: 3px;
+  color: rgba(244,236,224,0.5);
+  letter-spacing: 1.2px;
+  margin-top: 4px;
 }
-.badge {
+.hdr-status {
   display: inline-block;
   background: #6B8E4E;
   color: #fff;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
-  padding: 2px 8px;
+  padding: 3px 14px;
   border-radius: 20px;
-  margin-top: 7px;
+  margin-top: 12px;
 }
 
-/* Montant */
-.amount-block {
+/* ── Zone de contenu ─────────────────────────────────── */
+.wrap {
+  padding: 32px 64px 40px;
+}
+
+/* ── Bloc montant ────────────────────────────────────── */
+.amount {
   text-align: center;
-  margin: 10px 0;
+  padding: 22px 0 20px;
+  margin-bottom: 22px;
+  border-bottom: 2px dashed rgba(201,123,74,0.4);
 }
-.amount-label {
+.amount-lbl {
   font-size: 8px;
-  color: #0F4C5C;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 3px;
+  letter-spacing: 2px;
+  color: #0F4C5C;
+  margin-bottom: 8px;
 }
-.amount-value {
-  font-size: 30px;
+.amount-num {
+  font-size: 56px;
   font-weight: 700;
   color: #0F4C5C;
+  line-height: 1;
 }
-.amount-currency {
-  font-size: 14px;
-  color: #C97B4A;
+.amount-cur {
+  font-size: 22px;
   font-weight: 600;
+  color: #C97B4A;
 }
-.amount-fees {
-  font-size: 8px;
-  color: #999;
-  margin-top: 2px;
-}
-
-.divider {
-  border: none;
-  border-top: 1px dashed #C97B4A;
-  margin: 9px 0;
-  opacity: 0.5;
+.amount-note {
+  font-size: 9px;
+  color: #bbb;
+  margin-top: 8px;
 }
 
-/* Cards */
+/* ── Cards ───────────────────────────────────────────── */
 .card {
   background: #fff;
-  border-radius: 5px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  border: 1px solid rgba(15,76,92,0.08);
+  border-radius: 8px;
+  padding: 14px 20px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(15,76,92,0.07);
 }
 .card-title {
-  font-size: 7px;
+  font-size: 8px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: #0F4C5C;
   font-weight: 700;
-  margin-bottom: 6px;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
   border-bottom: 1px solid #f0ede8;
-  padding-bottom: 4px;
 }
 
 /*
- * table-layout:fixed  → colonnes fixes, le contenu ne déborde jamais à droite
- * word-break:break-all → coupe les IDs longs (TONDOPAYXXXXXXX) sans espace
+ * Pas de table-layout:fixed ni overflow:hidden — DomPDF coupe les textes
+ * avec ces propriétés. word-break:break-all gère les IDs longs.
  */
-table.info {
+table.rows {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
 }
-table.info td {
-  padding: 3px 0;
-  border-bottom: 1px solid #f5f2ee;
+table.rows td {
+  padding: 6px 0;
+  font-size: 11px;
+  border-bottom: 1px solid #f8f6f3;
+  vertical-align: top;
+}
+table.rows tr:last-child td { border-bottom: none; }
+table.rows td.k {
+  color: #888;
+  width: 36%;
+  padding-right: 16px;
   font-size: 10px;
-  vertical-align: middle;
-  overflow: hidden;
+}
+table.rows td.v {
+  font-weight: 600;
+  color: #1A1F1E;
+  word-wrap: break-word;
   word-break: break-all;
 }
-table.info tr:last-child td { border-bottom: none; }
-table.info td.lbl { color: #777; width: 46%; word-break: normal; }
-table.info td.val { font-weight: 600; color: #1A1F1E; text-align: right; }
-table.info td.val.accent  { color: #C97B4A; }
-table.info td.val.primary { color: #0F4C5C; }
+table.rows td.v.accent  { color: #C97B4A; }
+table.rows td.v.primary { color: #0F4C5C; }
 
-.ref-chip {
+.pill {
   display: inline-block;
   background: #0F4C5C;
   color: #F4ECE0;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 20px;
-  max-width: 100%;
-  overflow: hidden;
+  padding: 3px 10px;
+  border-radius: 12px;
 }
 
-/* Pied de page */
+/* ── Footer ──────────────────────────────────────────── */
 .footer {
   text-align: center;
-  margin-top: 9px;
-  padding-top: 7px;
-  border-top: 1px solid rgba(15,76,92,0.1);
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(15,76,92,0.12);
 }
-.footer-brand { font-size: 8px; font-weight: 700; color: #0F4C5C; }
-.footer-text  { font-size: 7px; color: #aaa; line-height: 1.5; margin-top: 2px; }
+.footer-brand { font-size: 10px; font-weight: 700; color: #0F4C5C; }
+.footer-text  { font-size: 8px; color: #bbb; margin-top: 3px; line-height: 1.7; }
 </style>
 </head>
 <body>
-<div class="page">
 
-  <div class="header">
-    <div class="brand"><span class="brand-icon">T</span>Tondo</div>
-    <div class="subtitle">REÇU DE PAIEMENT · PAYNALA SAS</div>
-    <div class="badge">✓ PAIEMENT CONFIRMÉ</div>
+<div class="hdr">
+  <div class="brand"><span class="brand-badge">T</span>Tondo</div>
+  <div class="hdr-sub">REÇU DE PAIEMENT · PAYNALA SAS</div>
+  <div class="hdr-status">&#10003; PAIEMENT CONFIRMÉ</div>
+</div>
+
+<div class="wrap">
+
+  <div class="amount">
+    <div class="amount-lbl">Montant cotisé</div>
+    <span class="amount-num">{{ number_format($montant_net, 0, ',', ' ') }}</span>
+    <span class="amount-cur"> FCFA</span>
+    <div class="amount-note">* Frais à la charge du cotisant</div>
   </div>
-
-  <div class="amount-block">
-    <div class="amount-label">Montant cotisé</div>
-    <span class="amount-value">{{ number_format($montant_net, 0, ',', ' ') }}</span>
-    <span class="amount-currency"> FCFA</span>
-    <div class="amount-fees">Frais à la charge du cotisant</div>
-  </div>
-
-  <hr class="divider">
 
   <div class="card">
     <div class="card-title">Transaction</div>
-    <table class="info">
+    <table class="rows">
       <tr>
-        <td class="lbl">Référence</td>
-        <td class="val accent">{{ $trans_id }}</td>
+        <td class="k">Référence</td>
+        <td class="v accent">{{ $trans_id }}</td>
       </tr>
       <tr>
-        <td class="lbl">Date &amp; heure</td>
-        <td class="val">{{ $date_heure }}</td>
+        <td class="k">Date &amp; heure</td>
+        <td class="v">{{ $date_heure }}</td>
       </tr>
       <tr>
-        <td class="lbl">Canal</td>
-        <td class="val">{{ $canal }}</td>
+        <td class="k">Canal</td>
+        <td class="v">{{ $canal }}</td>
       </tr>
       @if($montant_brut !== $montant_net)
       <tr>
-        <td class="lbl">Montant débité</td>
-        <td class="val">{{ number_format($montant_brut, 0, ',', ' ') }} FCFA</td>
+        <td class="k">Montant débité</td>
+        <td class="v">{{ number_format($montant_brut, 0, ',', ' ') }} FCFA</td>
       </tr>
       @endif
     </table>
@@ -206,32 +201,32 @@ table.info td.val.primary { color: #0F4C5C; }
 
   <div class="card">
     <div class="card-title">Cagnotte</div>
-    <table class="info">
+    <table class="rows">
       <tr>
-        <td class="lbl">Nom</td>
-        <td class="val primary">{{ $cagnotte_titre }}</td>
+        <td class="k">Nom</td>
+        <td class="v primary">{{ $cagnotte_titre }}</td>
       </tr>
       <tr>
-        <td class="lbl">Référence</td>
-        <td class="val"><span class="ref-chip"># {{ $cagnotte_reference }}</span></td>
+        <td class="k">Référence</td>
+        <td class="v"><span class="pill"># {{ $cagnotte_reference }}</span></td>
       </tr>
       <tr>
-        <td class="lbl">Type</td>
-        <td class="val">{{ $type_cagnotte }}</td>
+        <td class="k">Type</td>
+        <td class="v">{{ $type_cagnotte }}</td>
       </tr>
     </table>
   </div>
 
   <div class="card">
     <div class="card-title">Cotisant</div>
-    <table class="info">
+    <table class="rows">
       <tr>
-        <td class="lbl">Nom complet</td>
-        <td class="val">{{ $nom_cotisant }}</td>
+        <td class="k">Nom complet</td>
+        <td class="v">{{ $nom_cotisant }}</td>
       </tr>
       <tr>
-        <td class="lbl">Mobile Money</td>
-        <td class="val">{{ $numero_masque }}</td>
+        <td class="k">Mobile Money</td>
+        <td class="v">{{ $numero_masque }}</td>
       </tr>
     </table>
   </div>
@@ -239,7 +234,8 @@ table.info td.val.primary { color: #0F4C5C; }
   <div class="footer">
     <div class="footer-brand">Tondo · Paynala SAS</div>
     <div class="footer-text">
-      Reçu généré automatiquement · support@tondo.ga · tondo.ga
+      Reçu généré automatiquement et valant preuve de paiement.<br>
+      support@tondo.ga &nbsp;·&nbsp; www.tondo.ga &nbsp;·&nbsp; Libreville, Gabon
     </div>
   </div>
 
