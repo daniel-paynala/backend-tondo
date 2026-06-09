@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\WhatsApp;
 
 use App\Http\Controllers\Controller;
 use App\Services\WhatsApp\BotService;
+use App\Services\WhatsApp\SessionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
@@ -19,7 +20,10 @@ use Illuminate\Support\Facades\Log;
  */
 class WebhookController extends Controller
 {
-    public function __construct(private BotService $bot) {}
+    public function __construct(
+        private BotService     $bot,
+        private SessionService $session,
+    ) {}
 
     /**
      * POST /api/whatsapp/webhook
@@ -54,24 +58,26 @@ class WebhookController extends Controller
             $reponse = $this->bot->traiter($from, $body);
         } catch (\Throwable $e) {
             Log::error('WhatsApp BotService exception', [
+                'from'    => $from,
+                'body'    => $body,
+                'etape'   => $this->session->etape($from),
                 'message' => $e->getMessage(),
                 'file'    => $e->getFile(),
                 'line'    => $e->getLine(),
                 'trace'   => $e->getTraceAsString(),
             ]);
-            $reponse = <<<TXT
-            🎉 *Bienvenue sur Tondo !*
 
-            Que souhaitez-vous faire ?
+            // Reset la session pour ne pas bloquer l'utilisateur dans un état cassé
+            $this->session->reset($from);
 
-            1️⃣  *Cotiser*
-            2️⃣  *Rejoindre* une cagnotte
-            3️⃣  *Créer* une cagnotte
-            4️⃣  *Gérer* mes cagnottes
-            5️⃣  *Aide* & support
+            $detail = app()->environment('production')
+                ? ''
+                : "\n\n🔧 _[dev] " . class_basename($e) . ' : ' . $e->getMessage()
+                  . ' — ' . basename($e->getFile()) . ':' . $e->getLine() . '_';
 
-            _Tapez le numéro de votre choix._
-            TXT;
+            $reponse = "⚠️ Une erreur inattendue s'est produite. Votre session a été réinitialisée."
+                . $detail
+                . "\n\nTapez *1* pour Cotiser, *2* pour Rejoindre, *3* pour Créer, *4* pour Gérer, *5* pour Aide.";
         }
 
         if (is_array($reponse)) {

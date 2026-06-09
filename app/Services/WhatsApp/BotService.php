@@ -2161,37 +2161,41 @@ class BotService
      */
     private function envoyerOtp(string $numeroE164): array
     {
-        if (app()->isProduction()) {
-            try {
-                $this->twilioVerify->sendOtp($numeroE164);
-            } catch (\Throwable $e) {
-                Log::warning('envoyerOtp: échec Twilio Verify', [
-                    'numero' => $numeroE164,
-                    'err'    => $e->getMessage(),
-                ]);
-            }
-            return [null, ''];
+        // Bypass explicite via TONDO_OTP_BYPASS=123456 dans .env (test multi-utilisateurs)
+        $bypass = config('tondo.otp_bypass');
+        if ($bypass) {
+            return [$bypass, "\n_(Test : code = *{$bypass}*)_"];
         }
 
-        return ['123456', "\n_(Test : code = *123456*)_"];
+        try {
+            $this->twilioVerify->sendOtp($numeroE164);
+        } catch (\Throwable $e) {
+            Log::warning('envoyerOtp: échec Twilio Verify', [
+                'numero' => $numeroE164,
+                'err'    => $e->getMessage(),
+            ]);
+        }
+
+        return [null, ''];
     }
 
     /**
-     * En prod : vérifie via Twilio Verify (otp_local ignoré).
-     * En non-prod : compare au code local stocké en session.
+     * Si TONDO_OTP_BYPASS est défini : accepte ce code universel.
+     * Sinon : vérifie via Twilio Verify.
      */
     private function verifierOtp(string $numeroE164, string $codeSaisi, ?string $otpLocal): bool
     {
-        if (app()->isProduction()) {
-            try {
-                return $this->twilioVerify->checkOtp($numeroE164, $codeSaisi);
-            } catch (\Throwable $e) {
-                Log::error('verifierOtp: erreur checkOtp Twilio', ['err' => $e->getMessage()]);
-                return false;
-            }
+        $bypass = config('tondo.otp_bypass');
+        if ($bypass) {
+            return $codeSaisi === $bypass || $codeSaisi === ($otpLocal ?? $bypass);
         }
 
-        return $codeSaisi === ($otpLocal ?? '123456');
+        try {
+            return $this->twilioVerify->checkOtp($numeroE164, $codeSaisi);
+        } catch (\Throwable $e) {
+            Log::error('verifierOtp: erreur checkOtp Twilio', ['err' => $e->getMessage()]);
+            return false;
+        }
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
