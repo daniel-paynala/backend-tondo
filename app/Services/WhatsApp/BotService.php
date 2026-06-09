@@ -634,10 +634,7 @@ class BotService
         $projectId = $this->tondoProjectId();
 
         return TondoUser::where('project_id', $projectId)
-            ->where(fn ($q) => $q
-                ->where('telephone', 'like', "%{$suffixe}")
-                ->orWhere('numero', 'like', "%{$suffixe}")
-            )
+            ->where('numero', 'like', "%{$suffixe}")
             ->first();
     }
 
@@ -646,10 +643,7 @@ class BotService
         $suffixe = substr(preg_replace('/\D/', '', $numeroE164), -9);
 
         return TondoUser::where('project_id', $projectId)
-            ->where(fn ($q) => $q
-                ->where('telephone', 'like', "%{$suffixe}")
-                ->orWhere('numero', 'like', "%{$suffixe}")
-            )
+            ->where('numero', 'like', "%{$suffixe}")
             ->first();
     }
 

@@ -62,8 +62,6 @@ class WebhookController extends Controller
             $reponse = <<<TXT
             🎉 *Bienvenue sur Tondo !*
 
-            Bonjour cher client 👋
-
             Que souhaitez-vous faire ?
 
             1️⃣  *Cotiser*

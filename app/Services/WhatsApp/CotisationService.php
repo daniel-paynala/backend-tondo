@@ -59,12 +59,11 @@ class CotisationService
         $user->project_id     = $projectId;
         $user->nom            = mb_strtoupper(trim($nom));
         $user->prenom         = ucfirst(mb_strtolower(trim($prenom)));
-        $user->telephone      = $numeroE164;
         $user->numero         = $numeroE164;
         $user->indicatif      = '+241';
         $user->pays           = 'GA';
         $user->operateur      = null;
-        $user->date_naissance = null;   // compte light
+        $user->date_naissance = '1900-01-01';   // placeholder — compte light WhatsApp
         $user->kyc_valide     = false;
         $user->type_client    = 'particulier';
         $user->created_at     = now();
