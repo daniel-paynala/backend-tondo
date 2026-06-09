@@ -70,6 +70,41 @@ class CotisationService
         return $user;
     }
 
+    public function creerCompteFull(
+        string $nom,
+        string $prenom,
+        string $numeroE164,
+        string $projectId,
+        string $dateNaissance,
+    ): TondoUser {
+        $suffixe  = substr(preg_replace('/\D/', '', $numeroE164), -9);
+        $existant = TondoUser::where('project_id', $projectId)
+            ->where('numero', 'like', "%{$suffixe}")
+            ->first();
+
+        if ($existant) {
+            return $existant;
+        }
+
+        $user = new TondoUser();
+        $user->id             = (string) Str::uuid();
+        $user->project_id     = $projectId;
+        $user->nom            = mb_strtoupper(trim($nom));
+        $user->prenom         = ucfirst(mb_strtolower(trim($prenom)));
+        $user->numero         = $numeroE164;
+        $user->indicatif      = '+241';
+        $user->pays           = 'GA';
+        $user->operateur      = null;
+        $user->date_naissance = $dateNaissance;
+        $user->kyc_valide     = false;
+        $user->type_client    = 'particulier';
+        $user->created_at     = now();
+        $user->updated_at     = now();
+        $user->save();
+
+        return $user;
+    }
+
     // ── Initier un paiement ───────────────────────────────────────────────────
 
     /**

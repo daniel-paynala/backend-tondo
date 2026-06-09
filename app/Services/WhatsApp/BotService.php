@@ -7,6 +7,7 @@ use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Moteur conversationnel du bot WhatsApp Tondo.
@@ -39,9 +40,10 @@ use Illuminate\Support\Facades\DB;
 class BotService
 {
     public function __construct(
-        private SessionService    $session,
-        private CotisationService $cotisationSvc,
-        private ReceiptService    $receiptSvc,
+        private SessionService       $session,
+        private CotisationService    $cotisationSvc,
+        private ReceiptService       $receiptSvc,
+        private CreerCagnotteService $creerCagnotteSvc,
     ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ class BotService
             $etape === 'rejoindre.ref'          => $this->handleRejoindreRef($numero, $texte),
             $etape === 'rejoindre.numero'       => $this->handleRejoindreNumero($numero, $texte),
             $etape === 'rejoindre.nom_prenom'   => $this->handleRejoindreNomPrenom($numero, $texte),
+            str_starts_with($etape, 'creer.')  => $this->routerCreer($numero, $etape, $texte),
             default                             => $this->afficherMenu($numero),
         };
     }
@@ -694,19 +697,633 @@ class BotService
 
     private function demarrerCreer(string $numero): string
     {
-        $appUrl = config('app.url', 'http://51.44.254.213');
-        $this->session->reset($numero);
+        $this->session->set($numero, 'creer.type', [
+            'project_id' => $this->tondoProjectId(),
+        ]);
 
         return <<<TXT
         ✨ *Créer une cagnotte*
 
-        La création se fait depuis l'application Tondo :
-        👉 {$appUrl}/cagnottes/nouvelle
+        Que souhaitez-vous créer ?
 
-        Connectez-vous avec votre numéro et suivez les étapes.
+        1️⃣  *Cotisation ouverte* — collecte libre, montant variable
+        2️⃣  *Tontine périodique* — rotation, montant fixe par cycle
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        _Tapez le numéro de votre choix ou_ *#️⃣* _pour annuler._
         TXT;
+    }
+
+    private function routerCreer(string $numero, string $etape, string $texte): string
+    {
+        return match ($etape) {
+            'creer.type'                       => $this->handleCreerType($numero, $texte),
+            'creer.cotisation.nom'             => $this->handleCreerCotisationNom($numero, $texte),
+            'creer.cotisation.montant_cible'   => $this->handleCreerCotisationMontantCible($numero, $texte),
+            'creer.cotisation.date_fin'        => $this->handleCreerCotisationDateFin($numero, $texte),
+            'creer.tontine.nom'                => $this->handleCreerTontineNom($numero, $texte),
+            'creer.tontine.nb_participants'    => $this->handleCreerTontineNbParticipants($numero, $texte),
+            'creer.tontine.montant_cycle'      => $this->handleCreerTontineMontantCycle($numero, $texte),
+            'creer.tontine.periodicite'        => $this->handleCreerTontinePeriodicite($numero, $texte),
+            'creer.tontine.intervalle'         => $this->handleCreerTontineIntervalle($numero, $texte),
+            'creer.tontine.jour'               => $this->handleCreerTontineJour($numero, $texte),
+            'creer.tontine.penalite'           => $this->handleCreerTontinePenalite($numero, $texte),
+            'creer.tontine.penalite_montant'   => $this->handleCreerTontinePenaliteMontant($numero, $texte),
+            'creer.tontine.penalite_frequence' => $this->handleCreerTontinePenaliteFrequence($numero, $texte),
+            'creer.numero'                     => $this->handleCreerNumero($numero, $texte),
+            'creer.nom_prenom'                 => $this->handleCreerNomPrenom($numero, $texte),
+            'creer.date_naissance'             => $this->handleCreerDateNaissance($numero, $texte),
+            'creer.numero_retrait'             => $this->handleCreerNumeroRetrait($numero, $texte),
+            'creer.recap'                      => $this->handleCreerRecap($numero, $texte),
+            default                            => $this->afficherMenu($numero),
+        };
+    }
+
+    private function handleCreerType(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+
+        if ($texte === '1') {
+            $this->session->set($numero, 'creer.cotisation.nom', array_merge($data, [
+                'type' => 'cagnotte_ouverte',
+            ]));
+            return <<<TXT
+            💰 *Cotisation ouverte*
+
+            Quel est le *nom* de votre cagnotte ?
+            _(max 120 caractères)_
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        if ($texte === '2') {
+            $this->session->set($numero, 'creer.tontine.nom', array_merge($data, [
+                'type' => 'tontine_periodique',
+            ]));
+            return <<<TXT
+            🔄 *Tontine périodique*
+
+            Quel est le *nom* de votre tontine ?
+            _(max 120 caractères)_
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        return "⚠️ Tapez *1* pour Cotisation ou *2* pour Tontine.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    // ── 3.1 Cotisation — champs ───────────────────────────────────────────────
+
+    private function handleCreerCotisationNom(string $numero, string $texte): string
+    {
+        $titre = trim($texte);
+        if (mb_strlen($titre) < 3 || mb_strlen($titre) > 120) {
+            return "⚠️ Nom invalide (3 à 120 caractères).\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.cotisation.montant_cible', array_merge($data, [
+            'titre' => $titre,
+        ]));
+
+        return <<<TXT
+        Montant *cible* de la cagnotte ?
+        _(objectif de collecte en FCFA — tapez *0* si pas de limite)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerCotisationMontantCible(string $numero, string $texte): string
+    {
+        $montant = (int) preg_replace('/\D/', '', $texte);
+
+        if ($montant !== 0 && ($montant < 100 || $montant > 2_500_000)) {
+            return "⚠️ Montant invalide. Entre *100* et *2 500 000 FCFA*, ou *0* pour pas de limite.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.cotisation.date_fin', array_merge($data, [
+            'montant_cible' => $montant,
+        ]));
+
+        return <<<TXT
+        Date *limite* de la cagnotte ?
+        _(format : *JJ/MM/AAAA* — tapez *0* pour pas de date limite)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerCotisationDateFin(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+
+        if (trim($texte) === '0') {
+            $this->session->set($numero, 'creer.numero', array_merge($data, ['date_fin' => null]));
+            return $this->demanderNumeroCreateur();
+        }
+
+        $dt = $this->parseDate(trim($texte));
+        if (! $dt) {
+            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA* ou tapez *0* pour aucune limite.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+        if ($dt <= new \DateTimeImmutable('today')) {
+            return "⚠️ La date limite doit être *après aujourd'hui*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $this->session->set($numero, 'creer.numero', array_merge($data, [
+            'date_fin' => $dt->format('Y-m-d'),
+        ]));
+        return $this->demanderNumeroCreateur();
+    }
+
+    // ── 3.1 Tontine — champs ─────────────────────────────────────────────────
+
+    private function handleCreerTontineNom(string $numero, string $texte): string
+    {
+        $titre = trim($texte);
+        if (mb_strlen($titre) < 3 || mb_strlen($titre) > 120) {
+            return "⚠️ Nom invalide (3 à 120 caractères).\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.tontine.nb_participants', array_merge($data, [
+            'titre' => $titre,
+        ]));
+
+        return <<<TXT
+        Nombre de *participants* ?
+        _(entre 2 et 200)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontineNbParticipants(string $numero, string $texte): string
+    {
+        $nb = (int) preg_replace('/\D/', '', $texte);
+        if ($nb < 2 || $nb > 200) {
+            return "⚠️ Nombre invalide. Entre *2* et *200* participants.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.tontine.montant_cycle', array_merge($data, [
+            'nombre_participants' => $nb,
+        ]));
+
+        return <<<TXT
+        Montant reversé *par cycle* au bénéficiaire ? (en FCFA)
+        _💡 Pensez à intégrer vos frais de retrait dans ce montant._
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontineMontantCycle(string $numero, string $texte): string
+    {
+        $montant = (int) preg_replace('/\D/', '', $texte);
+        if ($montant < 100 || $montant > 2_500_000) {
+            return "⚠️ Montant invalide. Entre *100* et *2 500 000 FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.tontine.periodicite', array_merge($data, [
+            'montant_par_cycle' => $montant,
+        ]));
+
+        return <<<TXT
+        *Périodicité* de la tontine ?
+
+        1️⃣  Hebdomadaire
+        2️⃣  Mensuelle
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontinePeriodicite(string $numero, string $texte): string
+    {
+        if (! in_array($texte, ['1', '2'])) {
+            return "⚠️ Tapez *1* pour Hebdomadaire ou *2* pour Mensuelle.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $periodicite = $texte === '1' ? 'hebdomadaire' : 'mensuelle';
+        $data        = $this->session->data($numero);
+        $this->session->set($numero, 'creer.tontine.intervalle', array_merge($data, [
+            'periodicite' => $periodicite,
+        ]));
+
+        $unite = $periodicite === 'hebdomadaire' ? 'semaines' : 'mois';
+
+        return <<<TXT
+        Fréquence ?
+        _(toutes les X {$unite} — tapez *1* pour chaque {$unite})_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontineIntervalle(string $numero, string $texte): string
+    {
+        $intervalle = (int) preg_replace('/\D/', '', $texte);
+        if ($intervalle < 1 || $intervalle > 12) {
+            return "⚠️ Valeur invalide. Entre *1* et *12*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data        = $this->session->data($numero);
+        $periodicite = $data['periodicite'] ?? '';
+        $this->session->set($numero, 'creer.tontine.jour', array_merge($data, [
+            'intervalle' => $intervalle,
+        ]));
+
+        if ($periodicite === 'hebdomadaire') {
+            return <<<TXT
+            Jour de *retrait* ?
+
+            1️⃣ Lundi · 2️⃣ Mardi · 3️⃣ Mercredi · 4️⃣ Jeudi
+            5️⃣ Vendredi · 6️⃣ Samedi · 7️⃣ Dimanche
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        return <<<TXT
+        Jour du *mois* de retrait ?
+        _(entre 1 et 28)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontineJour(string $numero, string $texte): string
+    {
+        $data        = $this->session->data($numero);
+        $periodicite = $data['periodicite'] ?? '';
+        $val         = trim($texte);
+
+        if ($periodicite === 'hebdomadaire') {
+            $jours = ['1' => 'lundi', '2' => 'mardi', '3' => 'mercredi', '4' => 'jeudi',
+                      '5' => 'vendredi', '6' => 'samedi', '7' => 'dimanche'];
+            if (! isset($jours[$val])) {
+                return "⚠️ Tapez un chiffre entre *1* (Lundi) et *7* (Dimanche).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            }
+            $jour = $jours[$val];
+        } else {
+            $jour = (int) preg_replace('/\D/', '', $val);
+            if ($jour < 1 || $jour > 28) {
+                return "⚠️ Jour invalide. Entre *1* et *28*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            }
+        }
+
+        $this->session->set($numero, 'creer.tontine.penalite', array_merge($data, [
+            'jour' => $jour,
+        ]));
+
+        return <<<TXT
+        *Pénalité* de retard pour les cotisants en retard ?
+
+        1️⃣  Oui
+        0️⃣  Non
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontinePenalite(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+
+        if ($texte === '0') {
+            $this->session->set($numero, 'creer.numero', array_merge($data, [
+                'penalite_active' => false,
+            ]));
+            return $this->demanderNumeroCreateur();
+        }
+
+        if ($texte === '1') {
+            $this->session->set($numero, 'creer.tontine.penalite_montant', array_merge($data, [
+                'penalite_active' => true,
+            ]));
+            return <<<TXT
+            Montant de la pénalité ? (en FCFA)
+            _(entre 100 et 500 000 FCFA)_
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        return "⚠️ Tapez *1* pour Oui ou *0* pour Non.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    private function handleCreerTontinePenaliteMontant(string $numero, string $texte): string
+    {
+        $montant = (int) preg_replace('/\D/', '', $texte);
+        if ($montant < 100 || $montant > 500_000) {
+            return "⚠️ Montant invalide. Entre *100* et *500 000 FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.tontine.penalite_frequence', array_merge($data, [
+            'penalite_montant' => $montant,
+        ]));
+
+        return <<<TXT
+        Fréquence de la pénalité ?
+
+        1️⃣  Par *heure* de retard
+        2️⃣  Par *jour* de retard
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerTontinePenaliteFrequence(string $numero, string $texte): string
+    {
+        if (! in_array($texte, ['1', '2'])) {
+            return "⚠️ Tapez *1* pour Par heure ou *2* pour Par jour.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $frequence = $texte === '1' ? 'heure' : 'jour';
+        $data      = $this->session->data($numero);
+        $this->session->set($numero, 'creer.numero', array_merge($data, [
+            'penalite_frequence' => $frequence,
+        ]));
+
+        return $this->demanderNumeroCreateur();
+    }
+
+    // ── 3.2 Identification du créateur (partagé cotisation + tontine) ─────────
+
+    private function demanderNumeroCreateur(): string
+    {
+        return <<<TXT
+        📱 Votre *numéro Mobile Money* ?
+        _(format : *0XXXXXXXX*)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerNumero(string $numero, string $texte): string
+    {
+        $numeroSaisi = $this->normaliserNumero($texte);
+        if (! $numeroSaisi) {
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data      = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+        $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
+
+        if ($user) {
+            $this->session->set($numero, 'creer.numero_retrait', array_merge($data, [
+                'user_id'       => $user->id,
+                'numero_payeur' => $numeroSaisi,
+            ]));
+            return $this->demanderNumeroRetrait($user->prenom);
+        }
+
+        $this->session->set($numero, 'creer.nom_prenom', array_merge($data, [
+            'numero_payeur' => $numeroSaisi,
+        ]));
+
+        return <<<TXT
+        👤 *Nouveau sur Tondo*
+
+        Vous n'avez pas encore de compte. On va en créer un.
+
+        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+        _Exemple :_
+        MBOULA
+        Jean
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerNomPrenom(string $numero, string $texte): string
+    {
+        $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
+
+        if (count($lignes) < 2) {
+            return <<<TXT
+            ⚠️ Format incorrect. Entrez *nom* puis *prénom*, chacun sur une ligne.
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        $data = $this->session->data($numero);
+        $this->session->set($numero, 'creer.date_naissance', array_merge($data, [
+            'nom'    => mb_strtoupper(trim($lignes[0])),
+            'prenom' => ucfirst(mb_strtolower(trim($lignes[1]))),
+        ]));
+
+        return <<<TXT
+        📅 Date de *naissance* ?
+        _(format : *JJ/MM/AAAA* — vous devez avoir au moins 18 ans)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerDateNaissance(string $numero, string $texte): string
+    {
+        $dt = $this->parseDate(trim($texte));
+        if (! $dt) {
+            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+        if (! $this->estMajeur($dt)) {
+            return $this->erreurEtMenu($numero, "❌ Vous devez avoir *18 ans ou plus* pour créer une cagnotte.");
+        }
+
+        $data      = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+
+        $user = $this->cotisationSvc->creerCompteFull(
+            nom:           $data['nom'],
+            prenom:        $data['prenom'],
+            numeroE164:    $data['numero_payeur'],
+            projectId:     $projectId,
+            dateNaissance: $dt->format('Y-m-d'),
+        );
+
+        $this->session->set($numero, 'creer.numero_retrait', array_merge($data, [
+            'user_id' => $user->id,
+        ]));
+
+        return $this->demanderNumeroRetrait($user->prenom);
+    }
+
+    private function demanderNumeroRetrait(string $prenom): string
+    {
+        return <<<TXT
+        Bonjour *{$prenom}* !
+
+        Le montant collecté sera reversé sur votre numéro Mobile Money.
+        Voulez-vous utiliser un *autre numéro* pour le retrait ?
+
+        _(tapez le numéro alternatif au format *0XXXXXXXX*, ou *0* pour utiliser le même)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleCreerNumeroRetrait(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+
+        if (trim($texte) === '0') {
+            $numeroRetrait = $data['numero_payeur'];
+        } else {
+            $numeroRetrait = $this->normaliserNumero($texte);
+            if (! $numeroRetrait) {
+                return "⚠️ Numéro invalide. Format : *0XXXXXXXX* ou tapez *0* pour le même numéro.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            }
+        }
+
+        $this->session->set($numero, 'creer.recap', array_merge($data, [
+            'numero_retrait' => $numeroRetrait,
+        ]));
+
+        return $this->construireRecap($data, $numeroRetrait);
+    }
+
+    // ── 3.3 Récap + CGU ──────────────────────────────────────────────────────
+
+    private function construireRecap(array $data, string $numeroRetrait): string
+    {
+        $masque = $this->maskPhoneNum($numeroRetrait);
+
+        if ($data['type'] === 'tontine_periodique') {
+            $montant     = number_format((int) $data['montant_par_cycle'], 0, ',', ' ');
+            $periodicite = $data['periodicite'] === 'hebdomadaire' ? 'Hebdomadaire' : 'Mensuelle';
+            $unite       = $data['periodicite'] === 'hebdomadaire' ? 'semaine(s)' : 'mois';
+            $intervalle  = (int) ($data['intervalle'] ?? 1);
+            $jour        = is_string($data['jour'] ?? null) ? ucfirst($data['jour']) : 'Jour ' . ($data['jour'] ?? '?') . ' du mois';
+            $penalite    = ($data['penalite_active'] ?? false)
+                ? number_format((int) ($data['penalite_montant'] ?? 0), 0, ',', ' ') . ' FCFA/' . ($data['penalite_frequence'] ?? 'jour')
+                : 'Non';
+
+            $lignes = <<<TXT
+            📝 *Récapitulatif — Tontine périodique*
+
+            Nom : *{$data['titre']}*
+            Participants : *{$data['nombre_participants']}*
+            Montant/cycle : *{$montant} FCFA*
+            Périodicité : *{$periodicite}* · toutes les {$intervalle} {$unite}
+            Jour de retrait : *{$jour}*
+            Pénalité de retard : *{$penalite}*
+            Numéro de retrait : *{$masque}*
+            TXT;
+        } else {
+            $cible    = isset($data['montant_cible']) && (int) $data['montant_cible'] > 0
+                ? number_format((int) $data['montant_cible'], 0, ',', ' ') . ' FCFA'
+                : 'Pas de limite';
+            $dateFin  = $data['date_fin'] ?? null;
+            $dateFin  = $dateFin ? (new \DateTimeImmutable($dateFin))->format('d/m/Y') : 'Pas de limite';
+
+            $lignes = <<<TXT
+            📝 *Récapitulatif — Cotisation ouverte*
+
+            Nom : *{$data['titre']}*
+            Montant cible : *{$cible}*
+            Date limite : *{$dateFin}*
+            Numéro de retrait : *{$masque}*
+            TXT;
+        }
+
+        return $lignes . "\n\n" . $this->cguTexte();
+    }
+
+    private function cguTexte(): string
+    {
+        return <<<TXT
+        ─────────────────
+        📋 *Conditions d'utilisation*
+
+        • Le montant collecté est reversé sur votre numéro de retrait.
+        • Le numéro de retrait *ne peut plus être modifié* après création.
+        • Les frais sont à la charge du cotisant, appliqués au paiement.
+        • Tondo n'arbitre pas les conflits entre membres.
+
+        _Détail_
+        *Modèle économique* — Commission Tondo 2 %. Frais opérateur : 3 % au paiement (plafond 5 000 FCFA) + 3 % au retrait. Le bénéficiaire reçoit le montant net.
+        *Numéro de retrait* — Immuable après création. Protège les participants contre la fraude.
+        *Différends* — Tondo facilite la collecte mais n'arbitre pas les conflits, sauf cas manifestement clair (ex : usurpation d'identité).
+        *Périmètre v1* — Cagnottes publiques et associations comme bénéficiaires non disponibles (loi gabonaise n°35/62).
+        ─────────────────
+
+        Tapez *1* pour confirmer et créer · *0* pour annuler.
+        TXT;
+    }
+
+    // ── 3.4 Création effective ────────────────────────────────────────────────
+
+    private function handleCreerRecap(string $numero, string $texte): string
+    {
+        if ($texte === '0') {
+            return $this->erreurEtMenu($numero, "🚫 Création annulée.");
+        }
+
+        if ($texte !== '1') {
+            $data = $this->session->data($numero);
+            return $this->construireRecap($data, $data['numero_retrait'] ?? '') .
+                "\n\n⚠️ Tapez *1* pour confirmer ou *0* pour annuler.";
+        }
+
+        $data = $this->session->data($numero);
+        $user = TondoUser::find($data['user_id'] ?? null);
+
+        if (! $user) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        try {
+            $cagnotte = $this->creerCagnotteSvc->creer($data, $user);
+        } catch (\Throwable $e) {
+            Log::error('handleCreerRecap: échec création', ['err' => $e->getMessage()]);
+            return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez support@tondo.ga.");
+        }
+
+        $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $prenom = ucfirst(mb_strtolower($user->prenom));
+        $ref    = $cagnotte->reference;
+
+        return <<<TXT
+        🎉 *{$cagnotte->titre}* créée avec succès !
+
+        Félicitations *{$prenom}* !
+        Votre {$type} est active.
+
+        *Code : #{$ref}*
+        Partagez ce code avec vos participants.
+
+        TXT . "\n" . $this->afficherMenu($numero);
+    }
+
+    // ── 3 — Helpers ──────────────────────────────────────────────────────────
+
+    private function parseDate(string $texte): ?\DateTimeImmutable
+    {
+        if (preg_match('/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/', $texte, $m)) {
+            try {
+                $dt = new \DateTimeImmutable("{$m[3]}-{$m[2]}-{$m[1]}");
+                // Vérifier que la date est valide (ex: 31/02 rejeté)
+                if ($dt->format('d') === $m[1] && $dt->format('m') === $m[2]) {
+                    return $dt;
+                }
+            } catch (\Exception) {}
+        }
+        return null;
+    }
+
+    private function estMajeur(\DateTimeImmutable $naissance): bool
+    {
+        return $naissance->diff(new \DateTimeImmutable('today'))->y >= 18;
     }
 
     // ── 4 — Gérer ─────────────────────────────────────────────────────────────
