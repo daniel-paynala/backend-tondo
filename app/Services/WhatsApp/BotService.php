@@ -27,7 +27,9 @@ use Illuminate\Support\Facades\DB;
  *                                                               ├─ connu ──► [push] ──► cotiser.attente
  *                                                               └─ inconnu ──► cotiser.nom_prenom ──► [push] ──► cotiser.attente
  *
- *        ──► 2 ──► rejoindre.ref ──► lien
+ *        ──► 2 ──► rejoindre.ref
+ *                     ├─ inconnu    ──► rejoindre.nom_prenom ──► inscription ──► menu
+ *                     └─ connu      ──► inscription ──► menu
  *        ──► 3 ──► lien app web
  *        ──► 4 ──► liste cagnottes
  *        ──► 5 ──► aide
@@ -74,6 +76,7 @@ class BotService
             $etape === 'cotiser.nom_prenom'     => $this->handleCotiserNomPrenom($numero, $texte),
             $etape === 'cotiser.attente'        => $this->handleCotiserAttente($numero, $texte),
             $etape === 'rejoindre.ref'          => $this->handleRejoindreRef($numero, $texte),
+            $etape === 'rejoindre.nom_prenom'   => $this->handleRejoindreNomPrenom($numero, $texte),
             default                             => $this->afficherMenu($numero),
         };
     }
@@ -531,7 +534,7 @@ class BotService
         🤝 *Rejoindre une cagnotte*
 
         Entrez la *référence* de la cagnotte
-        (numéro à 4-6 chiffres fourni par l'organisateur).
+        (numéro à 6 chiffres fourni par l'organisateur).
 
         _Tapez_ *#️⃣* _pour revenir au menu._
         TXT;
@@ -541,22 +544,114 @@ class BotService
     {
         $ref      = preg_replace('/\D/', '', $texte);
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
-        $appUrl   = config('app.url', 'http://51.44.254.213');
 
         if (! $cagnotte) {
             return $this->erreurEtMenu($numero, "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
-        $this->session->reset($numero);
+        $projectId = $this->tondoProjectId();
+        $user      = $this->utilisateur($numero);
+
+        // Déjà membre ?
+        if ($user) {
+            $dejaMembre = DB::table('tondo_participants')
+                ->where('cagnotte_id', $cagnotte->id)
+                ->where('user_id', $user->id)
+                ->exists();
+
+            if ($dejaMembre) {
+                return $this->erreurEtMenu($numero, "ℹ️ Vous êtes déjà membre de *{$cagnotte->titre}* (#{$ref}).");
+            }
+        }
+
+        // Tontine : vérifier places libres
+        if ($cagnotte->type === 'tontine_periodique') {
+            if (($cagnotte->nombre_inscrits ?? 0) >= ($cagnotte->nombre_participants ?? 0)) {
+                return $this->erreurEtMenu($numero, "❌ *{$cagnotte->titre}* est complet.\nPlus aucune place disponible.");
+            }
+        }
+
+        // Utilisateur connu → inscrire directement
+        if ($user) {
+            $this->inscrireParticipant($user, $cagnotte);
+            $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+
+            return <<<TXT
+            ✅ *Inscription confirmée !*
+
+            Vous avez rejoint la {$type} *{$cagnotte->titre}* (#{$ref}).
+
+            TXT . "\n" . $this->afficherMenu($numero);
+        }
+
+        // Nouvel utilisateur → demander nom + prénom
+        $this->session->set($numero, 'rejoindre.nom_prenom', [
+            'cagnotte_id'  => $cagnotte->id,
+            'cagnotte_ref' => $ref,
+            'project_id'   => $projectId,
+        ]);
 
         return <<<TXT
-        ✅ *{$cagnotte->titre}* · #{$ref}
+        👤 *Nouveau sur Tondo*
 
-        Rejoignez cette cagnotte en cliquant ici :
-        👉 {$appUrl}/cagnottes/{$ref}
+        Vous n'avez pas encore de compte. On va en créer un rapidement.
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+        _Exemple :_
+        MBOULA
+        Jean
+
+        _Tapez_ *#️⃣* _pour annuler._
         TXT;
+    }
+
+    private function handleRejoindreNomPrenom(string $numero, string $texte): string
+    {
+        $lignes = array_filter(array_map('trim', explode("\n", $texte)));
+
+        if (count($lignes) < 2) {
+            return <<<TXT
+            ⚠️ Format incorrect.
+            Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+            _Exemple :_
+            MBOULA
+            Jean
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        $lignes    = array_values($lignes);
+        $nom       = mb_strtoupper(trim($lignes[0]));
+        $prenom    = ucfirst(mb_strtolower(trim($lignes[1])));
+        $data      = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+        $cagnotte  = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $user = $this->cotisationSvc->creerCompteLight(
+            nom: $nom,
+            prenom: $prenom,
+            numeroE164: $numero,
+            projectId: $projectId,
+        );
+
+        $this->inscrireParticipant($user, $cagnotte);
+
+        $ref  = $data['cagnotte_ref'] ?? $cagnotte->reference;
+        $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+
+        return <<<TXT
+        ✅ *Inscription confirmée !*
+
+        Bienvenue *{$prenom}* ! Vous avez rejoint la {$type} *{$cagnotte->titre}* (#{$ref}).
+
+        TXT . "\n" . $this->afficherMenu($numero);
     }
 
     // ── 3 — Créer ─────────────────────────────────────────────────────────────
@@ -717,5 +812,42 @@ class BotService
             $id = DB::table('projects')->where('slug', 'tondo')->value('id') ?? '';
         }
         return $id;
+    }
+
+    private function inscrireParticipant(TondoUser $user, TondoCagnotte $cagnotte): void
+    {
+        $deja = DB::table('tondo_participants')
+            ->where('cagnotte_id', $cagnotte->id)
+            ->where('user_id', $user->id)
+            ->exists();
+
+        if ($deja) {
+            return;
+        }
+
+        DB::table('tondo_participants')->insert([
+            'id'              => (string) \Illuminate\Support\Str::uuid(),
+            'project_id'      => $cagnotte->project_id,
+            'cagnotte_id'     => $cagnotte->id,
+            'user_id'         => $user->id,
+            'nom'             => $user->nom,
+            'prenom'          => $user->prenom,
+            'numero_masque'   => $this->maskPhoneNum($user->numero ?? ''),
+            'statut_paiement' => 'en_attente',
+            'montant_paye'    => 0,
+            'created_at'      => now(),
+        ]);
+
+        DB::table('tondo_cagnottes')
+            ->where('id', $cagnotte->id)
+            ->increment('nombre_inscrits');
+    }
+
+    private function maskPhoneNum(string $phone): string
+    {
+        $clean = preg_replace('/[^\d+]/', '', $phone);
+        if (strlen($clean) < 6) return $clean;
+        $prefix = substr($clean, 0, strlen($clean) - 6);
+        return $prefix . str_repeat('*', strlen($clean) - strlen($prefix) - 2) . substr($clean, -2);
     }
 }

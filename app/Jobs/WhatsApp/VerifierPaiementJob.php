@@ -68,7 +68,7 @@ class VerifierPaiementJob implements ShouldQueue
         if ($statut === 'echec') {
             $sent = $this->envoyerEchec($twilio);
             if ($sent) {
-                $sessionSvc->reset($this->numeroWa);
+                $sessionSvc->set($this->numeroWa, 'menu');
             }
             return;
         }
@@ -145,7 +145,16 @@ class VerifierPaiementJob implements ShouldQueue
 
         ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tondo.ga. Nous traiterons votre remboursement sous 24h._
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        ————————————————
+        🎉 *Que souhaitez-vous faire ?*
+
+        1️⃣  *Cotiser*
+        2️⃣  *Rejoindre* une cagnotte
+        3️⃣  *Créer* une cagnotte
+        4️⃣  *Gérer* mes cagnottes
+        5️⃣  *Aide* & support
+
+        _Tapez le numéro de votre choix._
         TXT);
     }
 
