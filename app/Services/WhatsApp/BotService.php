@@ -79,7 +79,7 @@ class BotService
 
         Que souhaitez-vous faire ?
 
-        1️⃣  *Cotiser* à une cagnotte
+        1️⃣  *Cotiser*
         2️⃣  *Rejoindre* une cagnotte
         3️⃣  *Créer* une cagnotte
         4️⃣  *Gérer* mes cagnottes
