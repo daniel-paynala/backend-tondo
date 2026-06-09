@@ -1378,19 +1378,11 @@ class BotService
         }
 
         $data = $this->session->data($numero);
-
-        try {
-            $this->twilioVerify->sendOtp($numeroSaisi);
-        } catch (\Throwable $e) {
-            Log::warning('handleGererNumero: échec envoi OTP', [
-                'numero' => $numeroSaisi,
-                'err'    => $e->getMessage(),
-            ]);
-            return "⚠️ Impossible d'envoyer le code de vérification sur *{$this->maskPhoneNum($numeroSaisi)}*.\nVérifiez le numéro ou réessayez.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
+        [$otp, $hint] = $this->envoyerOtp($numeroSaisi);
 
         $this->session->set($numero, 'gerer.otp', array_merge($data, [
             'numero_payeur' => $numeroSaisi,
+            'otp'           => $otp,
         ]));
 
         $masque = $this->maskPhoneNum($numeroSaisi);
@@ -1398,10 +1390,8 @@ class BotService
         return <<<TXT
         🔐 *Vérification de votre identité*
 
-        Un code à 6 chiffres a été envoyé par SMS au *{$masque}*.
+        Un code à 6 chiffres a été envoyé au *{$masque}*.{$hint}
         Entrez ce code pour continuer :
-
-        _(Code valable 10 minutes)_
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
@@ -1409,22 +1399,14 @@ class BotService
 
     private function handleGererOtp(string $numero, string $texte): string
     {
-        $data          = $this->session->data($numero);
-        $numeroSaisi   = $data['numero_payeur'] ?? '';
-        $code          = trim($texte);
+        $data = $this->session->data($numero);
+        $code = trim($texte);
 
         if (! preg_match('/^\d{6}$/', $code)) {
-            return "⚠️ Entrez le code à *6 chiffres* reçu par SMS.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n_Tapez_ *#️⃣* _pour annuler._";
         }
 
-        try {
-            $approuve = $this->twilioVerify->checkOtp($numeroSaisi, $code);
-        } catch (\Throwable $e) {
-            Log::error('handleGererOtp: erreur checkOtp', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu($numero, "❌ Erreur technique lors de la vérification. Réessayez.");
-        }
-
-        if (! $approuve) {
+        if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
             return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
         }
 
@@ -2078,19 +2060,11 @@ class BotService
         }
 
         $numeroGerant = $data['numero_payeur'] ?? '';
-
-        try {
-            $this->twilioVerify->sendOtp($numeroGerant);
-        } catch (\Throwable $e) {
-            Log::warning('handleGererReversementMontant: échec envoi OTP', [
-                'numero' => $numeroGerant,
-                'err'    => $e->getMessage(),
-            ]);
-            return "⚠️ Impossible d'envoyer le code de confirmation.\nVérifiez votre numéro ou réessayez.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
+        [$otp, $hint] = $this->envoyerOtp($numeroGerant);
 
         $this->session->set($numero, 'gerer.revers.otp', array_merge($data, [
             'revers_montant' => $montant,
+            'otp'            => $otp,
         ]));
 
         $masque     = $this->maskPhoneNum($data['revers_numero'] ?? '');
@@ -2102,10 +2076,8 @@ class BotService
 
         Reversement de *{$montantFmt} FCFA* vers *{$masque}*
 
-        Un code de confirmation a été envoyé par SMS au *{$gerantNum}*.
+        Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
-
-        _(Code valable 10 minutes)_
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
@@ -2117,19 +2089,10 @@ class BotService
         $code = trim($texte);
 
         if (! preg_match('/^\d{6}$/', $code)) {
-            return "⚠️ Entrez le code à *6 chiffres* reçu par SMS.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n_Tapez_ *#️⃣* _pour annuler._";
         }
 
-        $numeroGerant = $data['numero_payeur'] ?? '';
-
-        try {
-            $approuve = $this->twilioVerify->checkOtp($numeroGerant, $code);
-        } catch (\Throwable $e) {
-            Log::error('handleGererReversementOtp: erreur checkOtp', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu($numero, "❌ Erreur technique lors de la vérification. Réessayez.");
-        }
-
-        if (! $approuve) {
+        if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
             return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
         }
 
@@ -2185,6 +2148,49 @@ class BotService
 
         ————————————————
         TXT . "\n" . $this->afficherMenu($numero);
+    }
+
+    // ── Utilitaires OTP ──────────────────────────────────────────────────────
+
+    /**
+     * En prod : envoie un vrai SMS via Twilio Verify, retourne [null, ''].
+     * En non-prod : génère 123456, pas d'envoi, retourne le code + hint affiché.
+     *
+     * @return array{0: string|null, 1: string}  [otp_local|null, hint_message]
+     */
+    private function envoyerOtp(string $numeroE164): array
+    {
+        if (app()->isProduction()) {
+            try {
+                $this->twilioVerify->sendOtp($numeroE164);
+            } catch (\Throwable $e) {
+                Log::warning('envoyerOtp: échec Twilio Verify', [
+                    'numero' => $numeroE164,
+                    'err'    => $e->getMessage(),
+                ]);
+            }
+            return [null, ''];
+        }
+
+        return ['123456', "\n_(Test : code = *123456*)_"];
+    }
+
+    /**
+     * En prod : vérifie via Twilio Verify (otp_local ignoré).
+     * En non-prod : compare au code local stocké en session.
+     */
+    private function verifierOtp(string $numeroE164, string $codeSaisi, ?string $otpLocal): bool
+    {
+        if (app()->isProduction()) {
+            try {
+                return $this->twilioVerify->checkOtp($numeroE164, $codeSaisi);
+            } catch (\Throwable $e) {
+                Log::error('verifierOtp: erreur checkOtp Twilio', ['err' => $e->getMessage()]);
+                return false;
+            }
+        }
+
+        return $codeSaisi === ($otpLocal ?? '123456');
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
