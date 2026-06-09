@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -60,11 +59,15 @@ class ReceiptService
             ]);
 
         $filename = 'recu-tondo-' . ($transaction['trans_id'] ?? Str::random(8)) . '.pdf';
-        $path     = 'receipts/' . $filename;
+        $dir      = public_path('receipts');
 
-        Storage::disk('public')->put($path, $pdf->output());
+        if (! is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
 
-        return Storage::disk('public')->url($path);
+        file_put_contents($dir . '/' . $filename, $pdf->output());
+
+        return url('receipts/' . $filename);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
