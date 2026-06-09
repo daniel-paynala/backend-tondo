@@ -131,7 +131,7 @@ class BotService
             '2'     => $this->demarrerRejoindre($numero),
             '3'     => $this->demarrerCreer($numero),
             '4'     => $this->demarrerGerer($numero),
-            '5'     => $this->afficherAide(),
+            '5'     => $this->afficherAide($numero),
             default => $this->afficherMenu($numero),
         };
     }
@@ -2172,7 +2172,7 @@ class BotService
 
     // ── 5 — Aide ──────────────────────────────────────────────────────────────
 
-    private function afficherAide(): string
+    private function afficherAide(string $numero): string
     {
         return <<<TXT
         ❓ *Aide & support Tondo*
@@ -2183,8 +2183,7 @@ class BotService
         _(Réponse sous 24h, jours ouvrables)_
 
         ————————————————
-        _Tapez_ *#️⃣* _pour revenir au menu principal._
-        TXT;
+        TXT . "\n" . $this->afficherMenu($numero);
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
