@@ -76,6 +76,7 @@ class BotService
             $etape === 'cotiser.nom_prenom'     => $this->handleCotiserNomPrenom($numero, $texte),
             $etape === 'cotiser.attente'        => $this->handleCotiserAttente($numero, $texte),
             $etape === 'rejoindre.ref'          => $this->handleRejoindreRef($numero, $texte),
+            $etape === 'rejoindre.numero'       => $this->handleRejoindreNumero($numero, $texte),
             $etape === 'rejoindre.nom_prenom'   => $this->handleRejoindreNomPrenom($numero, $texte),
             default                             => $this->afficherMenu($numero),
         };
@@ -548,8 +549,44 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
-        $projectId = $this->tondoProjectId();
-        $user      = $this->utilisateur($numero);
+        $type = $cagnotte->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation';
+
+        $this->session->set($numero, 'rejoindre.numero', [
+            'cagnotte_id'  => $cagnotte->id,
+            'cagnotte_ref' => $ref,
+            'project_id'   => $cagnotte->project_id,
+            'type'         => $cagnotte->type,
+        ]);
+
+        return <<<TXT
+        🤝 *{$cagnotte->titre}* · #{$ref}
+        Type : {$type}
+
+        Entrez votre *numéro de téléphone* Mobile Money
+        (format : *0XXXXXXXX*).
+
+        _Tapez_ *#️⃣* _pour revenir au menu._
+        TXT;
+    }
+
+    private function handleRejoindreNumero(string $numero, string $texte): string
+    {
+        $numeroSaisi = $this->normaliserNumero($texte);
+
+        if (! $numeroSaisi) {
+            return "⚠️ Numéro invalide.\nFormat attendu : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data      = $this->session->data($numero);
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+        $cagnotte  = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $ref  = $data['cagnotte_ref'] ?? $cagnotte->reference;
+        $user = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
         // Déjà membre ?
         if ($user) {
@@ -559,7 +596,7 @@ class BotService
                 ->exists();
 
             if ($dejaMembre) {
-                return $this->erreurEtMenu($numero, "ℹ️ Vous êtes déjà membre de *{$cagnotte->titre}* (#{$ref}).");
+                return $this->erreurEtMenu($numero, "ℹ️ Ce numéro est déjà membre de *{$cagnotte->titre}* (#{$ref}).");
             }
         }
 
@@ -584,11 +621,9 @@ class BotService
         }
 
         // Nouvel utilisateur → demander nom + prénom
-        $this->session->set($numero, 'rejoindre.nom_prenom', [
-            'cagnotte_id'  => $cagnotte->id,
-            'cagnotte_ref' => $ref,
-            'project_id'   => $projectId,
-        ]);
+        $this->session->set($numero, 'rejoindre.nom_prenom', array_merge($data, [
+            'numero_payeur' => $numeroSaisi,
+        ]));
 
         return <<<TXT
         👤 *Nouveau sur Tondo*
@@ -636,7 +671,7 @@ class BotService
         $user = $this->cotisationSvc->creerCompteLight(
             nom: $nom,
             prenom: $prenom,
-            numeroE164: $numero,
+            numeroE164: $data['numero_payeur'] ?? $numero,
             projectId: $projectId,
         );
 
