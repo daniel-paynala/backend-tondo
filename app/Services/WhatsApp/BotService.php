@@ -2,6 +2,7 @@
 
 namespace App\Services\WhatsApp;
 
+use App\Jobs\WhatsApp\VerifierPaiementJob;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
@@ -400,6 +401,17 @@ class BotService
             'user_id'        => $user->id,
         ]);
 
+        // Surveillance automatique : job qui poll toutes les 30s pendant 3 min max
+        VerifierPaiementJob::dispatch(
+            transId:     $resultat['trans_id'],
+            numeroWa:    $numero,
+            projectId:   $cagnotte->project_id,
+            cagnotteRef: $cagnotte->reference,
+            montant:     (int) $data['montant'],
+            prenom:      $prenom,
+            userId:      $user->id,
+        )->delay(now()->addSeconds(30));
+
         return <<<TXT
         ⏳ Bonjour *{$prenom}* !
 
@@ -407,7 +419,8 @@ class BotService
 
         👉 *Validez le paiement de {$montantFmt} FCFA sur votre Mobile Money.*
 
-        Une fois validé, tapez *OK* pour vérifier le statut de votre paiement.
+        Vous recevrez la confirmation *automatiquement* dès validation (délai max 3 min).
+        Tapez *OK* si vous souhaitez vérifier manuellement.
 
         _Tapez_ *#* _pour annuler._
         TXT;
