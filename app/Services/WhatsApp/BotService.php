@@ -6,6 +6,7 @@ use App\Jobs\WhatsApp\VerifierPaiementJob;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
+use App\Services\TwilioVerifyService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -45,6 +46,7 @@ class BotService
         private ReceiptService       $receiptSvc,
         private CreerCagnotteService $creerCagnotteSvc,
         private GererCagnotteService $gererCagnotteSvc,
+        private TwilioVerifyService  $twilioVerify,
     ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────
@@ -1350,6 +1352,7 @@ class BotService
     {
         return match ($etape) {
             'gerer.numero'           => $this->handleGererNumero($numero, $texte),
+            'gerer.otp'              => $this->handleGererOtp($numero, $texte),
             'gerer.nom_prenom'       => $this->handleGererNomPrenom($numero, $texte),
             'gerer.date_naissance'   => $this->handleGererDateNaissance($numero, $texte),
             'gerer.liste'            => $this->handleGererListe($numero, $texte),
@@ -1373,25 +1376,73 @@ class BotService
             return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
         }
 
-        $data      = $this->session->data($numero);
+        $data = $this->session->data($numero);
+
+        try {
+            $this->twilioVerify->sendOtp($numeroSaisi);
+        } catch (\Throwable $e) {
+            Log::warning('handleGererNumero: échec envoi OTP', [
+                'numero' => $numeroSaisi,
+                'err'    => $e->getMessage(),
+            ]);
+            return "⚠️ Impossible d'envoyer le code de vérification sur *{$this->maskPhoneNum($numeroSaisi)}*.\nVérifiez le numéro ou réessayez.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $this->session->set($numero, 'gerer.otp', array_merge($data, [
+            'numero_payeur' => $numeroSaisi,
+        ]));
+
+        $masque = $this->maskPhoneNum($numeroSaisi);
+
+        return <<<TXT
+        🔐 *Vérification de votre identité*
+
+        Un code à 6 chiffres a été envoyé par SMS au *{$masque}*.
+        Entrez ce code pour continuer :
+
+        _(Code valable 10 minutes)_
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleGererOtp(string $numero, string $texte): string
+    {
+        $data          = $this->session->data($numero);
+        $numeroSaisi   = $data['numero_payeur'] ?? '';
+        $code          = trim($texte);
+
+        if (! preg_match('/^\d{6}$/', $code)) {
+            return "⚠️ Entrez le code à *6 chiffres* reçu par SMS.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        try {
+            $approuve = $this->twilioVerify->checkOtp($numeroSaisi, $code);
+        } catch (\Throwable $e) {
+            Log::error('handleGererOtp: erreur checkOtp', ['err' => $e->getMessage()]);
+            return $this->erreurEtMenu($numero, "❌ Erreur technique lors de la vérification. Réessayez.");
+        }
+
+        if (! $approuve) {
+            return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
+        }
+
+        // OTP validé — continuer le flow normal
         $projectId = $data['project_id'] ?? $this->tondoProjectId();
         $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
         if ($user) {
             return $this->afficherListeCagnottes($numero, $user, array_merge($data, [
-                'user_id'       => $user->id,
-                'numero_payeur' => $numeroSaisi,
+                'user_id' => $user->id,
             ]));
         }
 
-        $this->session->set($numero, 'gerer.nom_prenom', array_merge($data, [
-            'numero_payeur' => $numeroSaisi,
-        ]));
+        $this->session->set($numero, 'gerer.nom_prenom', $data);
 
         return <<<TXT
-        👤 *Nouveau sur Tondo*
+        ✅ *Identité vérifiée !*
 
-        Vous n'avez pas encore de compte. On va en créer un rapidement.
+        Vous n'avez pas encore de compte Tondo. On va en créer un.
 
         Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
 
