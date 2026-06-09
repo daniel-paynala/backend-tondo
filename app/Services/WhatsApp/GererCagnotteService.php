@@ -20,7 +20,7 @@ class GererCagnotteService
     public function cagnottesGerees(TondoUser $user): Collection
     {
         return TondoCagnotte::where('user_id', $user->id)
-            ->whereNotIn('statut', ['cloturee', 'annulee'])
+            ->where('statut', '!=', 'cloturee')
             ->orderBy('date_creation', 'desc')
             ->get();
     }

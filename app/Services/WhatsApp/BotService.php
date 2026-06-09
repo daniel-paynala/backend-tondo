@@ -1759,7 +1759,7 @@ class BotService
     private function executerSupprimerTontine(string $numero, TondoCagnotte $cagnotte): string
     {
         DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
-            'statut'     => 'annulee',
+            'statut'     => 'cloturee',
             'updated_at' => now(),
         ]);
 
