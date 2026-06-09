@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsCo
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
+use App\Http\Controllers\Api\WhatsApp\StatusController as WhatsAppStatusController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================================================
@@ -35,6 +36,7 @@ Route::get('/health', fn () => response()->json([
 // ============================================================================
 Route::prefix('whatsapp')->group(function () {
     Route::post('/webhook', [WhatsAppWebhookController::class, 'recevoir']);
+    Route::post('/status',  [WhatsAppStatusController::class,  'recevoir']);
 });
 
 // ============================================================================
