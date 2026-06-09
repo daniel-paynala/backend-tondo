@@ -235,7 +235,7 @@ class BotService
 
     // ── 1 — Cotiser : numéro de téléphone ────────────────────────────────────
 
-    private function handleCotiserNumero(string $numero, string $texte): string
+    private function handleCotiserNumero(string $numero, string $texte): string|array
     {
         $numeroSaisi = $this->normaliserNumero($texte);
 
@@ -309,7 +309,7 @@ class BotService
 
     // ── 1 — Cotiser : nom + prénom (nouveau compte light) ────────────────────
 
-    private function handleCotiserNomPrenom(string $numero, string $texte): string
+    private function handleCotiserNomPrenom(string $numero, string $texte): string|array
     {
         $lignes = array_filter(array_map('trim', explode("\n", $texte)));
 
@@ -345,7 +345,7 @@ class BotService
 
     // ── 1 — Cotiser : initier le paiement et attendre ────────────────────────
 
-    private function lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string
+    private function lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string|array
     {
         try {
             return $this->_lancerPaiement($numero, $user, $data, $numeroPayeur);
@@ -360,7 +360,7 @@ class BotService
         }
     }
 
-    private function _lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string
+    private function _lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string|array
     {
         $cagnotte = TondoCagnotte::find($data['cagnotte_id']);
 
@@ -415,7 +415,7 @@ class BotService
 
     // ── 1 — Cotiser : vérification après push ────────────────────────────────
 
-    private function handleCotiserAttente(string $numero, string $texte): string
+    private function handleCotiserAttente(string $numero, string $texte): string|array
     {
         $data    = $this->session->data($numero);
         $transId = $data['trans_id'] ?? null;
