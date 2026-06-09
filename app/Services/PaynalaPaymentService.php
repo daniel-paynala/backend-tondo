@@ -49,7 +49,7 @@ class PaynalaPaymentService
         $token = $this->getToken();
 
         $response = Http::withToken($token)
-            ->timeout(15)
+            ->timeout(8)
             ->post("{$this->baseUrl}/create_payment_v2", [
                 'request_id' => $requestId,
                 'amount'     => $amount,
@@ -79,7 +79,7 @@ class PaynalaPaymentService
         $token = $this->getToken();
 
         $response = Http::withToken($token)
-            ->timeout(10)
+            ->timeout(4)
             ->get("{$this->baseUrl}/payment_status_v2", ['request_id' => $requestId]);
 
         if ($response->status() === 404) {
@@ -280,7 +280,7 @@ class PaynalaPaymentService
     {
         // Cache 160 s < expiration 170 s → jamais de token expiré en transit.
         return Cache::remember('paynala_oauth_token', 160, function () {
-            $response = Http::timeout(10)
+            $response = Http::timeout(4)
                 ->post("{$this->baseUrl}/oauth_token_v2", [
                     'grant_type'    => 'client_credentials',
                     'client_id'     => $this->clientId,
