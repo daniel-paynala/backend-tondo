@@ -87,6 +87,12 @@ class BotService
 
     // ── Menu principal ────────────────────────────────────────────────────────
 
+    private function erreurEtMenu(string $numero, string $message): string
+    {
+        $this->session->reset($numero);
+        return $message . "\n\n" . $this->afficherMenu($numero);
+    }
+
     private function afficherMenu(string $numero): string
     {
         $this->session->set($numero, 'menu');
@@ -139,7 +145,7 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.\n\n_Tapez_ *#* _pour revenir au menu._";
+            return $this->erreurEtMenu($numero, "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         if ($cagnotte->statut === 'cloturee') {
@@ -207,11 +213,11 @@ class BotService
         $montant = (int) preg_replace('/\D/', '', $texte);
 
         if ($montant < 100) {
-            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide.\n\n_Tapez_ *#* _pour revenir au menu._";
+            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide, ou tapez *#* pour annuler.";
         }
 
         if ($montant > 500_000) {
-            return "⚠️ Montant maximum par transaction : *500 000 FCFA*.\n\n_Tapez_ *#* _pour revenir au menu._";
+            return "⚠️ Montant maximum par transaction : *500 000 FCFA*.\nEntrez un montant valide, ou tapez *#* pour annuler.";
         }
 
         $data = $this->session->data($numero);
@@ -512,7 +518,7 @@ class BotService
         $appUrl   = config('app.url', 'http://51.44.254.213');
 
         if (! $cagnotte) {
-            return "❌ Référence *#{$ref}* introuvable.\n\n_Tapez_ *#* _pour revenir au menu._";
+            return $this->erreurEtMenu($numero, "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         $this->session->reset($numero);
