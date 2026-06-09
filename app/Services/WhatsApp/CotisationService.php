@@ -42,12 +42,9 @@ class CotisationService
         string $numeroE164,
         string $projectId,
     ): TondoUser {
+        $suffixe  = substr(preg_replace('/\D/', '', $numeroE164), -9);
         $existant = TondoUser::where('project_id', $projectId)
-            ->where(function ($q) use ($numeroE164) {
-                $suffixe = substr(preg_replace('/\D/', '', $numeroE164), -9);
-                $q->where('telephone', 'like', "%{$suffixe}")
-                  ->orWhere('numero', 'like', "%{$suffixe}");
-            })
+            ->where('numero', 'like', "%{$suffixe}")
             ->first();
 
         if ($existant) {
