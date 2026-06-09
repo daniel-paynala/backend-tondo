@@ -5,47 +5,48 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-body {
+html, body {
   font-family: DejaVu Sans, sans-serif;
   font-size: 11px;
   color: #1A1F1E;
-  background: #F4ECE0;
+  /* Pas de background : évite que DomPDF colorie les pages vierges */
 }
 
 .page {
   width: 100%;
-  padding: 24px 28px;
+  padding: 40px 100px;
   background: #F4ECE0;
+  overflow: hidden;
 }
 
 /* En-tête */
 .header {
   background: #0F4C5C;
-  border-radius: 8px;
-  padding: 16px 20px;
-  margin-bottom: 16px;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
 }
 .brand {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: #F4ECE0;
   letter-spacing: -0.5px;
 }
-.brand span {
+.brand-icon {
   display: inline-block;
   background: #C97B4A;
   color: #1A1F1E;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
-  width: 22px;
-  height: 22px;
-  line-height: 22px;
+  width: 19px;
+  height: 19px;
+  line-height: 19px;
   text-align: center;
-  border-radius: 5px;
-  margin-right: 6px;
+  border-radius: 4px;
+  margin-right: 5px;
 }
 .subtitle {
-  font-size: 9px;
+  font-size: 8px;
   color: rgba(244,236,224,0.6);
   letter-spacing: 0.5px;
   margin-top: 3px;
@@ -54,37 +55,37 @@ body {
   display: inline-block;
   background: #6B8E4E;
   color: #fff;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: 20px;
-  margin-top: 10px;
+  margin-top: 7px;
 }
 
 /* Montant */
 .amount-block {
   text-align: center;
-  margin: 14px 0;
+  margin: 10px 0;
 }
 .amount-label {
-  font-size: 9px;
+  font-size: 8px;
   color: #0F4C5C;
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 .amount-value {
-  font-size: 34px;
+  font-size: 30px;
   font-weight: 700;
   color: #0F4C5C;
 }
 .amount-currency {
-  font-size: 16px;
+  font-size: 14px;
   color: #C97B4A;
   font-weight: 600;
 }
 .amount-fees {
-  font-size: 9px;
+  font-size: 8px;
   color: #999;
   margin-top: 2px;
 }
@@ -92,71 +93,80 @@ body {
 .divider {
   border: none;
   border-top: 1px dashed #C97B4A;
-  margin: 12px 0;
+  margin: 9px 0;
   opacity: 0.5;
 }
 
 /* Cards */
 .card {
   background: #fff;
-  border-radius: 6px;
-  padding: 10px 14px;
-  margin-bottom: 10px;
+  border-radius: 5px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
   border: 1px solid rgba(15,76,92,0.08);
 }
 .card-title {
-  font-size: 8px;
+  font-size: 7px;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: #0F4C5C;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   border-bottom: 1px solid #f0ede8;
-  padding-bottom: 5px;
+  padding-bottom: 4px;
 }
 
-/* Lignes d'info — table pour éviter overflow flex */
+/*
+ * table-layout:fixed  → colonnes fixes, le contenu ne déborde jamais à droite
+ * word-break:break-all → coupe les IDs longs (TONDOPAYXXXXXXX) sans espace
+ */
 table.info {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 table.info td {
-  padding: 4px 0;
+  padding: 3px 0;
   border-bottom: 1px solid #f5f2ee;
   font-size: 10px;
   vertical-align: middle;
+  overflow: hidden;
+  word-break: break-all;
 }
 table.info tr:last-child td { border-bottom: none; }
-table.info td.lbl { color: #777; width: 48%; }
+table.info td.lbl { color: #777; width: 46%; word-break: normal; }
 table.info td.val { font-weight: 600; color: #1A1F1E; text-align: right; }
-table.info td.val.accent { color: #C97B4A; }
+table.info td.val.accent  { color: #C97B4A; }
 table.info td.val.primary { color: #0F4C5C; }
 
 .ref-chip {
+  display: inline-block;
   background: #0F4C5C;
   color: #F4ECE0;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 20px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 /* Pied de page */
 .footer {
   text-align: center;
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: 9px;
+  padding-top: 7px;
   border-top: 1px solid rgba(15,76,92,0.1);
 }
-.footer-brand { font-size: 9px; font-weight: 700; color: #0F4C5C; }
-.footer-text  { font-size: 8px; color: #aaa; line-height: 1.5; margin-top: 2px; }
+.footer-brand { font-size: 8px; font-weight: 700; color: #0F4C5C; }
+.footer-text  { font-size: 7px; color: #aaa; line-height: 1.5; margin-top: 2px; }
 </style>
 </head>
 <body>
 <div class="page">
 
   <div class="header">
-    <div class="brand"><span>T</span>Tondo</div>
+    <div class="brand"><span class="brand-icon">T</span>Tondo</div>
     <div class="subtitle">REÇU DE PAIEMENT · PAYNALA SAS</div>
     <div class="badge">✓ PAIEMENT CONFIRMÉ</div>
   </div>
