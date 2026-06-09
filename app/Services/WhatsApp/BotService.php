@@ -1411,8 +1411,9 @@ class BotService
         }
 
         // OTP validé — continuer le flow normal
-        $projectId = $data['project_id'] ?? $this->tondoProjectId();
-        $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
+        $numeroSaisi = $data['numero_payeur'] ?? '';
+        $projectId   = $data['project_id'] ?? $this->tondoProjectId();
+        $user        = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
         if ($user) {
             return $this->afficherListeCagnottes($numero, $user, array_merge($data, [
