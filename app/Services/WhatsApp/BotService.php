@@ -2,8 +2,8 @@
 
 namespace App\Services\WhatsApp;
 
-use App\Jobs\WhatsApp\VerifierPaiementJob;
 use App\Models\TondoCagnotte;
+use App\Models\TondoPaiementEnAttente;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
 use App\Services\TwilioVerifyService;
@@ -47,6 +47,7 @@ class BotService
         private CreerCagnotteService $creerCagnotteSvc,
         private GererCagnotteService $gererCagnotteSvc,
         private TwilioVerifyService  $twilioVerify,
+        private TwilioSenderService  $twilio,
     ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────
@@ -418,16 +419,16 @@ class BotService
             'user_id'        => $user->id,
         ]);
 
-        // Surveillance automatique : job qui poll toutes les 30s pendant 3 min max
-        VerifierPaiementJob::dispatch(
-            transId:     $resultat['trans_id'],
-            numeroWa:    $numero,
-            projectId:   $cagnotte->project_id,
-            cagnotteRef: $cagnotte->reference,
-            montant:     (int) $data['montant'],
-            prenom:      $prenom,
-            userId:      $user->id,
-        )->delay(now()->addSeconds(30));
+        // Surveillance automatique : vérification toutes les minutes par le scheduler.
+        TondoPaiementEnAttente::create([
+            'trans_id'    => $resultat['trans_id'],
+            'numero_wa'   => $numero,
+            'project_id'  => $cagnotte->project_id,
+            'cagnotte_ref' => $cagnotte->reference,
+            'montant'     => (int) $data['montant'],
+            'prenom'      => $prenom,
+            'user_id'     => $user->id,
+        ]);
 
         return <<<TXT
         ⏳ Bonjour *{$prenom}* !
@@ -468,18 +469,21 @@ class BotService
         $statut = $this->cotisationSvc->verifierStatut($transId, $data['project_id']);
 
         if ($statut === 'succes') {
+            // Supprimer du suivi automatique pour éviter un double-envoi par le scheduler.
+            TondoPaiementEnAttente::where('trans_id', $transId)->delete();
+
             $this->session->set($numero, 'menu');
             $cagnotte = TondoCagnotte::where('reference', $data['reference'])->first();
             $user     = TondoUser::find($data['user_id']);
 
-            // Reçu PDF envoyé en message séparé dès qu'il est prêt.
-            \App\Jobs\WhatsApp\EnvoyerRecuJob::dispatch(
+            // Reçu PDF envoyé en message outbound séparé.
+            $this->envoyerRecuOutbound(
                 numeroWa:    $numero,
                 userId:      $data['user_id'] ?? null,
                 cagnotteRef: $data['reference'] ?? null,
                 transId:     $transId,
                 montant:     (int) ($data['montant'] ?? 0),
-            )->delay(now()->addSeconds(4));
+            );
 
             return $this->recu($user, $cagnotte, [
                 'trans_id'    => $transId,
@@ -508,6 +512,31 @@ class BotService
     }
 
     // ── Reçu Tonji (PDF) ─────────────────────────────────────────────────────
+
+    private function envoyerRecuOutbound(
+        string  $numeroWa,
+        ?string $userId,
+        ?string $cagnotteRef,
+        string  $transId,
+        int     $montant,
+    ): void {
+        try {
+            $user     = $userId     ? TondoUser::find($userId)                                  : null;
+            $cagnotte = $cagnotteRef ? TondoCagnotte::where('reference', $cagnotteRef)->first() : null;
+
+            $pdfUrl = $this->receiptSvc->generer($user, $cagnotte, [
+                'trans_id'    => $transId,
+                'montant_net' => $montant,
+            ], 'WhatsApp');
+
+            $this->twilio->envoyer($numeroWa, "📄 *Votre reçu Tonji :*\n{$pdfUrl}");
+        } catch (\Throwable $e) {
+            Log::error('BotService: échec envoi reçu outbound', [
+                'trans_id' => $transId,
+                'err'      => $e->getMessage(),
+            ]);
+        }
+    }
 
     /**
      * Génère le PDF et retourne [message_texte, pdf_url].

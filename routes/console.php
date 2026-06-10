@@ -4,6 +4,7 @@ use App\Console\Commands\CleanReceiptsCommand;
 use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
 use App\Console\Commands\TraiterReversementsAutoCagnottes;
+use App\Console\Commands\VerifierPaiementsEnAttenteCommand;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -48,6 +49,15 @@ Schedule::command(TraiterReversementsAutoCagnottes::class)
 Schedule::command(TontineRappelsCommand::class)
     ->dailyAt('09:00')
     ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
+/*
+ * Vérification des paiements WhatsApp en attente — toutes les minutes.
+ * Remplace VerifierPaiementJob (ne nécessite pas de queue worker).
+ */
+Schedule::command(VerifierPaiementsEnAttenteCommand::class)
+    ->everyMinute()
     ->withoutOverlapping()
     ->runInBackground();
 
