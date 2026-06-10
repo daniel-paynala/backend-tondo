@@ -53,13 +53,13 @@ Schedule::command(TontineRappelsCommand::class)
     ->runInBackground();
 
 /*
- * Vérification des paiements WhatsApp en attente — toutes les minutes.
+ * Vérification des paiements WhatsApp en attente — toutes les 5 secondes.
  * Remplace VerifierPaiementJob (ne nécessite pas de queue worker).
+ * No-op instantané si aucun paiement en attente.
  */
 Schedule::command(VerifierPaiementsEnAttenteCommand::class)
-    ->everyMinute()
-    ->withoutOverlapping()
-    ->runInBackground();
+    ->everyFiveSeconds()
+    ->withoutOverlapping();
 
 /*
  * Nettoyage des PDFs de receipts/ vieux de plus de 24h — 02h chaque nuit.
