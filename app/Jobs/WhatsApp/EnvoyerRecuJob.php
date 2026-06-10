@@ -41,7 +41,7 @@ class EnvoyerRecuJob implements ShouldQueue
                 'montant_net' => $this->montant,
             ], 'WhatsApp');
 
-            $twilio->envoyer($this->numeroWa, "📄 *Votre reçu Tondo :*\n{$pdfUrl}");
+            $twilio->envoyer($this->numeroWa, "📄 *Votre reçu Tonji :*\n{$pdfUrl}");
         } catch (\Throwable $e) {
             Log::error('EnvoyerRecuJob: échec', [
                 'err'      => $e->getMessage(),
