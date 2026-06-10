@@ -759,15 +759,10 @@ class BotService
             'creer.cotisation.nom'             => $this->handleCreerCotisationNom($numero, $texte),
             'creer.cotisation.montant_cible'   => $this->handleCreerCotisationMontantCible($numero, $texte),
             'creer.cotisation.date_fin'        => $this->handleCreerCotisationDateFin($numero, $texte),
-            'creer.tontine.nom'                => $this->handleCreerTontineNom($numero, $texte),
-            'creer.tontine.nb_participants'    => $this->handleCreerTontineNbParticipants($numero, $texte),
-            'creer.tontine.montant_cycle'      => $this->handleCreerTontineMontantCycle($numero, $texte),
-            'creer.tontine.periodicite'        => $this->handleCreerTontinePeriodicite($numero, $texte),
-            'creer.tontine.intervalle'         => $this->handleCreerTontineIntervalle($numero, $texte),
-            'creer.tontine.jour'               => $this->handleCreerTontineJour($numero, $texte),
-            'creer.tontine.penalite'           => $this->handleCreerTontinePenalite($numero, $texte),
-            'creer.tontine.penalite_montant'   => $this->handleCreerTontinePenaliteMontant($numero, $texte),
-            'creer.tontine.penalite_frequence' => $this->handleCreerTontinePenaliteFrequence($numero, $texte),
+            'creer.tontine.nom'             => $this->handleCreerTontineNom($numero, $texte),
+            'creer.tontine.nb_participants' => $this->handleCreerTontineNbParticipants($numero, $texte),
+            'creer.tontine.montant_cycle'   => $this->handleCreerTontineMontantCycle($numero, $texte),
+            'creer.tontine.periodicite'     => $this->handleCreerTontinePeriodicite($numero, $texte),
             'creer.numero'                     => $this->handleCreerNumero($numero, $texte),
             'creer.nom_prenom'                 => $this->handleCreerNomPrenom($numero, $texte),
             'creer.date_naissance'             => $this->handleCreerDateNaissance($numero, $texte),
@@ -933,10 +928,11 @@ class BotService
         ]));
 
         return <<<TXT
-        *Périodicité* de la tontine ?
+        *Fréquence* de reversement ?
 
-        1️⃣  Hebdomadaire
-        2️⃣  Mensuelle
+        1️⃣  *1 semaine* (retrait le lundi)
+        2️⃣  *2 semaines* (retrait le lundi)
+        3️⃣  *1 mois* (retrait le 7 du mois)
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
@@ -944,150 +940,19 @@ class BotService
 
     private function handleCreerTontinePeriodicite(string $numero, string $texte): string
     {
-        if (! in_array($texte, ['1', '2'])) {
-            return "⚠️ Tapez *1* pour Hebdomadaire ou *2* pour Mensuelle.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        if (! in_array($texte, ['1', '2', '3'])) {
+            return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._";
         }
 
-        $periodicite = $texte === '1' ? 'hebdomadaire' : 'mensuelle';
-        $data        = $this->session->data($numero);
-        $this->session->set($numero, 'creer.tontine.intervalle', array_merge($data, [
-            'periodicite' => $periodicite,
-        ]));
+        $data    = $this->session->data($numero);
+        $mapping = [
+            '1' => ['periodicite' => 'hebdomadaire', 'intervalle' => 1, 'jour' => 'lundi'],
+            '2' => ['periodicite' => 'hebdomadaire', 'intervalle' => 2, 'jour' => 'lundi'],
+            '3' => ['periodicite' => 'mensuelle',    'intervalle' => 1, 'jour' => 7],
+        ];
 
-        $unite = $periodicite === 'hebdomadaire' ? 'semaines' : 'mois';
-
-        return <<<TXT
-        Fréquence ?
-        _(toutes les X {$unite} — tapez *1* pour chaque {$unite})_
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
-    }
-
-    private function handleCreerTontineIntervalle(string $numero, string $texte): string
-    {
-        $intervalle = (int) preg_replace('/\D/', '', $texte);
-        if ($intervalle < 1 || $intervalle > 12) {
-            return "⚠️ Valeur invalide. Entre *1* et *12*.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
-
-        $data        = $this->session->data($numero);
-        $periodicite = $data['periodicite'] ?? '';
-        $this->session->set($numero, 'creer.tontine.jour', array_merge($data, [
-            'intervalle' => $intervalle,
-        ]));
-
-        if ($periodicite === 'hebdomadaire') {
-            return <<<TXT
-            Jour de *retrait* ?
-
-            1️⃣ Lundi · 2️⃣ Mardi · 3️⃣ Mercredi · 4️⃣ Jeudi
-            5️⃣ Vendredi · 6️⃣ Samedi · 7️⃣ Dimanche
-
-            _Tapez_ *#️⃣* _pour annuler._
-            TXT;
-        }
-
-        return <<<TXT
-        Jour du *mois* de retrait ?
-        _(entre 1 et 28)_
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
-    }
-
-    private function handleCreerTontineJour(string $numero, string $texte): string
-    {
-        $data        = $this->session->data($numero);
-        $periodicite = $data['periodicite'] ?? '';
-        $val         = trim($texte);
-
-        if ($periodicite === 'hebdomadaire') {
-            $jours = ['1' => 'lundi', '2' => 'mardi', '3' => 'mercredi', '4' => 'jeudi',
-                      '5' => 'vendredi', '6' => 'samedi', '7' => 'dimanche'];
-            if (! isset($jours[$val])) {
-                return "⚠️ Tapez un chiffre entre *1* (Lundi) et *7* (Dimanche).\n\n_Tapez_ *#️⃣* _pour annuler._";
-            }
-            $jour = $jours[$val];
-        } else {
-            $jour = (int) preg_replace('/\D/', '', $val);
-            if ($jour < 1 || $jour > 28) {
-                return "⚠️ Jour invalide. Entre *1* et *28*.\n\n_Tapez_ *#️⃣* _pour annuler._";
-            }
-        }
-
-        $this->session->set($numero, 'creer.tontine.penalite', array_merge($data, [
-            'jour' => $jour,
-        ]));
-
-        return <<<TXT
-        *Pénalité* de retard pour les cotisants en retard ?
-
-        1️⃣  Oui
-        0️⃣  Non
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
-    }
-
-    private function handleCreerTontinePenalite(string $numero, string $texte): string
-    {
-        $data = $this->session->data($numero);
-
-        if ($texte === '0') {
-            $this->session->set($numero, 'creer.numero', array_merge($data, [
-                'penalite_active' => false,
-            ]));
-            return $this->demanderNumeroCreateur();
-        }
-
-        if ($texte === '1') {
-            $this->session->set($numero, 'creer.tontine.penalite_montant', array_merge($data, [
-                'penalite_active' => true,
-            ]));
-            return <<<TXT
-            Montant de la pénalité ? (en FCFA)
-            _(entre 100 et 500 000 FCFA)_
-
-            _Tapez_ *#️⃣* _pour annuler._
-            TXT;
-        }
-
-        return "⚠️ Tapez *1* pour Oui ou *0* pour Non.\n\n_Tapez_ *#️⃣* _pour annuler._";
-    }
-
-    private function handleCreerTontinePenaliteMontant(string $numero, string $texte): string
-    {
-        $montant = (int) preg_replace('/\D/', '', $texte);
-        if ($montant < 100 || $montant > 500_000) {
-            return "⚠️ Montant invalide. Entre *100* et *500 000 FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
-
-        $data = $this->session->data($numero);
-        $this->session->set($numero, 'creer.tontine.penalite_frequence', array_merge($data, [
-            'penalite_montant' => $montant,
-        ]));
-
-        return <<<TXT
-        Fréquence de la pénalité ?
-
-        1️⃣  Par *heure* de retard
-        2️⃣  Par *jour* de retard
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
-    }
-
-    private function handleCreerTontinePenaliteFrequence(string $numero, string $texte): string
-    {
-        if (! in_array($texte, ['1', '2'])) {
-            return "⚠️ Tapez *1* pour Par heure ou *2* pour Par jour.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
-
-        $frequence = $texte === '1' ? 'heure' : 'jour';
-        $data      = $this->session->data($numero);
-        $this->session->set($numero, 'creer.numero', array_merge($data, [
-            'penalite_frequence' => $frequence,
+        $this->session->set($numero, 'creer.numero', array_merge($data, $mapping[$texte], [
+            'penalite_active' => false,
         ]));
 
         return $this->demanderNumeroCreateur();
@@ -1238,14 +1103,17 @@ class BotService
         $masque = $this->maskPhoneNum($numeroRetrait);
 
         if ($data['type'] === 'tontine_periodique') {
-            $montant     = number_format((int) $data['montant_par_cycle'], 0, ',', ' ');
-            $periodicite = $data['periodicite'] === 'hebdomadaire' ? 'Hebdomadaire' : 'Mensuelle';
-            $unite       = $data['periodicite'] === 'hebdomadaire' ? 'semaine(s)' : 'mois';
-            $intervalle  = (int) ($data['intervalle'] ?? 1);
-            $jour        = is_string($data['jour'] ?? null) ? ucfirst($data['jour']) : 'Jour ' . ($data['jour'] ?? '?') . ' du mois';
-            $penalite    = ($data['penalite_active'] ?? false)
-                ? number_format((int) ($data['penalite_montant'] ?? 0), 0, ',', ' ') . ' FCFA/' . ($data['penalite_frequence'] ?? 'jour')
-                : 'Non';
+            $montant    = number_format((int) $data['montant_par_cycle'], 0, ',', ' ');
+            $intervalle = (int) ($data['intervalle'] ?? 1);
+            $jour       = $data['jour'] ?? '?';
+            $jourStr    = is_string($jour) ? ucfirst($jour) : 'le ' . $jour . ' du mois';
+
+            if ($data['periodicite'] === 'hebdomadaire') {
+                $freq = $intervalle === 1 ? 'Toutes les semaines' : "Toutes les {$intervalle} semaines";
+                $freq .= " ({$jourStr})";
+            } else {
+                $freq = "1 fois/mois ({$jourStr})";
+            }
 
             $lignes = <<<TXT
             📝 *Récapitulatif — Tontine périodique*
@@ -1253,9 +1121,7 @@ class BotService
             Nom : *{$data['titre']}*
             Participants : *{$data['nombre_participants']}*
             Montant/cycle : *{$montant} FCFA*
-            Périodicité : *{$periodicite}* · toutes les {$intervalle} {$unite}
-            Jour de retrait : *{$jour}*
-            Pénalité de retard : *{$penalite}*
+            Fréquence : *{$freq}*
             Numéro de retrait : *{$masque}*
             TXT;
         } else {
