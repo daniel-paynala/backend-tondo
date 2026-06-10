@@ -901,8 +901,7 @@ class BotService
         ]));
 
         return <<<TXT
-        Montant reversé *par cycle* au bénéficiaire ? (en FCFA)
-        _💡 Pensez à intégrer vos frais de retrait dans ce montant._
+        Montant *récupéré par participant* ? (en FCFA)
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
