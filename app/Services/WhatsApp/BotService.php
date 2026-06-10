@@ -64,6 +64,11 @@ class BotService
         $texte = trim($texte);
         $etape = $this->session->etape($numero);
 
+        // ── Deep link TONJI [ref] — contourne l'état de session ──────────────
+        if (preg_match('/^TONJI\s+(\d{4,6})$/i', $texte, $m)) {
+            return $this->handleDeepLink($numero, $m[1]);
+        }
+
         if ($this->estRetourMenu($texte)) {
             $this->session->reset($numero);
             return $this->afficherMenu($numero);
@@ -1297,6 +1302,10 @@ class BotService
         $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
         $prenom = ucfirst(mb_strtolower($user->prenom));
         $ref    = $cagnotte->reference;
+        $botNum = ltrim(config('tondo.whatsapp_numero', ''), '+');
+        $lienWa = $botNum
+            ? "\nhttps://wa.me/{$botNum}?text=" . rawurlencode("TONJI {$ref}")
+            : " #*{$ref}*";
 
         return <<<TXT
         🎉 *{$cagnotte->titre}* créée avec succès !
@@ -1305,7 +1314,7 @@ class BotService
         Votre {$type} est active.
 
         *Code : #{$ref}*
-        Partagez ce code avec vos participants.
+        Partagez ce lien à vos participants :{$lienWa}
 
         TXT . "\n" . $this->afficherMenu($numero);
     }
@@ -2371,6 +2380,89 @@ class BotService
         4️⃣  Retour à la liste
 
         _Tapez_ *#️⃣* _pour revenir au menu principal._
+        TXT;
+    }
+
+    // ── Deep links TONJI [ref] ────────────────────────────────────────────────
+
+    /**
+     * Point d'entrée deep link : détecte le type et l'état de la cagnotte,
+     * puis injecte la session au bon endroit du flow existant.
+     *
+     * Règles :
+     *  - Tontine non démarrée (date_debut IS NULL) → rejoindre.numero
+     *  - Tontine démarrée                           → cotiser.numero (montant fixe)
+     *  - Cotisation ouverte                         → deeplink.choix (rejoindre OU cotiser)
+     */
+    private function handleDeepLink(string $numero, string $ref): string
+    {
+        $cagnotte = TondoCagnotte::where('reference', $ref)->first();
+
+        if (! $cagnotte || $cagnotte->statut === 'cloturee') {
+            $this->session->set($numero, 'menu');
+            return "❌ Cette cagnotte n'est pas disponible.\n\n" . $this->afficherMenu($numero);
+        }
+
+        // Tontine non démarrée → rejoindre directement
+        if ($cagnotte->type === 'tontine_periodique' && is_null($cagnotte->date_debut)) {
+            $this->session->set($numero, 'rejoindre.numero', [
+                'cagnotte_id'  => $cagnotte->id,
+                'cagnotte_ref' => $cagnotte->reference,
+                'project_id'   => $cagnotte->project_id,
+                'type'         => $cagnotte->type,
+            ]);
+            return <<<TXT
+            🤝 *{$cagnotte->titre}* · #{$ref}
+            Type : Tontine
+
+            Entrez votre *numéro de téléphone* Mobile Money
+            (format : *0XXXXXXXX*).
+
+            _Tapez_ *#️⃣* _pour revenir au menu._
+            TXT;
+        }
+
+        // Tontine démarrée → cotiser montant fixe directement
+        if ($cagnotte->type === 'tontine_periodique' && ! is_null($cagnotte->date_debut)) {
+            $montant = (int) $cagnotte->montant_par_cycle;
+            $fmt     = number_format($montant, 0, ',', ' ');
+
+            $this->session->set($numero, 'cotiser.numero', [
+                'reference'      => $cagnotte->reference,
+                'cagnotte_id'    => $cagnotte->id,
+                'cagnotte_titre' => $cagnotte->titre,
+                'type'           => $cagnotte->type,
+                'project_id'     => $cagnotte->project_id,
+                'montant'        => $montant,
+            ]);
+
+            return <<<TXT
+            ✅ *{$cagnotte->titre}* · #{$ref}
+            Type : Tontine · Montant fixe : *{$fmt} FCFA*
+
+            Entrez votre *numéro de téléphone* Mobile Money
+            (format : *0XXXXXXXX*).
+
+            _Tapez_ *#️⃣* _pour revenir au menu._
+            TXT;
+        }
+
+        // Cotisation → cotiser directement (rejoindre est automatique au paiement)
+        $this->session->set($numero, 'cotiser.montant', [
+            'reference'      => $cagnotte->reference,
+            'cagnotte_id'    => $cagnotte->id,
+            'cagnotte_titre' => $cagnotte->titre,
+            'type'           => $cagnotte->type,
+            'project_id'     => $cagnotte->project_id,
+        ]);
+
+        return <<<TXT
+        💰 *{$cagnotte->titre}* · #{$ref}
+
+        Quel *montant* souhaitez-vous cotiser ?
+        _(minimum 100 FCFA — maximum 500 000 FCFA)_
+
+        _Tapez_ *#️⃣* _pour revenir au menu._
         TXT;
     }
 
