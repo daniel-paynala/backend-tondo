@@ -248,6 +248,10 @@ class BotService
             return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide, ou tapez *#️⃣* pour annuler.";
         }
 
+        if ($montant > 500_000) {
+            return "⚠️ Montant trop élevé.\nEntrez un montant valide, ou tapez *#️⃣* pour annuler.";
+        }
+
         $data = $this->session->data($numero);
         $this->session->set($numero, 'cotiser.numero', array_merge($data, ['montant' => $montant]));
 
