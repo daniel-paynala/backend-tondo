@@ -306,24 +306,15 @@ class BotService
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
-        // ── Cotisation : nouvel utilisateur → demander nom + prénom ──────────
-        $this->session->set($numero, 'cotiser.nom_prenom', array_merge($data, [
-            'numero_payeur' => $numeroSaisi,
-        ]));
+        // ── Cotisation : nouvel utilisateur → compte anonyme + paiement direct ──
+        $user = $this->cotisationSvc->creerCompteLight(
+            nom: 'ANONYME',
+            prenom: 'Anonyme',
+            numeroE164: $numeroSaisi,
+            projectId: $projectId,
+        );
 
-        return <<<TXT
-        👤 *Nouveau sur Tonji*
-
-        Vous n'avez pas encore de compte. On va en créer un rapidement.
-
-        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
-
-        _Exemple :_
-        MBOULA
-        Jean
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
+        return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
     }
 
     // ── 1 — Cotiser : nom + prénom (nouveau compte light) ────────────────────
@@ -1538,11 +1529,14 @@ class BotService
             }
 
             $total  = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
-            $lignes = $paiements->map(fn ($p) =>
-                \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
-                ' · ' . $p->cotisant .
-                ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*'
-            )->implode("\n");
+            $lignes = $paiements->map(function ($p) {
+                $nom = preg_match('/^anonyme\s+anonyme$/i', trim($p->cotisant ?? ''))
+                    ? 'Anonyme'
+                    : ($p->cotisant ?? '—');
+                return \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
+                    ' · ' . $nom .
+                    ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*';
+            })->implode("\n");
 
             $nb = $paiements->count();
 
