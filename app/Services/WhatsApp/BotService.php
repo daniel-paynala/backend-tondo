@@ -390,7 +390,8 @@ class BotService
             return "❌ Erreur lors de l'initiation du paiement : {$resultat['message']}\n\n_Tapez_ *#️⃣* _pour revenir au menu._";
         }
 
-        $prenom   = ucfirst(mb_strtolower($user->prenom));
+        $prenom     = ucfirst(mb_strtolower($user->prenom));
+        $salut      = strtolower($prenom) === 'anonyme' ? 'Bonjour !' : "Bonjour *{$prenom}* !";
         $montantFmt = number_format($data['montant'], 0, ',', ' ');
 
         // Paiement immédiat (mock)
@@ -422,7 +423,7 @@ class BotService
         ]);
 
         return <<<TXT
-        ⏳ Bonjour *{$prenom}* !
+        ⏳ {$salut}
 
         Un message de confirmation a été envoyé sur votre téléphone *{$numeroPayeur}*.
 
@@ -539,11 +540,12 @@ class BotService
         $titre   = $cagnotte ? $cagnotte->titre : '—';
         $ref     = $cagnotte ? '#' . $cagnotte->reference : '';
         $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
+        $merci   = ($prenom && strtolower($prenom) !== 'anonyme') ? "Merci {$prenom} 🙏" : 'Merci 🙏';
 
         return <<<TXT
         ✅ *Paiement confirmé !*
 
-        Merci {$prenom} 🙏
+        {$merci}
         Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
 
         ————————————————
