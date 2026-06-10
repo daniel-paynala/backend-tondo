@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Moteur conversationnel du bot WhatsApp Tondo.
+ * Moteur conversationnel du bot WhatsApp Tonji.
  *
  * Machine à états pilotée par SessionService :
  *
@@ -110,7 +110,7 @@ class BotService
         $this->session->set($numero, 'menu');
 
         return <<<TXT
-        🎉 *Bienvenue sur Tondo !*
+        🎉 *Bienvenue sur Tonji !*
 
         Que souhaitez-vous faire ?
 
@@ -306,7 +306,7 @@ class BotService
         ]));
 
         return <<<TXT
-        👤 *Nouveau sur Tondo*
+        👤 *Nouveau sur Tonji*
 
         Vous n'avez pas encore de compte. On va en créer un rapidement.
 
@@ -487,7 +487,7 @@ class BotService
             return <<<TXT
             ❌ *Paiement échoué ou refusé.*
 
-            ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tondo.ga ou appelez le *+241 01 XX XX XX*. Nous traiterons votre remboursement sous 24h._
+            ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tonji.ga ou appelez le *+241 01 XX XX XX*. Nous traiterons votre remboursement sous 24h._
 
             TXT . "\n" . $this->afficherMenu($numero);
         }
@@ -502,7 +502,7 @@ class BotService
         TXT;
     }
 
-    // ── Reçu Tondo (PDF) ─────────────────────────────────────────────────────
+    // ── Reçu Tonji (PDF) ─────────────────────────────────────────────────────
 
     /**
      * Génère le PDF et retourne [message_texte, pdf_url].
@@ -636,7 +636,7 @@ class BotService
         ]));
 
         return <<<TXT
-        👤 *Nouveau sur Tondo*
+        👤 *Nouveau sur Tonji*
 
         Vous n'avez pas encore de compte. On va en créer un rapidement.
 
@@ -1095,7 +1095,7 @@ class BotService
         ]));
 
         return <<<TXT
-        👤 *Nouveau sur Tondo*
+        👤 *Nouveau sur Tonji*
 
         Vous n'avez pas encore de compte. On va en créer un.
 
@@ -1253,12 +1253,12 @@ class BotService
         • Le montant collecté est reversé sur votre numéro de retrait.
         • Le numéro de retrait *ne peut plus être modifié* après création.
         • Les frais sont à la charge du cotisant, appliqués au paiement.
-        • Tondo n'arbitre pas les conflits entre membres.
+        • Tonji n'arbitre pas les conflits entre membres.
 
         _Détail_
-        *Modèle économique* — Commission Tondo 2 %. Frais opérateur : 3 % au paiement (plafond 5 000 FCFA) + 3 % au retrait. Le bénéficiaire reçoit le montant net.
+        *Modèle économique* — Commission Tonji 2 %. Frais opérateur : 3 % au paiement (plafond 5 000 FCFA) + 3 % au retrait. Le bénéficiaire reçoit le montant net.
         *Numéro de retrait* — Immuable après création. Protège les participants contre la fraude.
-        *Différends* — Tondo facilite la collecte mais n'arbitre pas les conflits, sauf cas manifestement clair (ex : usurpation d'identité).
+        *Différends* — Tonji facilite la collecte mais n'arbitre pas les conflits, sauf cas manifestement clair (ex : usurpation d'identité).
         *Périmètre v1* — Cagnottes publiques et associations comme bénéficiaires non disponibles (loi gabonaise n°35/62).
         ─────────────────
 
@@ -1291,7 +1291,7 @@ class BotService
             $cagnotte = $this->creerCagnotteSvc->creer($data, $user);
         } catch (\Throwable $e) {
             Log::error('handleCreerRecap: échec création', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez support@tondo.ga.");
+            return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez support@tonji.ga.");
         }
 
         $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
@@ -1363,6 +1363,9 @@ class BotService
             'gerer.revers.num'       => $this->handleGererReversementNum($numero, $texte),
             'gerer.revers.mont'      => $this->handleGererReversementMontant($numero, $texte),
             'gerer.revers.otp'       => $this->handleGererReversementOtp($numero, $texte),
+            'gerer.fermer.confirm'   => $this->handleGererFermerConfirm($numero, $texte),
+            'gerer.fermer.num'       => $this->handleGererFermerNum($numero, $texte),
+            'gerer.fermer.otp'       => $this->handleGererFermerOtp($numero, $texte),
             'gerer.tontine'          => $this->handleGererTontine($numero, $texte),
             'gerer.tontine.ordre'    => $this->handleGererTontineOrdre($numero, $texte),
             'gerer.tontine.hist'     => $this->handleGererTontineHistorique($numero, $texte),
@@ -1426,7 +1429,7 @@ class BotService
         return <<<TXT
         ✅ *Identité vérifiée !*
 
-        Vous n'avez pas encore de compte Tondo. On va en créer un.
+        Vous n'avez pas encore de compte Tonji. On va en créer un.
 
         Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
 
@@ -1550,7 +1553,8 @@ class BotService
 
         1️⃣  *Historique* des transactions
         2️⃣  *Initier* un reversement
-        3️⃣  Retour à la liste
+        3️⃣  *Fermer* la cotisation
+        4️⃣  Retour à la liste
 
         _Tapez_ *#️⃣* _pour revenir au menu principal._
         TXT;
@@ -1565,8 +1569,51 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
         }
 
-        if ($texte === '3') {
+        if ($texte === '4') {
             return $this->retourListeCagnottes($numero, $data);
+        }
+
+        if ($texte === '3') {
+            $solde = (int) $cagnotte->montant_collecte;
+
+            if ($solde === 0) {
+                $this->session->set($numero, 'gerer.fermer.confirm', array_merge($data, [
+                    'fermer_solde_zero' => true,
+                ]));
+
+                return <<<TXT
+                ⚠️ *Fermer la cotisation ?*
+
+                La cotisation *{$cagnotte->titre}* sera clôturée définitivement.
+                Solde : *0 FCFA* — aucun reversement nécessaire.
+
+                1️⃣  Oui, fermer définitivement
+                2️⃣  Non, annuler
+
+                _Cette action est irréversible._
+                TXT;
+            }
+
+            $soldeFmt   = number_format($solde, 0, ',', ' ');
+            $numRetrait = $cagnotte->numero_retrait ?? ($data['numero_payeur'] ?? '');
+            $masque     = $this->maskPhoneNum($numRetrait);
+
+            $this->session->set($numero, 'gerer.fermer.confirm', array_merge($data, [
+                'fermer_solde_zero' => false,
+            ]));
+
+            return <<<TXT
+            🔒 *Fermer la cotisation*
+
+            Il reste *{$soldeFmt} FCFA* à reverser.
+            Numéro de retrait enregistré : *{$masque}*
+
+            1️⃣  Reverser vers ce numéro et fermer
+            2️⃣  Changer le numéro de destination
+            3️⃣  Annuler
+
+            _La cotisation sera clôturée après confirmation du reversement._
+            TXT;
         }
 
         if ($texte === '1') {
@@ -1581,7 +1628,8 @@ class BotService
 
                 1️⃣  *Historique* des transactions
                 2️⃣  *Initier* un reversement
-                3️⃣  Retour à la liste
+                3️⃣  *Fermer* la cotisation
+                4️⃣  Retour à la liste
                 TXT;
             }
 
@@ -1633,7 +1681,7 @@ class BotService
             TXT;
         }
 
-        return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour revenir au menu principal._";
+        return "⚠️ Tapez *1*, *2*, *3* ou *4*.\n\n_Tapez_ *#️⃣* _pour revenir au menu principal._";
     }
 
     // ── 4 — Gérer > Tontine ───────────────────────────────────────────────────
@@ -1775,7 +1823,7 @@ class BotService
     {
         $participants = DB::table('tondo_participants')
             ->where('cagnotte_id', $cagnotte->id)
-            ->orderByRaw('COALESCE(ordre, 9999)')
+            ->orderByRaw('COALESCE(ordre_passage, 9999)')
             ->orderBy('created_at')
             ->select(['id', 'nom', 'prenom'])
             ->get();
@@ -1847,7 +1895,7 @@ class BotService
             if ($id) {
                 DB::table('tondo_participants')
                     ->where('id', $id)
-                    ->update(['ordre' => $nouveau, 'updated_at' => now()]);
+                    ->update(['ordre_passage' => $nouveau, 'updated_at' => now()]);
             }
         }
 
@@ -1962,7 +2010,8 @@ class BotService
 
             1️⃣  *Historique* des transactions
             2️⃣  *Initier* un reversement
-            3️⃣  Retour à la liste
+            3️⃣  *Fermer* la cotisation
+            4️⃣  Retour à la liste
 
             _Tapez_ *#️⃣* _pour revenir au menu principal._
             TXT;
@@ -2120,7 +2169,7 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ " . $e->getMessage());
         } catch (\Throwable $e) {
             Log::error('handleGererReversementOtp: erreur inattendue', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu($numero, "❌ Erreur technique. Contactez support@tondo.ga.");
+            return $this->erreurEtMenu($numero, "❌ Erreur technique. Contactez support@tonji.ga.");
         }
 
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
@@ -2135,16 +2184,206 @@ class BotService
         TXT . "\n" . $this->afficherMenu($numero);
     }
 
+    // ── 4bis — Gérer > Fermer cotisation ──────────────────────────────────────
+
+    private function handleGererFermerConfirm(string $numero, string $texte): string
+    {
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $soldeZero = (bool) ($data['fermer_solde_zero'] ?? false);
+
+        if ($soldeZero) {
+            if ($texte === '1') {
+                DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+                    'statut'     => 'cloturee',
+                    'updated_at' => now(),
+                ]);
+                return "✅ *Cotisation clôturée.*\n\nLa cotisation *{$cagnotte->titre}* a bien été fermée.\n\n"
+                    . $this->afficherMenu($numero);
+            }
+            if ($texte === '2') {
+                return $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            }
+            return "⚠️ Tapez *1* pour confirmer ou *2* pour annuler.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        // Solde > 0
+        if ($texte === '1') {
+            // Garder le numéro de retrait enregistré
+            $dest         = $cagnotte->numero_retrait ?? ($data['numero_payeur'] ?? '');
+            $numeroGerant = $data['numero_payeur'] ?? '';
+            [$otp, $hint] = $this->envoyerOtp($numeroGerant);
+
+            $this->session->set($numero, 'gerer.fermer.otp', array_merge($data, [
+                'fermer_numero' => $dest,
+                'otp'           => $otp,
+            ]));
+
+            $masque    = $this->maskPhoneNum($dest);
+            $gerantNum = $this->maskPhoneNum($numeroGerant);
+            $soldeFmt  = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+
+            return <<<TXT
+            🔐 *Confirmation requise*
+
+            Fermeture + reversement de *{$soldeFmt} FCFA* vers *{$masque}*
+
+            Un code a été envoyé au *{$gerantNum}*.{$hint}
+            Entrez le code à 6 chiffres pour valider :
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
+
+        if ($texte === '2') {
+            $this->session->set($numero, 'gerer.fermer.num', $data);
+            return "Entrez le *numéro* Mobile Money du bénéficiaire :\n_(format : *0XXXXXXXX*)_\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        if ($texte === '3') {
+            return $this->retourMenuCagnotte($numero, $cagnotte, $data);
+        }
+
+        return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+    }
+
+    private function handleGererFermerNum(string $numero, string $texte): string
+    {
+        $numeroSaisi = $this->normaliserNumero($texte);
+        if (! $numeroSaisi) {
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $numeroGerant = $data['numero_payeur'] ?? '';
+        [$otp, $hint] = $this->envoyerOtp($numeroGerant);
+
+        $this->session->set($numero, 'gerer.fermer.otp', array_merge($data, [
+            'fermer_numero' => $numeroSaisi,
+            'otp'           => $otp,
+        ]));
+
+        $masque    = $this->maskPhoneNum($numeroSaisi);
+        $gerantNum = $this->maskPhoneNum($numeroGerant);
+        $soldeFmt  = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+
+        return <<<TXT
+        🔐 *Confirmation requise*
+
+        Fermeture + reversement de *{$soldeFmt} FCFA* vers *{$masque}*
+
+        Un code a été envoyé au *{$gerantNum}*.{$hint}
+        Entrez le code à 6 chiffres pour valider :
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
+    }
+
+    private function handleGererFermerOtp(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+        $code = trim($texte);
+
+        if (! preg_match('/^\d{6}$/', $code)) {
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
+            return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
+        }
+
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+        $gerant   = TondoUser::find($data['user_id'] ?? null);
+
+        if (! $cagnotte || ! $gerant) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $numeroRetrait = $data['fermer_numero'] ?? '';
+        $montant       = (int) $cagnotte->montant_collecte;
+
+        try {
+            $result = $this->gererCagnotteSvc->initierReversement(
+                cagnotte:   $cagnotte,
+                gerant:     $gerant,
+                numeroE164: $numeroRetrait,
+                montant:    $montant,
+            );
+        } catch (\RuntimeException $e) {
+            return $this->erreurEtMenu(
+                $numero,
+                "❌ " . $e->getMessage() . "\n\nLa cotisation reste ouverte."
+            );
+        } catch (\Throwable $e) {
+            Log::error('handleGererFermerOtp: erreur reversement', ['err' => $e->getMessage()]);
+            return $this->erreurEtMenu(
+                $numero,
+                "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cotisation reste ouverte."
+            );
+        }
+
+        // Reversement confirmé → clôturer
+        DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+            'statut'     => 'cloturee',
+            'updated_at' => now(),
+        ]);
+
+        $masque     = $this->maskPhoneNum($numeroRetrait);
+        $montantFmt = number_format($result['montant'], 0, ',', ' ');
+
+        return <<<TXT
+        ✅ *Cotisation fermée !*
+
+        *{$montantFmt} FCFA* reversés vers *{$masque}*
+        Référence : `{$result['trans_id']}`
+
+        La cotisation *{$cagnotte->titre}* a été clôturée.
+
+        TXT . "\n" . $this->afficherMenu($numero);
+    }
+
+    private function retourMenuCagnotte(string $numero, TondoCagnotte $cagnotte, array $data): string
+    {
+        $collecte = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+        $ref      = $cagnotte->reference;
+        $this->session->set($numero, 'gerer.cagnotte', $data);
+
+        return <<<TXT
+        💼 *{$cagnotte->titre}* · #{$ref}
+        Solde disponible : *{$collecte} FCFA*
+
+        Que souhaitez-vous faire ?
+
+        1️⃣  *Historique* des transactions
+        2️⃣  *Initier* un reversement
+        3️⃣  *Fermer* la cotisation
+        4️⃣  Retour à la liste
+
+        _Tapez_ *#️⃣* _pour revenir au menu principal._
+        TXT;
+    }
+
     // ── 5 — Aide ──────────────────────────────────────────────────────────────
 
     private function afficherAide(string $numero): string
     {
         return <<<TXT
-        ❓ *Aide & support Tondo*
+        ❓ *Aide & support Tonji*
 
         Pour toute question, problème ou réclamation, notre équipe est disponible :
 
-        📧 *Email* : support@tondo.ga
+        📧 *Email* : support@tonji.ga
         _(Réponse sous 24h, jours ouvrables)_
 
         ————————————————

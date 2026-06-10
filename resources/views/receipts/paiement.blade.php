@@ -160,7 +160,7 @@ table.rows td.v.primary { color: #0F4C5C; }
 <body>
 
 <div class="hdr">
-  <div class="brand"><span class="brand-badge">T</span>Tondo</div>
+  <div class="brand"><span class="brand-badge">T</span>Tonji</div>
   <div class="hdr-sub">REÇU DE PAIEMENT · PAYNALA SAS</div>
   <div class="hdr-status">&#10003; PAIEMENT CONFIRMÉ</div>
 </div>
@@ -231,10 +231,10 @@ table.rows td.v.primary { color: #0F4C5C; }
   </div>
 
   <div class="footer">
-    <div class="footer-brand">Tondo · Paynala SAS</div>
+    <div class="footer-brand">Tonji · Paynala SAS</div>
     <div class="footer-text">
       Reçu généré automatiquement et valant preuve de paiement.<br>
-      support@tondo.ga &nbsp;·&nbsp; www.tondo.ga &nbsp;·&nbsp; Libreville, Gabon
+      support@tonji.ga &nbsp;·&nbsp; www.tonji.ga &nbsp;·&nbsp; Libreville, Gabon
     </div>
   </div>
 

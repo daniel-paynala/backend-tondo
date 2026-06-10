@@ -21,6 +21,6 @@ ACTIONS À FAIRE
 2. Une fois tous cotisés, le prochain retrait automatique s'effectuera
    à la prochaine échéance prévue.
 3. Si vous souhaitez débloquer manuellement, utilisez le tableau de bord
-   administrateur ou contactez le support Tondo.
+   administrateur ou contactez le support Tonji.
 
--- Tondo Alertes automatiques
+-- Tonji Alertes automatiques

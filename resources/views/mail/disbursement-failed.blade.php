@@ -10,7 +10,7 @@ transaction a été traitée avant toute correction.
 DÉTAILS
 -------
 Payout ID        : {{ $payoutId }}
-Trans ID Tondo   : {{ $transId }}
+Trans ID Tonji   : {{ $transId }}
 Cagnotte         : {{ $cagnotteReference }}
 Montant          : {{ number_format($montant, 0, ',', ' ') }} FCFA
 Bénéficiaire     : {{ $numeroBeneficiaire }}
@@ -35,4 +35,4 @@ ACTIONS À FAIRE
     → Mettre à jour tondo_payout SET statut='echec'
       WHERE id='{{ $payoutId }}'
 
--- Tondo Alertes automatiques
+-- Tonji Alertes automatiques

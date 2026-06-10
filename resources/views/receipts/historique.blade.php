@@ -84,7 +84,7 @@ table.hist td.ref     { font-size: 7px; color: #aaa; word-break: break-all; }
 <body>
 
 <div class="hdr">
-  <div class="brand"><span class="brand-badge">T</span>Tondo</div>
+  <div class="brand"><span class="brand-badge">T</span>Tonji</div>
   <div class="hdr-sub">HISTORIQUE DES TRANSACTIONS · PAYNALA SAS</div>
   <div class="hdr-badge">📊 RAPPORT GÉRANT</div>
 </div>
@@ -141,10 +141,10 @@ table.hist td.ref     { font-size: 7px; color: #aaa; word-break: break-all; }
   @endif
 
   <div class="footer">
-    <div class="footer-brand">Tondo · Paynala SAS</div>
+    <div class="footer-brand">Tonji · Paynala SAS</div>
     <div class="footer-text">
       Document généré automatiquement — usage interne gérant.<br>
-      support@tondo.ga &nbsp;·&nbsp; www.tondo.ga &nbsp;·&nbsp; Libreville, Gabon
+      support@tonji.ga &nbsp;·&nbsp; www.tonji.ga &nbsp;·&nbsp; Libreville, Gabon
     </div>
   </div>
 
