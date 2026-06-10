@@ -232,7 +232,7 @@ class BotService
         Type : Cotisation
 
         Quel *montant* souhaitez-vous cotiser ?
-        _(minimum 100 FCFA — maximum 500 000 FCFA)_
+        _(minimum 100 FCFA)_
 
         _Tapez_ *#️⃣* _pour revenir au menu._
         TXT;
@@ -246,10 +246,6 @@ class BotService
 
         if ($montant < 100) {
             return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide, ou tapez *#️⃣* pour annuler.";
-        }
-
-        if ($montant > 500_000) {
-            return "⚠️ Montant maximum par transaction : *500 000 FCFA*.\nEntrez un montant valide, ou tapez *#️⃣* pour annuler.";
         }
 
         $data = $this->session->data($numero);
