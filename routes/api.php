@@ -135,6 +135,7 @@ Route::prefix('mobile')->group(function () {
         Route::post('/cagnottes/{reference}/fermer',               [MobileCagnottesController::class, 'fermer']);
         Route::post('/cagnottes/{reference}/demarrer',              [MobileCagnottesController::class, 'demarrer']);
         Route::post('/cagnottes/{reference}/rappel',               [MobileCagnottesController::class, 'rappel']);
+        Route::patch('/cagnottes/{reference}/reversement-auto',    [MobileCagnottesController::class, 'patchReversementAuto']);
         Route::post('/cagnottes/{reference}/rejoindre',            [MobileCagnottesController::class, 'rejoindre']);
         Route::post('/cagnottes/{reference}/participants',          [MobileCagnottesController::class, 'storeParticipant']);
         Route::post('/cagnottes/{reference}/participants/ordre',    [MobileCagnottesController::class, 'ordonnerParticipants']);

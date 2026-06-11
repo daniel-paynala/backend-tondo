@@ -1047,6 +1047,31 @@ class CagnottesController extends Controller
         ]);
     }
 
+    public function patchReversementAuto(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('type', 'cagnotte_ouverte')
+            ->where('user_id', $user->id)
+            ->whereIn('statut', ['active', 'en_cours'])
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable, accès refusé, ou opération non applicable.'], 404);
+        }
+
+        $data = $request->validate([
+            'reversement_auto' => ['required', 'boolean'],
+        ]);
+
+        $cagnotte->reversement_auto = (bool) $data['reversement_auto'];
+        $cagnotte->save();
+
+        return response()->json(['cagnotte' => $this->serialize($cagnotte)]);
+    }
+
     private function serialize(TondoCagnotte $c): array
     {
         return [

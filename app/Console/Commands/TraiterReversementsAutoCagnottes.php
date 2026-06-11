@@ -16,17 +16,20 @@ use Illuminate\Support\Str;
 /**
  * Déclenche les reversements automatiques des cotisations ouvertes.
  *
- * Planification : quotidienne à 08h00 (Africa/Libreville) dans routes/console.php.
+ * Planification : quotidienne à 18h00 (Africa/Libreville) dans routes/console.php.
  *
- * Trois modes de déclenchement (priorité décroissante) :
- *  1. Date limite atteinte   — date_fin <= aujourd'hui
- *  2. Montant cible atteint  — montant_collecte >= montant_cible
- *  3. Fréquence libre        — reversement_auto_frequence_mois : tous les N mois
+ * Quatre modes de déclenchement (priorité décroissante) :
+ *  1. Date limite atteinte    — date_fin <= aujourd'hui
+ *  2. Montant cible atteint   — montant_collecte >= montant_cible
+ *  3. Fréquence libre         — reversement_auto_frequence_mois : tous les N mois
  *     depuis la dernière opération réussie (ou depuis la création si aucune).
+ *  4. Systématique quotidien  — pas d'échéance configurée (ni date_fin, ni
+ *     montant_cible, ni fréquence_mois) : si solde > 0, on reverse tout en fin
+ *     de journée et la cagnotte reste active.
  *
  * Après succès :
  *  - Mode date / montant → cagnotte clôturée automatiquement (statut = cloturee).
- *  - Mode libre → cagnotte reste active ; le prochain cycle reprend.
+ *  - Mode libre / quotidien → cagnotte reste active ; le prochain cycle reprend.
  *
  * En cas d'échec Paynala : log critique + mail admins, solde non restauré
  * (même politique que TraiterRetraitsTontines).
@@ -120,6 +123,11 @@ class TraiterReversementsAutoCagnottes extends Command
             if ($prochainDeclenchement->toDateString() <= $today) {
                 return 'libre';
             }
+        }
+
+        // Priorité 4 : systématique quotidien — aucune échéance, on reverse si solde > 0.
+        if (! $cagnotte->date_fin && ! $cagnotte->montant_cible && ! $cagnotte->reversement_auto_frequence_mois) {
+            return 'quotidien';
         }
 
         return null;
@@ -255,19 +263,19 @@ class TraiterReversementsAutoCagnottes extends Command
                 ]);
 
             // Mode date ou montant cible → clôturer la cagnotte.
-            if ($mode !== 'libre') {
+            // Mode libre / quotidien → la cagnotte reste active.
+            if ($mode !== 'libre' && $mode !== 'quotidien') {
                 DB::table('tondo_cagnottes')
                     ->where('id', $cagnotte->id)
                     ->update(['statut' => 'cloturee', 'updated_at' => now()]);
             }
-            // Mode libre → la cagnotte reste active pour le prochain cycle.
         });
 
         // ── Notification gérant ───────────────────────────────────────────────
         $montantFmt = number_format($montant, 0, ',', ' ');
-        $corps = $mode === 'libre'
-            ? "{$montantFmt} FCFA reversés automatiquement sur « {$cagnotte->titre} »."
-            : "{$montantFmt} FCFA reversés automatiquement — cotisation « {$cagnotte->titre} » clôturée.";
+        $corps = in_array($mode, ['libre', 'quotidien'])
+            ? "{$montantFmt} FCFA reversés sur « {$cagnotte->titre} »."
+            : "{$montantFmt} FCFA reversés — cotisation « {$cagnotte->titre} » clôturée.";
 
         $notif->notifyOne(
             userId:  $cagnotte->user_id,

@@ -31,12 +31,12 @@ Schedule::command(TraiterRetraitsTontines::class)
     ->runInBackground();
 
 /*
- * Reversements automatiques cotisations ouvertes — 08h heure de Libreville.
- * Vérifie chaque jour si une échéance (date, montant cible) est atteinte
- * ou si le délai de fréquence libre (N mois) est écoulé.
+ * Reversements automatiques cotisations ouvertes — 18h heure de Libreville.
+ * Modes : date atteinte, montant cible atteint, fréquence libre (N mois),
+ * ou reversement systématique quotidien (solde > 0, sans échéance configurée).
  */
 Schedule::command(TraiterReversementsAutoCagnottes::class)
-    ->dailyAt('08:00')
+    ->dailyAt('18:00')
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();
