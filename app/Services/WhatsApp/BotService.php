@@ -1152,20 +1152,7 @@ class BotService
     private function cguTexte(): string
     {
         return <<<TXT
-        ─────────────────
-        📋 *Conditions d'utilisation*
-
-        • Le montant collecté est reversé sur votre numéro de retrait.
-        • Le numéro de retrait *ne peut plus être modifié* après création.
-        • Les frais sont à la charge du cotisant, appliqués au paiement.
-        • Tonji n'arbitre pas les conflits entre membres.
-
-        _Détail_
-        *Modèle économique* — Commission Tonji 2 %. Frais opérateur : 3 % au paiement (plafond 5 000 FCFA) + 3 % au retrait. Le bénéficiaire reçoit le montant net.
-        *Numéro de retrait* — Immuable après création. Protège les participants contre la fraude.
-        *Différends* — Tonji facilite la collecte mais n'arbitre pas les conflits, sauf cas manifestement clair (ex : usurpation d'identité).
-        *Périmètre v1* — Cagnottes publiques et associations comme bénéficiaires non disponibles (loi gabonaise n°35/62).
-        ─────────────────
+        En confirmant, vous acceptez les conditions d'utilisation Tonji : https://tonji.ga/cgu
 
         Tapez *1* pour confirmer et créer · *0* pour annuler.
         TXT;
@@ -1396,7 +1383,7 @@ class BotService
 
         Pour utiliser Tonji, vous devez avoir *18 ans ou plus*.
 
-        Tapez *1* pour certifier être majeur et accepter les conditions d'utilisation Tonji.
+        Tapez *1* pour certifier être majeur et accepter les conditions d'utilisation : https://tonji.ga/cgu
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
