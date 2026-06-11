@@ -306,10 +306,10 @@ class BotService
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
-        // ── Cotisation : nouvel utilisateur → compte anonyme + paiement direct ──
+        // ── Cotisation : nouvel utilisateur → compte silencieux + paiement direct ──
         $user = $this->cotisationSvc->creerCompteLight(
-            nom: 'ANONYME',
-            prenom: 'Anonyme',
+            nom: '',
+            prenom: '',
             numeroE164: $numeroSaisi,
             projectId: $projectId,
         );
@@ -391,7 +391,7 @@ class BotService
         }
 
         $prenom     = ucfirst(mb_strtolower($user->prenom));
-        $salut      = strtolower($prenom) === 'anonyme' ? 'Bonjour !' : "Bonjour *{$prenom}* !";
+        $salut      = $prenom ? "Bonjour *{$prenom}* !" : 'Bonjour !';
         $montantFmt = number_format($data['montant'], 0, ',', ' ');
 
         // Paiement immédiat (mock)
@@ -974,6 +974,27 @@ class BotService
         $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
         if ($user) {
+            // Compte light (profil vide) — compléter avant de pouvoir créer
+            if (trim($user->nom) === '' || trim($user->prenom) === '') {
+                $this->session->set($numero, 'creer.nom_prenom', array_merge($data, [
+                    'user_id'       => $user->id,
+                    'numero_payeur' => $numeroSaisi,
+                ]));
+                return <<<TXT
+                👤 *Complétez votre profil*
+
+                Pour créer une cagnotte, nous avons besoin de votre identité.
+
+                Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+
+                _Exemple :_
+                MBOULA
+                Jean
+
+                _Tapez_ *#️⃣* _pour annuler._
+                TXT;
+            }
+
             $this->session->set($numero, 'creer.numero_retrait', array_merge($data, [
                 'user_id'       => $user->id,
                 'numero_payeur' => $numeroSaisi,
@@ -1056,8 +1077,9 @@ class BotService
 
     private function demanderNumeroRetrait(string $prenom): string
     {
+        $salut = $prenom ? "Bonjour *{$prenom}* !" : 'Bonjour !';
         return <<<TXT
-        Bonjour *{$prenom}* !
+        {$salut}
 
         Le montant collecté sera reversé sur votre numéro Mobile Money.
         Voulez-vous utiliser un *autre numéro* pour le retrait ?
@@ -1531,9 +1553,8 @@ class BotService
 
             $total  = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
             $lignes = $paiements->map(function ($p) {
-                $nom = preg_match('/^anonyme\s+anonyme$/i', trim($p->cotisant ?? ''))
-                    ? 'Anonyme'
-                    : ($p->cotisant ?? '—');
+                $brut = trim($p->cotisant ?? '');
+                $nom  = $brut === '' ? 'Anonyme' : $brut;
                 return \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
                     ' · ' . $nom .
                     ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*';

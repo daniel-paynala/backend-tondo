@@ -83,6 +83,12 @@ class CotisationService
             ->first();
 
         if ($existant) {
+            // Mise à jour du profil (compte light → full)
+            $existant->nom            = mb_strtoupper(trim($nom));
+            $existant->prenom         = ucfirst(mb_strtolower(trim($prenom)));
+            $existant->date_naissance = $dateNaissance;
+            $existant->updated_at     = now();
+            $existant->save();
             return $existant;
         }
 
