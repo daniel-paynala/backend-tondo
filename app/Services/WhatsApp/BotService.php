@@ -1026,11 +1026,13 @@ class BotService
                 TXT;
             }
 
-            $this->session->set($numero, 'creer.numero_retrait', array_merge($data, [
-                'user_id'       => $user->id,
-                'numero_payeur' => $numeroSaisi,
-            ]));
-            return $this->demanderNumeroRetrait($user->prenom);
+            $merged = array_merge($data, [
+                'user_id'        => $user->id,
+                'numero_payeur'  => $numeroSaisi,
+                'numero_retrait' => $numeroSaisi,
+            ]);
+            $this->session->set($numero, 'creer.recap', $merged);
+            return $this->construireRecap($merged, $numeroSaisi);
         }
 
         $this->session->set($numero, 'creer.nom_prenom', array_merge($data, [
@@ -1090,11 +1092,14 @@ class BotService
             dateNaissance: '2000-01-01',
         );
 
-        $this->session->set($numero, 'creer.numero_retrait', array_merge($data, [
-            'user_id' => $user->id,
-        ]));
+        $numeroRetrait = $data['numero_payeur'];
+        $merged        = array_merge($data, [
+            'user_id'        => $user->id,
+            'numero_retrait' => $numeroRetrait,
+        ]);
+        $this->session->set($numero, 'creer.recap', $merged);
 
-        return $this->demanderNumeroRetrait($user->prenom);
+        return $this->construireRecap($merged, $numeroRetrait);
     }
 
     private function demanderNumeroRetrait(string $prenom): string
