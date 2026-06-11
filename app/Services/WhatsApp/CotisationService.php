@@ -84,28 +84,30 @@ class CotisationService
 
         if ($existant) {
             // Mise à jour du profil (compte light → full)
-            $existant->nom            = mb_strtoupper(trim($nom));
-            $existant->prenom         = ucfirst(mb_strtolower(trim($prenom)));
-            $existant->date_naissance = $dateNaissance;
-            $existant->updated_at     = now();
+            $existant->nom             = mb_strtoupper(trim($nom));
+            $existant->prenom          = ucfirst(mb_strtolower(trim($prenom)));
+            $existant->date_naissance  = $dateNaissance;
+            $existant->certifie_majeur = true;
+            $existant->updated_at      = now();
             $existant->save();
             return $existant;
         }
 
         $user = new TondoUser();
-        $user->id             = (string) Str::uuid();
-        $user->project_id     = $projectId;
-        $user->nom            = mb_strtoupper(trim($nom));
-        $user->prenom         = ucfirst(mb_strtolower(trim($prenom)));
-        $user->numero         = $numeroE164;
-        $user->indicatif      = '+241';
-        $user->pays           = 'GA';
-        $user->operateur      = null;
-        $user->date_naissance = $dateNaissance;
-        $user->kyc_valide     = false;
-        $user->type_client    = 'particulier';
-        $user->created_at     = now();
-        $user->updated_at     = now();
+        $user->id              = (string) Str::uuid();
+        $user->project_id      = $projectId;
+        $user->nom             = mb_strtoupper(trim($nom));
+        $user->prenom          = ucfirst(mb_strtolower(trim($prenom)));
+        $user->numero          = $numeroE164;
+        $user->indicatif       = '+241';
+        $user->pays            = 'GA';
+        $user->operateur       = null;
+        $user->date_naissance  = $dateNaissance;
+        $user->certifie_majeur = true;
+        $user->kyc_valide      = false;
+        $user->type_client     = 'particulier';
+        $user->created_at      = now();
+        $user->updated_at      = now();
         $user->save();
 
         return $user;

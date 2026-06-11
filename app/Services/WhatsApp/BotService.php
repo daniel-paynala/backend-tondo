@@ -758,7 +758,7 @@ class BotService
             'creer.tontine.periodicite'     => $this->handleCreerTontinePeriodicite($numero, $texte),
             'creer.numero'                     => $this->handleCreerNumero($numero, $texte),
             'creer.nom_prenom'                 => $this->handleCreerNomPrenom($numero, $texte),
-            'creer.date_naissance'             => $this->handleCreerDateNaissance($numero, $texte),
+            'creer.certification'              => $this->handleCreerCertification($numero, $texte),
             'creer.numero_retrait'             => $this->handleCreerNumeroRetrait($numero, $texte),
             'creer.recap'                      => $this->handleCreerRecap($numero, $texte),
             default                            => $this->afficherMenu($numero),
@@ -1034,27 +1034,18 @@ class BotService
         }
 
         $data = $this->session->data($numero);
-        $this->session->set($numero, 'creer.date_naissance', array_merge($data, [
+        $this->session->set($numero, 'creer.certification', array_merge($data, [
             'nom'    => mb_strtoupper(trim($lignes[0])),
             'prenom' => ucfirst(mb_strtolower(trim($lignes[1]))),
         ]));
 
-        return <<<TXT
-        📅 Date de *naissance* ?
-        _(format : *JJ/MM/AAAA* — vous devez avoir au moins 18 ans)_
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
+        return $this->messageCertification();
     }
 
-    private function handleCreerDateNaissance(string $numero, string $texte): string
+    private function handleCreerCertification(string $numero, string $texte): string
     {
-        $dt = $this->parseDate(trim($texte));
-        if (! $dt) {
-            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
-        if (! $this->estMajeur($dt)) {
-            return $this->erreurEtMenu($numero, "❌ Vous devez avoir *18 ans ou plus* pour créer une cagnotte.");
+        if ($texte !== '1') {
+            return "⚠️ Tapez *1* pour certifier votre majorité, ou *#️⃣* pour annuler.";
         }
 
         $data      = $this->session->data($numero);
@@ -1065,7 +1056,7 @@ class BotService
             prenom:        $data['prenom'],
             numeroE164:    $data['numero_payeur'],
             projectId:     $projectId,
-            dateNaissance: $dt->format('Y-m-d'),
+            dateNaissance: '2000-01-01',
         );
 
         $this->session->set($numero, 'creer.numero_retrait', array_merge($data, [
@@ -1273,7 +1264,7 @@ class BotService
             'gerer.numero'           => $this->handleGererNumero($numero, $texte),
             'gerer.otp'              => $this->handleGererOtp($numero, $texte),
             'gerer.nom_prenom'       => $this->handleGererNomPrenom($numero, $texte),
-            'gerer.date_naissance'   => $this->handleGererDateNaissance($numero, $texte),
+            'gerer.certification'    => $this->handleGererCertification($numero, $texte),
             'gerer.liste'            => $this->handleGererListe($numero, $texte),
             'gerer.cagnotte'         => $this->handleGererCagnotte($numero, $texte),
             'gerer.historique'       => $this->handleGererHistorique($numero, $texte),
@@ -1368,22 +1359,18 @@ class BotService
         }
 
         $data = $this->session->data($numero);
-        $this->session->set($numero, 'gerer.date_naissance', array_merge($data, [
+        $this->session->set($numero, 'gerer.certification', array_merge($data, [
             'nom'    => mb_strtoupper(trim($lignes[0])),
             'prenom' => ucfirst(mb_strtolower(trim($lignes[1]))),
         ]));
 
-        return "📅 Date de *naissance* ?\n_(format : *JJ/MM/AAAA*)_\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return $this->messageCertification();
     }
 
-    private function handleGererDateNaissance(string $numero, string $texte): string
+    private function handleGererCertification(string $numero, string $texte): string
     {
-        $dt = $this->parseDate(trim($texte));
-        if (! $dt) {
-            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
-        }
-        if (! $this->estMajeur($dt)) {
-            return $this->erreurEtMenu($numero, "❌ Vous devez avoir *18 ans ou plus*.");
+        if ($texte !== '1') {
+            return "⚠️ Tapez *1* pour certifier votre majorité, ou *#️⃣* pour annuler.";
         }
 
         $data      = $this->session->data($numero);
@@ -1394,12 +1381,25 @@ class BotService
             prenom:        $data['prenom'],
             numeroE164:    $data['numero_payeur'],
             projectId:     $projectId,
-            dateNaissance: $dt->format('Y-m-d'),
+            dateNaissance: '2000-01-01',
         );
 
         return $this->afficherListeCagnottes($numero, $user, array_merge($data, [
             'user_id' => $user->id,
         ]));
+    }
+
+    private function messageCertification(): string
+    {
+        return <<<TXT
+        🔞 *Confirmation de majorité*
+
+        Pour utiliser Tonji, vous devez avoir *18 ans ou plus*.
+
+        Tapez *1* pour certifier être majeur et accepter les conditions d'utilisation Tonji.
+
+        _Tapez_ *#️⃣* _pour annuler._
+        TXT;
     }
 
     private function afficherListeCagnottes(string $numero, TondoUser $user, array $data): string
