@@ -756,6 +756,7 @@ class BotService
             'creer.tontine.nb_participants' => $this->handleCreerTontineNbParticipants($numero, $texte),
             'creer.tontine.montant_cycle'   => $this->handleCreerTontineMontantCycle($numero, $texte),
             'creer.tontine.periodicite'     => $this->handleCreerTontinePeriodicite($numero, $texte),
+            'creer.tontine.jour_mois'       => $this->handleCreerTontineJourMois($numero, $texte),
             'creer.numero'                     => $this->handleCreerNumero($numero, $texte),
             'creer.nom_prenom'                 => $this->handleCreerNomPrenom($numero, $texte),
             'creer.certification'              => $this->handleCreerCertification($numero, $texte),
@@ -924,7 +925,7 @@ class BotService
 
         1️⃣  *1 semaine* (retrait le lundi)
         2️⃣  *2 semaines* (retrait le lundi)
-        3️⃣  *1 mois* (retrait le 7 du mois)
+        3️⃣  *1 mois* (vous choisirez le jour)
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
@@ -940,11 +941,41 @@ class BotService
         $mapping = [
             '1' => ['periodicite' => 'hebdomadaire', 'intervalle' => 1, 'jour' => 'lundi'],
             '2' => ['periodicite' => 'hebdomadaire', 'intervalle' => 2, 'jour' => 'lundi'],
-            '3' => ['periodicite' => 'mensuelle',    'intervalle' => 1, 'jour' => 7],
         ];
+
+        if ($texte === '3') {
+            $this->session->set($numero, 'creer.tontine.jour_mois', array_merge($data, [
+                'periodicite' => 'mensuelle', 'intervalle' => 1, 'penalite_active' => false,
+            ]));
+            return <<<TXT
+            Quel *jour du mois* pour le versement ?
+
+            1️⃣  Le *5*
+            2️⃣  Le *7*
+            3️⃣  Le *15*
+
+            _Tapez_ *#️⃣* _pour annuler._
+            TXT;
+        }
 
         $this->session->set($numero, 'creer.numero', array_merge($data, $mapping[$texte], [
             'penalite_active' => false,
+        ]));
+
+        return $this->demanderNumeroCreateur();
+    }
+
+    private function handleCreerTontineJourMois(string $numero, string $texte): string
+    {
+        if (! in_array($texte, ['1', '2', '3'])) {
+            return "⚠️ Tapez *1* (le 5), *2* (le 7) ou *3* (le 15).\n\n_Tapez_ *#️⃣* _pour annuler._";
+        }
+
+        $jourMap = ['1' => 5, '2' => 7, '3' => 15];
+        $data    = $this->session->data($numero);
+
+        $this->session->set($numero, 'creer.numero', array_merge($data, [
+            'jour' => $jourMap[$texte],
         ]));
 
         return $this->demanderNumeroCreateur();
