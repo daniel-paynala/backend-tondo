@@ -488,7 +488,7 @@ class BotService
             return <<<TXT
             ❌ *Paiement échoué ou refusé.*
 
-            ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tonji.ga ou appelez le *+241 01 XX XX XX*. Nous traiterons votre remboursement sous 24h._
+            ⚠️ _Si vous constatez un problème, contactez-nous à support@tonji.ga._
 
             TXT . "\n" . $this->afficherMenu($numero);
         }
