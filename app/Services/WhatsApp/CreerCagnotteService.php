@@ -27,8 +27,9 @@ class CreerCagnotteService
         $cagnotte->titre                 = $data['titre'];
         $cagnotte->type                  = $type;
         $cagnotte->statut                = 'active';
-        $cagnotte->numero_retrait        = $data['numero_retrait'];
-        $cagnotte->numero_retrait_masque = $this->maskPhone($data['numero_retrait']);
+        $numeroRetrait                   = $data['numero_retrait'] ?? $user->numero;
+        $cagnotte->numero_retrait        = $numeroRetrait;
+        $cagnotte->numero_retrait_masque = $this->maskPhone($numeroRetrait);
 
         if ($type === 'tontine_periodique') {
             $cashBack = (int) $data['montant_par_cycle'];

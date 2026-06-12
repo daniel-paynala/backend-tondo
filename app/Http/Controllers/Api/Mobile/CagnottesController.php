@@ -129,12 +129,15 @@ class CagnottesController extends Controller
         }
 
         $base = $request->validate([
-            'titre'         => ['required', 'string', 'max:120'],
-            'numero_retrait' => ['required', 'string', 'regex:/^\+?\d{8,15}$/'],
-            'reference'     => ['nullable', 'string', 'regex:/^\d{6}$/'],
+            'titre'          => ['required', 'string', 'max:120'],
+            'numero_retrait' => ['nullable', 'string', 'regex:/^\+?\d{8,15}$/'],
+            'reference'      => ['nullable', 'string', 'regex:/^\d{6}$/'],
         ]);
 
         $user = $request->user();
+
+        // Si le créateur n'a pas fourni de numéro de retrait, on prend son propre numéro.
+        $numeroRetrait = $base['numero_retrait'] ?? $user->numero;
 
         $cagnotte = new TondoCagnotte();
         $cagnotte->id = (string) Str::uuid();
@@ -143,10 +146,10 @@ class CagnottesController extends Controller
         $cagnotte->titre = $base['titre'];
         $cagnotte->type = $type;
         $cagnotte->statut = 'active';
-        $cagnotte->numero_retrait_masque = $this->maskPhone($base['numero_retrait']);
+        $cagnotte->numero_retrait_masque = $this->maskPhone($numeroRetrait);
         // Stocké en clair pour le scheduler de reversement automatique.
         // Non exposé dans les réponses API mobiles.
-        $cagnotte->numero_retrait = $base['numero_retrait'];
+        $cagnotte->numero_retrait = $numeroRetrait;
 
         $airtelConfig = app(TondoConfigService::class)->getOperatorConfig(
             $user->project_id,
