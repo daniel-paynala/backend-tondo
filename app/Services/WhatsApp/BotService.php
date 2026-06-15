@@ -163,7 +163,7 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Référence *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         if ($cagnotte->statut === 'cloturee') {
@@ -208,7 +208,7 @@ class BotService
             ]);
 
             return <<<TXT
-            ✅ *{$cagnotte->titre}* · #{$ref}
+            ✅ *{$cagnotte->titre}* · N°{$ref}
             Type : Tontine · Montant fixe : *{$fmt} FCFA*
 
             Entrez votre *numéro de téléphone* Mobile Money
@@ -228,7 +228,7 @@ class BotService
         ]);
 
         return <<<TXT
-        ✅ *{$cagnotte->titre}* · #{$ref}
+        ✅ *{$cagnotte->titre}* · N°{$ref}
         Type : Cotisation
 
         Quel *montant* souhaitez-vous cotiser ?
@@ -538,7 +538,7 @@ class BotService
     {
         $montant = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
         $titre   = $cagnotte ? $cagnotte->titre : '—';
-        $ref     = $cagnotte ? '#' . $cagnotte->reference : '';
+        $ref     = $cagnotte ? 'N°' . $cagnotte->reference : '';
         $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
         $merci   = ($prenom && strtolower($prenom) !== 'anonyme') ? "Merci {$prenom} 🙏" : 'Merci 🙏';
 
@@ -582,7 +582,7 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Référence *#{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Référence *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         $type = $cagnotte->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation';
@@ -595,7 +595,7 @@ class BotService
         ]);
 
         return <<<TXT
-        🤝 *{$cagnotte->titre}* · #{$ref}
+        🤝 *{$cagnotte->titre}* · N°{$ref}
         Type : {$type}
 
         Entrez votre *numéro de téléphone* Mobile Money
@@ -632,7 +632,7 @@ class BotService
                 ->exists();
 
             if ($dejaMembre) {
-                return $this->erreurEtMenu($numero, "ℹ️ Ce numéro est déjà membre de *{$cagnotte->titre}* (#{$ref}).");
+                return $this->erreurEtMenu($numero, "ℹ️ Ce numéro est déjà membre de *{$cagnotte->titre}* (N°{$ref}).");
             }
         }
 
@@ -652,7 +652,7 @@ class BotService
             return <<<TXT
             ✅ *Inscription confirmée !*
 
-            Bienvenue *{$prenom}* ! Vous avez rejoint la {$type} *{$cagnotte->titre}* (#{$ref}).
+            Bienvenue *{$prenom}* ! Vous avez rejoint la {$type} *{$cagnotte->titre}* (N°{$ref}).
 
             TXT . "\n" . $this->afficherMenu($numero);
         }
@@ -720,7 +720,7 @@ class BotService
         return <<<TXT
         ✅ *Inscription confirmée !*
 
-        Bienvenue *{$prenom}* ! Vous avez rejoint la {$type} *{$cagnotte->titre}* (#{$ref}).
+        Bienvenue *{$prenom}* ! Vous avez rejoint la {$type} *{$cagnotte->titre}* (N°{$ref}).
 
         TXT . "\n" . $this->afficherMenu($numero);
     }
@@ -811,16 +811,13 @@ class BotService
         }
 
         $data = $this->session->data($numero);
-        $this->session->set($numero, 'creer.cotisation.montant_cible', array_merge($data, [
-            'titre' => $titre,
+        $this->session->set($numero, 'creer.numero', array_merge($data, [
+            'titre'         => $titre,
+            'montant_cible' => 0,
+            'date_fin'      => null,
         ]));
 
-        return <<<TXT
-        Montant *cible* de la cagnotte ?
-        _(objectif de collecte en FCFA — tapez *0* si pas de limite)_
-
-        _Tapez_ *#️⃣* _pour annuler._
-        TXT;
+        return $this->demanderNumeroCreateur();
     }
 
     private function handleCreerCotisationMontantCible(string $numero, string $texte): string
@@ -902,7 +899,8 @@ class BotService
         ]));
 
         return <<<TXT
-        Montant *récupéré par participant* ? (en FCFA)
+        Montant *récupéré par participant* ? _(sans les frais)_
+        (en FCFA)
 
         _Tapez_ *#️⃣* _pour annuler._
         TXT;
@@ -1228,7 +1226,7 @@ class BotService
         $botNum = ltrim(config('tondo.whatsapp_numero', ''), '+');
         $lienWa = $botNum
             ? "\nhttps://wa.me/{$botNum}?text=" . rawurlencode("TONJI {$ref}")
-            : " #*{$ref}*";
+            : " N°*{$ref}*";
 
         return <<<TXT
         🎉 *{$cagnotte->titre}* créée avec succès !
@@ -1236,7 +1234,7 @@ class BotService
         Félicitations *{$prenom}* !
         Votre {$type} est active.
 
-        *Code : #{$ref}*
+        *Code : N°{$ref}*
         Partagez ce lien à vos participants :{$lienWa}
 
         TXT . "\n" . $this->afficherMenu($numero);
@@ -1436,7 +1434,7 @@ class BotService
         }
 
         $liste    = $cagnottes->values();
-        $index    = $liste->map(fn ($c, $i) => ($i + 1) . ". *{$c->titre}* · #{$c->reference} · "
+        $index    = $liste->map(fn ($c, $i) => ($i + 1) . ". *{$c->titre}* · N°{$c->reference} · "
             . ($c->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation')
         )->implode("\n");
 
@@ -1487,7 +1485,7 @@ class BotService
         $this->session->set($numero, 'gerer.cagnotte', $newData);
 
         return <<<TXT
-        💼 *{$cagnotte->titre}* · #{$ref}
+        💼 *{$cagnotte->titre}* · N°{$ref}
         Solde disponible : *{$collecte} FCFA*
 
         Que souhaitez-vous faire ?
@@ -1574,8 +1572,10 @@ class BotService
                 TXT;
             }
 
-            $total  = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
-            $lignes = $paiements->map(function ($p) {
+            $nbTotal = $paiements->count();
+            $total   = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
+            $cinq    = $paiements->take(5);
+            $lignes  = $cinq->map(function ($p) {
                 $brut = trim($p->cotisant ?? '');
                 $nom  = $brut === '' ? 'Anonyme' : $brut;
                 return \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
@@ -1583,15 +1583,17 @@ class BotService
                     ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*';
             })->implode("\n");
 
-            $nb = $paiements->count();
+            $suite = $nbTotal > 5
+                ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — exportez le PDF pour l\'historique complet._"
+                : '';
 
             $this->session->set($numero, 'gerer.historique', $data);
 
             return <<<TXT
             📊 *Historique — {$cagnotte->titre}*
-            Total collecté : *{$total} FCFA* · {$nb} transaction(s)
+            Total collecté : *{$total} FCFA* · {$nbTotal} transaction(s)
 
-            {$lignes}
+            {$lignes}{$suite}
 
             ————————————————
             Exporter en *PDF* ?
@@ -1647,7 +1649,7 @@ class BotService
 
         if ($lancee) {
             return <<<TXT
-            🔄 *{$titre}* · #{$ref}
+            🔄 *{$titre}* · N°{$ref}
             Participants : {$inscrits}/{$max} · Tontine en cours
 
             Que souhaitez-vous faire ?
@@ -1662,7 +1664,7 @@ class BotService
 
         if ($inscrits >= $max) {
             return <<<TXT
-            ⏳ *{$titre}* · #{$ref}
+            ⏳ *{$titre}* · N°{$ref}
             Participants : {$inscrits}/{$max} ✅ Complet — Prête à démarrer !
 
             Que souhaitez-vous faire ?
@@ -1679,7 +1681,7 @@ class BotService
 
         $manquants = $max - $inscrits;
         return <<<TXT
-        ⏳ *{$titre}* · #{$ref}
+        ⏳ *{$titre}* · N°{$ref}
         Participants : {$inscrits}/{$max} _(il manque {$manquants})_
 
         Que souhaitez-vous faire ?
@@ -1739,12 +1741,15 @@ class BotService
             'updated_at' => now(),
         ]);
 
+        $cagnotte->refresh();
+        $data = $this->session->data($numero);
+
         return <<<TXT
         🎉 *Tontine lancée !*
 
         La tontine *{$cagnotte->titre}* est maintenant active.
 
-        TXT . "\n" . $this->afficherMenu($numero);
+        TXT . "\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
     }
 
     private function executerSupprimerTontine(string $numero, TondoCagnotte $cagnotte): string
@@ -1754,12 +1759,14 @@ class BotService
             'updated_at' => now(),
         ]);
 
+        $data = $this->session->data($numero);
+
         return <<<TXT
         ✅ *Tontine supprimée.*
 
         La tontine *{$cagnotte->titre}* a bien été supprimée.
 
-        TXT . "\n" . $this->afficherMenu($numero);
+        TXT . "\n" . $this->retourListeCagnottes($numero, $data);
     }
 
     private function demarrerEditionOrdre(string $numero, TondoCagnotte $cagnotte, array $data): string
@@ -1865,22 +1872,26 @@ class BotService
             TXT;
         }
 
-        $total  = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
-        $lignes = $paiements->map(fn ($p) =>
+        $nbTotal = $paiements->count();
+        $total   = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
+        $cinq    = $paiements->take(5);
+        $lignes  = $cinq->map(fn ($p) =>
             \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
             ' · ' . $p->cotisant .
             ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*'
         )->implode("\n");
 
-        $nb = $paiements->count();
+        $suite = $nbTotal > 5
+            ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — exportez le PDF pour l\'historique complet._"
+            : '';
 
         $this->session->set($numero, 'gerer.tontine.hist', $data);
 
         return <<<TXT
         📊 *Historique — {$cagnotte->titre}*
-        Total : *{$total} FCFA* · {$nb} transaction(s)
+        Total : *{$total} FCFA* · {$nbTotal} transaction(s)
 
-        {$lignes}
+        {$lignes}{$suite}
 
         ————————————————
         1️⃣  Exporter en PDF _(lien valable 24h)_
@@ -1901,6 +1912,7 @@ class BotService
         if ($texte === '1') {
             try {
                 $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
+                $cagnotte->refresh();
                 return <<<TXT
                 📄 *Historique PDF*
 
@@ -1908,7 +1920,7 @@ class BotService
 
                 _(Ce lien expire dans 24h.)_
 
-                TXT . "\n" . $this->afficherMenu($numero);
+                TXT . "\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
             } catch (\Throwable $e) {
                 Log::error('handleGererTontineHistorique: échec PDF', ['err' => $e->getMessage()]);
                 return $this->erreurEtMenu($numero, "❌ Impossible de générer le PDF. Réessayez plus tard.");
@@ -1948,7 +1960,7 @@ class BotService
             $ref      = $data['cagnotte_ref'] ?? '—';
 
             return <<<TXT
-            💼 *{$titre}* · #{$ref}
+            💼 *{$titre}* · N°{$ref}
             Solde disponible : *{$collecte} FCFA*
 
             1️⃣  *Historique* des transactions
@@ -1967,7 +1979,6 @@ class BotService
 
             try {
                 $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
-                $this->session->reset($numero);
                 return <<<TXT
                 📄 *Historique PDF*
 
@@ -1975,7 +1986,7 @@ class BotService
 
                 _(Ce lien expire dans 24h.)_
 
-                TXT . "\n" . $this->afficherMenu($numero);
+                TXT . "\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
             } catch (\Throwable $e) {
                 Log::error('handleGererHistorique: échec PDF', ['err' => $e->getMessage()]);
                 return $this->erreurEtMenu($numero, "❌ Impossible de générer le PDF. Réessayez plus tard.");
@@ -2124,7 +2135,7 @@ class BotService
         Bénéficiaire : *{$masque}*
         Référence : `{$result['trans_id']}`
 
-        TXT . "\n" . $this->afficherMenu($numero);
+        TXT . "\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
     }
 
     // ── 4bis — Gérer > Fermer cotisation ──────────────────────────────────────
@@ -2303,7 +2314,7 @@ class BotService
         $this->session->set($numero, 'gerer.cagnotte', $data);
 
         return <<<TXT
-        💼 *{$cagnotte->titre}* · #{$ref}
+        💼 *{$cagnotte->titre}* · N°{$ref}
         Solde disponible : *{$collecte} FCFA*
 
         Que souhaitez-vous faire ?
@@ -2346,7 +2357,7 @@ class BotService
                 'type'         => $cagnotte->type,
             ]);
             return <<<TXT
-            🤝 *{$cagnotte->titre}* · #{$ref}
+            🤝 *{$cagnotte->titre}* · N°{$ref}
             Type : Tontine
 
             Entrez votre *numéro de téléphone* Mobile Money
@@ -2371,7 +2382,7 @@ class BotService
             ]);
 
             return <<<TXT
-            ✅ *{$cagnotte->titre}* · #{$ref}
+            ✅ *{$cagnotte->titre}* · N°{$ref}
             Type : Tontine · Montant fixe : *{$fmt} FCFA*
 
             Entrez votre *numéro de téléphone* Mobile Money
@@ -2391,7 +2402,7 @@ class BotService
         ]);
 
         return <<<TXT
-        💰 *{$cagnotte->titre}* · #{$ref}
+        💰 *{$cagnotte->titre}* · N°{$ref}
 
         Quel *montant* souhaitez-vous cotiser ?
         _(minimum 100 FCFA — maximum 500 000 FCFA)_

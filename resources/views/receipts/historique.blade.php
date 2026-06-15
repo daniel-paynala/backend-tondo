@@ -7,45 +7,79 @@
 
 html, body {
   font-family: DejaVu Sans, sans-serif;
+  font-size: 30px;
   color: #1A1F1E;
-  background: #F4ECE0;
-  font-size: 10px;
+  background: #fff;
 }
 
 .hdr {
   background: #0F4C5C;
-  padding: 14px 20px 12px;
+  padding: 28px 36px 24px;
 }
-.brand { font-size: 16px; font-weight: 700; color: #F4ECE0; }
+.brand {
+  font-size: 42px;
+  font-weight: 700;
+  color: #F4ECE0;
+}
 .brand-badge {
-  display: inline-block; background: #C97B4A; color: #1A1F1E;
-  font-size: 10px; font-weight: 700; width: 18px; height: 18px;
-  line-height: 18px; text-align: center; border-radius: 3px;
-  margin-right: 5px; vertical-align: middle;
+  display: inline-block;
+  background: #C97B4A;
+  color: #1A1F1E;
+  font-size: 28px;
+  font-weight: 700;
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  text-align: center;
+  border-radius: 5px;
+  margin-right: 10px;
+  vertical-align: middle;
 }
-.hdr-sub   { font-size: 7px; color: rgba(244,236,224,0.5); letter-spacing: 0.8px; margin-top: 2px; }
-.hdr-badge { display: inline-block; background: #6B8E4E; color: #fff; font-size: 7px;
-             font-weight: 700; padding: 2px 8px; border-radius: 20px; margin-top: 6px; }
+.hdr-sub {
+  font-size: 20px;
+  color: rgba(244,236,224,0.75);
+  letter-spacing: 0.5px;
+  margin-top: 8px;
+}
+.hdr-badge {
+  display: inline-block;
+  background: #6B8E4E;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  padding: 5px 18px;
+  border-radius: 24px;
+  margin-top: 12px;
+}
 
-.wrap { padding: 14px 20px 20px; }
+.wrap { padding: 32px 36px 40px; }
 
-.meta { margin-bottom: 14px; }
-.meta-titre  { font-size: 14px; font-weight: 700; color: #0F4C5C; margin-bottom: 4px; }
-.meta-ref    { font-size: 8px; color: #888; }
-.meta-date   { font-size: 8px; color: #888; margin-top: 2px; }
+.meta { margin-bottom: 28px; }
+.meta-titre  { font-size: 36px; font-weight: 700; color: #0F4C5C; margin-bottom: 8px; }
+.meta-ref    { font-size: 26px; color: #555; }
+.meta-date   { font-size: 24px; color: #777; margin-top: 6px; }
 
 .solde-bloc {
-  background: #fff; border-radius: 6px; padding: 10px 14px;
-  margin-bottom: 14px; border: 1px solid rgba(15,76,92,0.08);
-  display: flex; justify-content: space-between; align-items: center;
+  background: rgba(15,76,92,0.06);
+  border-radius: 8px;
+  padding: 22px 28px;
+  margin-bottom: 28px;
+  border: 2px solid rgba(15,76,92,0.12);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
-.solde-lbl { font-size: 8px; text-transform: uppercase; letter-spacing: 1px; color: #888; }
-.solde-val { font-size: 20px; font-weight: 700; color: #0F4C5C; }
-.solde-cur { font-size: 10px; font-weight: 600; color: #C97B4A; }
+.solde-lbl { font-size: 22px; text-transform: uppercase; letter-spacing: 0.8px; color: #777; }
+.solde-val { font-size: 48px; font-weight: 700; color: #0F4C5C; }
+.solde-cur { font-size: 28px; font-weight: 600; color: #C97B4A; }
 
 .section-title {
-  font-size: 7px; text-transform: uppercase; letter-spacing: 1px;
-  color: #0F4C5C; font-weight: 700; margin-bottom: 6px;
+  font-size: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #0F4C5C;
+  font-weight: 700;
+  margin-bottom: 14px;
 }
 
 table.hist {
@@ -55,30 +89,45 @@ table.hist {
 table.hist thead th {
   background: #0F4C5C;
   color: #F4ECE0;
-  font-size: 7px;
+  font-size: 24px;
   font-weight: 700;
-  padding: 5px 8px;
+  padding: 12px 16px;
   text-align: left;
 }
 table.hist tbody tr:nth-child(even) td { background: #fff; }
 table.hist tbody tr:nth-child(odd)  td { background: rgba(15,76,92,0.04); }
 table.hist tbody td {
-  padding: 4px 8px;
-  font-size: 8px;
-  border-bottom: 1px solid rgba(15,76,92,0.06);
+  padding: 12px 16px;
+  font-size: 28px;
+  border-bottom: 1px solid rgba(15,76,92,0.10);
   vertical-align: middle;
 }
-table.hist td.montant { font-weight: 700; color: #0F4C5C; text-align: right; white-space: nowrap; }
-table.hist td.ref     { font-size: 7px; color: #aaa; word-break: break-all; }
+table.hist td.montant {
+  font-weight: 700;
+  color: #0F4C5C;
+  text-align: right;
+  white-space: nowrap;
+}
+table.hist td.ref {
+  font-size: 22px;
+  color: #888;
+  word-break: break-all;
+}
 
-.total-row td { background: rgba(15,76,92,0.08) !important; font-weight: 700; }
+.total-row td {
+  background: rgba(15,76,92,0.10) !important;
+  font-weight: 700;
+  font-size: 30px;
+}
 
 .footer {
-  text-align: center; margin-top: 16px; padding-top: 8px;
-  border-top: 1px solid rgba(15,76,92,0.12);
+  text-align: center;
+  margin-top: 36px;
+  padding-top: 16px;
+  border-top: 2px solid rgba(15,76,92,0.15);
 }
-.footer-brand { font-size: 8px; font-weight: 700; color: #0F4C5C; }
-.footer-text  { font-size: 7px; color: #bbb; margin-top: 2px; }
+.footer-brand { font-size: 28px; font-weight: 700; color: #0F4C5C; }
+.footer-text  { font-size: 24px; color: #888; margin-top: 6px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -93,7 +142,7 @@ table.hist td.ref     { font-size: 7px; color: #aaa; word-break: break-all; }
 
   <div class="meta">
     <div class="meta-titre">{{ $cagnotte->titre }}</div>
-    <div class="meta-ref">Référence #{{ $cagnotte->reference }} · {{ $cagnotte->type === 'tontine_periodique' ? 'Tontine périodique' : 'Cotisation ouverte' }}</div>
+    <div class="meta-ref">Référence N°{{ $cagnotte->reference }} · {{ $cagnotte->type === 'tontine_periodique' ? 'Tontine périodique' : 'Cotisation ouverte' }}</div>
     <div class="meta-date">Généré le {{ $date }}</div>
   </div>
 
@@ -105,14 +154,14 @@ table.hist td.ref     { font-size: 7px; color: #aaa; word-break: break-all; }
     </div>
     <div style="text-align:right">
       <div class="solde-lbl">Transactions</div>
-      <div style="font-size:18px; font-weight:700; color:#C97B4A">{{ $paiements->count() }}</div>
+      <div style="font-size:46px; font-weight:700; color:#C97B4A">{{ $paiements->count() }}</div>
     </div>
   </div>
 
   <div class="section-title">Détail des paiements</div>
 
   @if($paiements->isEmpty())
-    <p style="color:#888; font-size:9px; text-align:center; padding:20px 0">Aucune transaction confirmée.</p>
+    <p style="color:#888; font-size:28px; text-align:center; padding:40px 0">Aucune transaction confirmée.</p>
   @else
   <table class="hist">
     <thead>
@@ -133,7 +182,7 @@ table.hist td.ref     { font-size: 7px; color: #aaa; word-break: break-all; }
       </tr>
       @endforeach
       <tr class="total-row">
-        <td colspan="3" style="text-align:right; font-size:8px; color:#0F4C5C">TOTAL</td>
+        <td colspan="3" style="text-align:right; color:#0F4C5C">TOTAL</td>
         <td class="montant" style="color:#0F4C5C">{{ number_format($total, 0, ',', ' ') }} FCFA</td>
       </tr>
     </tbody>
