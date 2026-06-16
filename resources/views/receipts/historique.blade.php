@@ -7,7 +7,7 @@
 
 html, body {
   font-family: DejaVu Sans, sans-serif;
-  font-size: 50px;
+  font-size: 25px;
   color: #111;
   background: #fff;
 }
