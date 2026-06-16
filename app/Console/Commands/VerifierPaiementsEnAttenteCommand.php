@@ -81,7 +81,7 @@ class VerifierPaiementsEnAttenteCommand extends Command
                 $twilio->envoyer($p->numero_wa, <<<TXT
                 ❌ *Paiement échoué ou refusé.*
 
-                ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tonji.ga. Nous traiterons votre remboursement sous 24h._
+                ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tonji.ga._
 
                 ————————————————
                 🎉 *Que souhaitez-vous faire ?*
