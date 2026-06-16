@@ -150,8 +150,8 @@ class BotService
         return <<<TXT
         💰 *Cotiser*
 
-        Entrez la *référence* de la cagnotte
-        (numéro à 6 chiffres fourni par l'organisateur).
+        Entrez le *Numéro de tontine ou de cotisation*
+        (6 chiffres, fourni par l'organisateur).
 
         _Tapez_ *#️⃣* _pour revenir au menu._
         TXT;
@@ -163,7 +163,7 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Référence *N°{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cotisation *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         if ($cagnotte->statut === 'cloturee') {
@@ -569,8 +569,8 @@ class BotService
         return <<<TXT
         🤝 *Rejoindre une cagnotte*
 
-        Entrez la *référence* de la cagnotte
-        (numéro à 6 chiffres fourni par l'organisateur).
+        Entrez le *Numéro de tontine ou de cotisation*
+        (6 chiffres, fourni par l'organisateur).
 
         _Tapez_ *#️⃣* _pour revenir au menu._
         TXT;
@@ -582,7 +582,7 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Référence *N°{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cotisation *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         $type = $cagnotte->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation';
@@ -1220,7 +1220,8 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez support@tonji.ga.");
         }
 
-        $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $type      = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $typeLabel = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cotisation';
         $prenom = ucfirst(mb_strtolower($user->prenom));
         $ref    = $cagnotte->reference;
         $botNum = ltrim(config('tondo.whatsapp_numero', ''), '+');
@@ -1234,7 +1235,7 @@ class BotService
         Félicitations *{$prenom}* !
         Votre {$type} est active.
 
-        *Code : N°{$ref}*
+        *Numéro de {$typeLabel} : N°{$ref}*
         Partagez ce lien à vos participants :{$lienWa}
 
         TXT . "\n" . $this->afficherMenu($numero);
