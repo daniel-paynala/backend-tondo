@@ -53,7 +53,7 @@ class GererCagnotteService
             'total'     => $total,
             'date'      => now()->format('d/m/Y à H:i'),
         ])
-            ->setPaper('A4', 'portrait')
+            ->setPaper('A6', 'portrait')
             ->setOptions([
                 'defaultFont'     => 'DejaVu Sans',
                 'isRemoteEnabled' => false,
