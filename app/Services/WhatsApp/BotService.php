@@ -1924,12 +1924,14 @@ class BotService
                 TXT . "\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
             } catch (\Throwable $e) {
                 Log::error('handleGererTontineHistorique: échec PDF', ['err' => $e->getMessage()]);
-                return $this->erreurEtMenu($numero, "❌ Impossible de générer le PDF. Réessayez plus tard.");
+                $cagnotte->refresh();
+                return "❌ Impossible de générer le PDF. Réessayez plus tard.\n\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
             }
         }
 
         if ($texte === '2') {
-            return $this->retourListeCagnottes($numero, $data);
+            $cagnotte->refresh();
+            return $this->afficherMenuTontine($numero, $cagnotte, $data);
         }
 
         if ($texte === '3') {
@@ -1990,7 +1992,7 @@ class BotService
                 TXT . "\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
             } catch (\Throwable $e) {
                 Log::error('handleGererHistorique: échec PDF', ['err' => $e->getMessage()]);
-                return $this->erreurEtMenu($numero, "❌ Impossible de générer le PDF. Réessayez plus tard.");
+                return "❌ Impossible de générer le PDF. Réessayez plus tard.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
             }
         }
 
@@ -2121,10 +2123,10 @@ class BotService
                 montant:    $montant,
             );
         } catch (\RuntimeException $e) {
-            return $this->erreurEtMenu($numero, "❌ " . $e->getMessage());
+            return "❌ " . $e->getMessage() . "\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         } catch (\Throwable $e) {
             Log::error('handleGererReversementOtp: erreur inattendue', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu($numero, "❌ Erreur technique. Contactez support@tonji.ga.");
+            return "❌ Erreur technique. Contactez support@tonji.ga.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
@@ -2159,7 +2161,7 @@ class BotService
                     'updated_at' => now(),
                 ]);
                 return "✅ *Cotisation clôturée.*\n\nLa cotisation *{$cagnotte->titre}* a bien été fermée.\n\n"
-                    . $this->afficherMenu($numero);
+                    . $this->retourListeCagnottes($numero, $data);
             }
             if ($texte === '2') {
                 return $this->retourMenuCagnotte($numero, $cagnotte, $data);
@@ -2276,16 +2278,10 @@ class BotService
                 montant:    $montant,
             );
         } catch (\RuntimeException $e) {
-            return $this->erreurEtMenu(
-                $numero,
-                "❌ " . $e->getMessage() . "\n\nLa cotisation reste ouverte."
-            );
+            return "❌ " . $e->getMessage() . "\n\nLa cotisation reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         } catch (\Throwable $e) {
             Log::error('handleGererFermerOtp: erreur reversement', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu(
-                $numero,
-                "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cotisation reste ouverte."
-            );
+            return "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cotisation reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
         // Reversement confirmé → clôturer
@@ -2305,7 +2301,7 @@ class BotService
 
         La cotisation *{$cagnotte->titre}* a été clôturée.
 
-        TXT . "\n" . $this->afficherMenu($numero);
+        TXT . "\n" . $this->retourListeCagnottes($numero, $data);
     }
 
     private function retourMenuCagnotte(string $numero, TondoCagnotte $cagnotte, array $data): string
