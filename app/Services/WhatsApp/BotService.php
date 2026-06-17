@@ -1449,7 +1449,7 @@ class BotService
         {$index}
 
         Quelle cagnotte souhaitez-vous gérer ?
-        _(tapez le numéro correspondant)_
+        _(tapez le numéro de la liste, ou entrez directement le numéro de la cagnotte)_
 
         #️⃣ _pour revenir en arrière_
         TXT;
@@ -1459,13 +1459,19 @@ class BotService
     {
         $data  = $this->session->data($numero);
         $refs  = $data['refs'] ?? [];
-        $choix = (int) trim($texte);
+        $n     = count($refs);
+        $input = trim($texte);
+        $choix = (int) $input;
 
-        if ($choix < 1 || $choix > count($refs)) {
-            return "⚠️ Tapez un chiffre entre *1* et *" . count($refs) . "*.\n\n#️⃣ _pour revenir en arrière_";
+        // Numéro de cagnotte saisi directement → priorité sur le choix positionnel
+        if (in_array($input, $refs, true)) {
+            $ref = $input;
+        } elseif ($choix >= 1 && $choix <= $n) {
+            $ref = $refs[$choix - 1];
+        } else {
+            return "⚠️ Tapez un chiffre entre *1* et *{$n}*, ou entrez directement le *numéro de la cagnotte*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
-        $ref      = $refs[$choix - 1];
         $cagnotte = TondoCagnotte::where('reference', $ref)->first();
 
         if (! $cagnotte) {
