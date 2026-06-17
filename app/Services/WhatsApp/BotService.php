@@ -1591,10 +1591,18 @@ class BotService
             })->implode("\n");
 
             $suite = $nbTotal > 5
-                ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — exportez le PDF pour l\'historique complet._"
+                ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — consultez le PDF pour l'historique complet._"
                 : '';
 
             $this->session->set($numero, 'gerer.historique', $data);
+
+            try {
+                $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
+                $pdfBloc = "————————————————\n📄 *Historique complet — PDF*\n{$pdfUrl}";
+            } catch (\Throwable $e) {
+                Log::error('historique cotisation: échec PDF', ['err' => $e->getMessage()]);
+                $pdfBloc = "❌ _Impossible de générer le PDF. Réessayez plus tard._";
+            }
 
             return <<<TXT
             📊 *Historique — {$cagnotte->titre}*
@@ -1602,11 +1610,9 @@ class BotService
 
             {$lignes}{$suite}
 
-            ————————————————
-            Exporter en *PDF* ?
+            {$pdfBloc}
 
-            1️⃣  Oui — recevoir le lien
-            0️⃣  Non — retour menu
+            0️⃣  Retour menu
             TXT;
         }
 
@@ -1889,10 +1895,18 @@ class BotService
         )->implode("\n");
 
         $suite = $nbTotal > 5
-            ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — exportez le PDF pour l\'historique complet._"
+            ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — consultez le PDF pour l'historique complet._"
             : '';
 
         $this->session->set($numero, 'gerer.tontine.hist', $data);
+
+        try {
+            $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
+            $pdfBloc = "————————————————\n📄 *Historique complet — PDF*\n{$pdfUrl}";
+        } catch (\Throwable $e) {
+            Log::error('historique tontine: échec PDF', ['err' => $e->getMessage()]);
+            $pdfBloc = "❌ _Impossible de générer le PDF. Réessayez plus tard._";
+        }
 
         return <<<TXT
         📊 *Historique — {$cagnotte->titre}*
@@ -1900,10 +1914,9 @@ class BotService
 
         {$lignes}{$suite}
 
-        ————————————————
-        1️⃣  Exporter en PDF _(lien valable 24h)_
-        2️⃣  Retour au menu précédant
-        3️⃣  Menu principal
+        {$pdfBloc}
+
+        0️⃣  Retour menu
         TXT;
     }
 
@@ -1916,26 +1929,7 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
         }
 
-        if ($texte === '1') {
-            try {
-                $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
-                $cagnotte->refresh();
-                return <<<TXT
-                📄 *Historique PDF*
-
-                {$pdfUrl}
-
-                _(Ce lien expire dans 24h.)_
-
-                TXT . "\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
-            } catch (\Throwable $e) {
-                Log::error('handleGererTontineHistorique: échec PDF', ['err' => $e->getMessage()]);
-                $cagnotte->refresh();
-                return "❌ Impossible de générer le PDF. Réessayez plus tard.\n\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
-            }
-        }
-
-        if ($texte === '2') {
+        if ($texte === '0') {
             $cagnotte->refresh();
             return $this->afficherMenuTontine($numero, $cagnotte, $data);
         }
@@ -1962,47 +1956,10 @@ class BotService
         $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
 
         if ($texte === '0') {
-            // Retour au menu cagnotte
-            $this->session->set($numero, 'gerer.cagnotte', $data);
-            $collecte = number_format((int) ($cagnotte?->montant_collecte ?? 0), 0, ',', ' ');
-            $titre    = $cagnotte?->titre ?? '—';
-            $ref      = $data['cagnotte_ref'] ?? '—';
-
-            return <<<TXT
-            💼 *{$titre}* · N°{$ref}
-            Solde disponible : *{$collecte} FCFA*
-
-            1️⃣  *Historique* des transactions
-            2️⃣  *Initier* un reversement
-            3️⃣  *Fermer* la cotisation
-            4️⃣  Retour à la liste
-
-            #️⃣ _pour revenir en arrière_
-            TXT;
+            return $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
-        if ($texte === '1') {
-            if (! $cagnotte) {
-                return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
-            }
-
-            try {
-                $pdfUrl = $this->gererCagnotteSvc->genererHistoriquePdf($cagnotte);
-                return <<<TXT
-                📄 *Historique PDF*
-
-                {$pdfUrl}
-
-                _(Ce lien expire dans 24h.)_
-
-                TXT . "\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
-            } catch (\Throwable $e) {
-                Log::error('handleGererHistorique: échec PDF', ['err' => $e->getMessage()]);
-                return "❌ Impossible de générer le PDF. Réessayez plus tard.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
-            }
-        }
-
-        return "⚠️ Tapez *1* pour le PDF ou *0* pour revenir.\n\n#️⃣ _pour revenir en arrière_";
+        return "⚠️ Tapez *0* pour revenir au menu.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     private function handleGererReversementDest(string $numero, string $texte): string
