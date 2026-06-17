@@ -1,0 +1,19 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.com.paynala.tondo",
+        "paths": [
+          "/rejoindre/*",
+          "/recu/*"
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "TEAMID.com.paynala.tondo"
+    ]
+  }
+}
