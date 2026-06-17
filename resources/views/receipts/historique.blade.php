@@ -259,7 +259,7 @@ table.hist td.montant {
       @foreach($paiements as $p)
       <tr>
         <td class="nom">{{ $p->cotisant }}</td>
-        <td class="date">{{ \Carbon\Carbon::parse($p->updated_at)->format('d/m/y') }}</td>
+        <td class="date">{{ \Carbon\Carbon::parse($p->updated_at)->format('d/m/y H:i') }}</td>
         <td class="montant">{{ number_format((int)$p->montant, 0, ',', ' ') }}&nbsp;F</td>
       </tr>
       @endforeach
