@@ -153,7 +153,7 @@ class BotService
         Entrez le *Numéro de tontine ou de cotisation*
         (6 chiffres, fourni par l'organisateur).
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -167,7 +167,7 @@ class BotService
         }
 
         if ($cagnotte->statut === 'cloturee') {
-            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n_Tapez_ *#️⃣* _pour revenir au menu._";
+            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Stocker les infos cagnotte dans la session
@@ -214,7 +214,7 @@ class BotService
             Entrez votre *numéro de téléphone* Mobile Money
             (format : *0XXXXXXXX*).
 
-            _Tapez_ *#️⃣* _pour revenir au menu._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -234,7 +234,7 @@ class BotService
         Quel *montant* souhaitez-vous cotiser ?
         _(minimum 100 FCFA)_
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -245,11 +245,11 @@ class BotService
         $montant = (int) preg_replace('/\D/', '', $texte);
 
         if ($montant < 100) {
-            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide, ou tapez *#️⃣* pour annuler.";
+            return "⚠️ Montant minimum : *100 FCFA*.\nEntrez un montant valide, ou #️⃣ pour revenir en arrière.";
         }
 
         if ($montant > 500_000) {
-            return "⚠️ Montant trop élevé.\nEntrez un montant valide, ou tapez *#️⃣* pour annuler.";
+            return "⚠️ Montant trop élevé.\nEntrez un montant valide, ou #️⃣ pour revenir en arrière.";
         }
 
         $data = $this->session->data($numero);
@@ -261,7 +261,7 @@ class BotService
         Entrez votre *numéro de téléphone* Mobile Money
         (format : *0XXXXXXXX*).
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -272,7 +272,7 @@ class BotService
         $numeroSaisi = $this->normaliserNumero($texte);
 
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide.\nFormat attendu : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Numéro invalide.\nFormat attendu : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data     = $this->session->data($numero);
@@ -332,7 +332,7 @@ class BotService
             MBOULA
             Jean
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -366,7 +366,7 @@ class BotService
                 'file'    => $e->getFile(),
             ]);
             $this->session->reset($numero);
-            return "❌ Une erreur technique est survenue. Veuillez réessayer.\n\n_Tapez_ *#️⃣* _pour revenir au menu._";
+            return "❌ Une erreur technique est survenue. Veuillez réessayer.\n\n#️⃣ _pour revenir en arrière_";
         }
     }
 
@@ -376,7 +376,7 @@ class BotService
 
         if (! $cagnotte) {
             $this->session->reset($numero);
-            return "❌ Erreur : cagnotte introuvable.\n\n_Tapez_ *#️⃣* _pour revenir au menu._";
+            return "❌ Erreur : cagnotte introuvable.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Utiliser le numéro saisi comme numéro de paiement
@@ -387,7 +387,7 @@ class BotService
 
         if ($resultat['statut'] === 'erreur') {
             $this->session->reset($numero);
-            return "❌ Erreur lors de l'initiation du paiement : {$resultat['message']}\n\n_Tapez_ *#️⃣* _pour revenir au menu._";
+            return "❌ Erreur lors de l'initiation du paiement : {$resultat['message']}\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $prenom     = ucfirst(mb_strtolower($user->prenom));
@@ -432,7 +432,7 @@ class BotService
         Vous recevrez la confirmation *automatiquement* dès validation (délai max 3 min).
         Tapez *OK* si vous souhaitez vérifier manuellement.
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -454,7 +454,7 @@ class BotService
 
             Validez le paiement sur votre Mobile Money puis tapez *OK*.
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -499,7 +499,7 @@ class BotService
 
         Attendez quelques secondes et tapez *OK* à nouveau.
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -572,7 +572,7 @@ class BotService
         Entrez le *Numéro de tontine ou de cotisation*
         (6 chiffres, fourni par l'organisateur).
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -601,7 +601,7 @@ class BotService
         Entrez votre *numéro de téléphone* Mobile Money
         (format : *0XXXXXXXX*).
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -610,7 +610,7 @@ class BotService
         $numeroSaisi = $this->normaliserNumero($texte);
 
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide.\nFormat attendu : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Numéro invalide.\nFormat attendu : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data      = $this->session->data($numero);
@@ -673,7 +673,7 @@ class BotService
         MBOULA
         Jean
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -690,7 +690,7 @@ class BotService
             MBOULA
             Jean
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -741,7 +741,7 @@ class BotService
         1️⃣  *Cotisation ouverte* — collecte libre, montant variable
         2️⃣  *Tontine périodique* — rotation, montant fixe par cycle
 
-        _Tapez le numéro de votre choix ou_ *#️⃣* _pour annuler._
+        _Tapez le numéro de votre choix_ · #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -780,7 +780,7 @@ class BotService
             Quel est le *nom* de votre cagnotte ?
             _(max 120 caractères)_
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -794,11 +794,11 @@ class BotService
             Quel est le *nom* de votre tontine ?
             _(max 120 caractères)_
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
-        return "⚠️ Tapez *1* pour Cotisation ou *2* pour Tontine.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return "⚠️ Tapez *1* pour Cotisation ou *2* pour Tontine.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     // ── 3.1 Cotisation — champs ───────────────────────────────────────────────
@@ -807,7 +807,7 @@ class BotService
     {
         $titre = trim($texte);
         if (mb_strlen($titre) < 3 || mb_strlen($titre) > 120) {
-            return "⚠️ Nom invalide (3 à 120 caractères).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Nom invalide (3 à 120 caractères).\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -825,7 +825,7 @@ class BotService
         $montant = (int) preg_replace('/\D/', '', $texte);
 
         if ($montant !== 0 && ($montant < 100 || $montant > 2_500_000)) {
-            return "⚠️ Montant invalide. Entre *100* et *2 500 000 FCFA*, ou *0* pour pas de limite.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Montant invalide. Entre *100* et *2 500 000 FCFA*, ou *0* pour pas de limite.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -837,7 +837,7 @@ class BotService
         Date *limite* de la cagnotte ?
         _(format : *JJ/MM/AAAA* — tapez *0* pour pas de date limite)_
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -852,10 +852,10 @@ class BotService
 
         $dt = $this->parseDate(trim($texte));
         if (! $dt) {
-            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA* ou tapez *0* pour aucune limite.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Format invalide. Utilisez *JJ/MM/AAAA* ou tapez *0* pour aucune limite.\n\n#️⃣ _pour revenir en arrière_";
         }
         if ($dt <= new \DateTimeImmutable('today')) {
-            return "⚠️ La date limite doit être *après aujourd'hui*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ La date limite doit être *après aujourd'hui*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $this->session->set($numero, 'creer.numero', array_merge($data, [
@@ -870,7 +870,7 @@ class BotService
     {
         $titre = trim($texte);
         if (mb_strlen($titre) < 3 || mb_strlen($titre) > 120) {
-            return "⚠️ Nom invalide (3 à 120 caractères).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Nom invalide (3 à 120 caractères).\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -882,7 +882,7 @@ class BotService
         Nombre de *participants* ?
         _(entre 2 et 200)_
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -890,7 +890,7 @@ class BotService
     {
         $nb = (int) preg_replace('/\D/', '', $texte);
         if ($nb < 2 || $nb > 200) {
-            return "⚠️ Nombre invalide. Entre *2* et *200* participants.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Nombre invalide. Entre *2* et *200* participants.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -902,7 +902,7 @@ class BotService
         Montant *récupéré par participant* ? _(sans les frais)_
         (en FCFA)
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -910,7 +910,7 @@ class BotService
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
         if ($montant < 100 || $montant > 2_500_000) {
-            return "⚠️ Montant invalide. Entre *100* et *2 500 000 FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Montant invalide. Entre *100* et *2 500 000 FCFA*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -925,14 +925,14 @@ class BotService
         2️⃣  *2 semaines* (retrait le lundi)
         3️⃣  *1 mois* (vous choisirez le jour)
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
     private function handleCreerTontinePeriodicite(string $numero, string $texte): string
     {
         if (! in_array($texte, ['1', '2', '3'])) {
-            return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data    = $this->session->data($numero);
@@ -952,7 +952,7 @@ class BotService
             2️⃣  Le *7*
             3️⃣  Le *15*
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -966,7 +966,7 @@ class BotService
     private function handleCreerTontineJourMois(string $numero, string $texte): string
     {
         if (! in_array($texte, ['1', '2', '3'])) {
-            return "⚠️ Tapez *1* (le 5), *2* (le 7) ou *3* (le 15).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Tapez *1* (le 5), *2* (le 7) ou *3* (le 15).\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $jourMap = ['1' => 5, '2' => 7, '3' => 15];
@@ -987,7 +987,7 @@ class BotService
         📱 Votre *numéro Mobile Money* ?
         _(format : *0XXXXXXXX*)_
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -995,7 +995,7 @@ class BotService
     {
         $numeroSaisi = $this->normaliserNumero($texte);
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data      = $this->session->data($numero);
@@ -1020,7 +1020,7 @@ class BotService
                 MBOULA
                 Jean
 
-                _Tapez_ *#️⃣* _pour annuler._
+                #️⃣ _pour revenir en arrière_
                 TXT;
             }
 
@@ -1048,7 +1048,7 @@ class BotService
         MBOULA
         Jean
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1060,7 +1060,7 @@ class BotService
             return <<<TXT
             ⚠️ Format incorrect. Entrez *nom* puis *prénom*, chacun sur une ligne.
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -1076,7 +1076,7 @@ class BotService
     private function handleCreerCertification(string $numero, string $texte): string
     {
         if ($texte !== '1') {
-            return "⚠️ Tapez *1* pour certifier votre majorité, ou *#️⃣* pour annuler.";
+            return "⚠️ Tapez *1* pour certifier votre majorité, #️⃣ pour revenir en arrière.";
         }
 
         $data      = $this->session->data($numero);
@@ -1111,7 +1111,7 @@ class BotService
 
         _(tapez le numéro alternatif au format *0XXXXXXXX*, ou *0* pour utiliser le même)_
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1124,7 +1124,7 @@ class BotService
         } else {
             $numeroRetrait = $this->normaliserNumero($texte);
             if (! $numeroRetrait) {
-                return "⚠️ Numéro invalide. Format : *0XXXXXXXX* ou tapez *0* pour le même numéro.\n\n_Tapez_ *#️⃣* _pour annuler._";
+                return "⚠️ Numéro invalide. Format : *0XXXXXXXX* ou tapez *0* pour le même numéro.\n\n#️⃣ _pour revenir en arrière_";
             }
         }
 
@@ -1276,7 +1276,7 @@ class BotService
         Votre *numéro Mobile Money* ?
         _(format : *0XXXXXXXX*)_
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1308,7 +1308,7 @@ class BotService
     {
         $numeroSaisi = $this->normaliserNumero($texte);
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -1327,7 +1327,7 @@ class BotService
         Un code à 6 chiffres a été envoyé au *{$masque}*.{$hint}
         Entrez ce code pour continuer :
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1337,11 +1337,11 @@ class BotService
         $code = trim($texte);
 
         if (! preg_match('/^\d{6}$/', $code)) {
-            return "⚠️ Entrez le code à *6 chiffres*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
-            return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
+            return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
         }
 
         // OTP validé — continuer le flow normal
@@ -1368,7 +1368,7 @@ class BotService
         MBOULA
         Jean
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1377,7 +1377,7 @@ class BotService
         $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
 
         if (count($lignes) < 2) {
-            return "⚠️ Format incorrect. Entrez *nom* puis *prénom*, chacun sur une ligne.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Format incorrect. Entrez *nom* puis *prénom*, chacun sur une ligne.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -1392,7 +1392,7 @@ class BotService
     private function handleGererCertification(string $numero, string $texte): string
     {
         if ($texte !== '1') {
-            return "⚠️ Tapez *1* pour certifier votre majorité, ou *#️⃣* pour annuler.";
+            return "⚠️ Tapez *1* pour certifier votre majorité, #️⃣ pour revenir en arrière.";
         }
 
         $data      = $this->session->data($numero);
@@ -1420,7 +1420,7 @@ class BotService
 
         Tapez *1* pour certifier être majeur et accepter les conditions d'utilisation : https://tonji.ga/cgu
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1451,7 +1451,7 @@ class BotService
         Quelle cagnotte souhaitez-vous gérer ?
         _(tapez le numéro correspondant)_
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1462,7 +1462,7 @@ class BotService
         $choix = (int) trim($texte);
 
         if ($choix < 1 || $choix > count($refs)) {
-            return "⚠️ Tapez un chiffre entre *1* et *" . count($refs) . "*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Tapez un chiffre entre *1* et *" . count($refs) . "*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $ref      = $refs[$choix - 1];
@@ -1496,7 +1496,7 @@ class BotService
         3️⃣  *Fermer* la cotisation
         4️⃣  Retour à la liste
 
-        _Tapez_ *#️⃣* _pour revenir au menu principal._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1623,11 +1623,11 @@ class BotService
             1️⃣  *Mon numéro* Mobile Money
             2️⃣  *Autre numéro*
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
-        return "⚠️ Tapez *1*, *2*, *3* ou *4*.\n\n_Tapez_ *#️⃣* _pour revenir au menu principal._";
+        return "⚠️ Tapez *1*, *2*, *3* ou *4*.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     // ── 4 — Gérer > Tontine ───────────────────────────────────────────────────
@@ -1711,7 +1711,7 @@ class BotService
                 '1' => $this->demarrerHistoriqueTontine($numero, $cagnotte, $data),
                 '2' => $this->retourListeCagnottes($numero, $data),
                 '3' => $this->afficherMenu($numero),
-                default => "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._",
+                default => "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_",
             };
         }
 
@@ -1722,7 +1722,7 @@ class BotService
                 '3' => $this->executerSupprimerTontine($numero, $cagnotte),
                 '4' => $this->retourListeCagnottes($numero, $data),
                 '5' => $this->afficherMenu($numero),
-                default => "⚠️ Tapez un chiffre de *1* à *5*.\n\n_Tapez_ *#️⃣* _pour annuler._",
+                default => "⚠️ Tapez un chiffre de *1* à *5*.\n\n#️⃣ _pour revenir en arrière_",
             };
         }
 
@@ -1731,7 +1731,7 @@ class BotService
             '1' => $this->executerSupprimerTontine($numero, $cagnotte),
             '2' => $this->retourListeCagnottes($numero, $data),
             '3' => $this->afficherMenu($numero),
-            default => "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._",
+            default => "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_",
         };
     }
 
@@ -1805,7 +1805,7 @@ class BotService
 
         _(Toutes les {$n} positions doivent être couvertes.)_
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -1820,25 +1820,25 @@ class BotService
 
         foreach ($lignes as $ligne) {
             if (! preg_match('/^(\d+)-(\d+)$/', $ligne, $m)) {
-                return "⚠️ Format invalide : *{$ligne}*\nUtilisez *X-Y* (ex: `3-1`).\n\n_Tapez_ *#️⃣* _pour annuler._";
+                return "⚠️ Format invalide : *{$ligne}*\nUtilisez *X-Y* (ex: `3-1`).\n\n#️⃣ _pour revenir en arrière_";
             }
             $ancien  = (int) $m[1];
             $nouveau = (int) $m[2];
             if ($ancien < 1 || $ancien > $n || $nouveau < 1 || $nouveau > $n) {
-                return "⚠️ Position hors plage dans *{$ligne}* (1 à {$n}).\n\n_Tapez_ *#️⃣* _pour annuler._";
+                return "⚠️ Position hors plage dans *{$ligne}* (1 à {$n}).\n\n#️⃣ _pour revenir en arrière_";
             }
             $pairs[$ancien] = $nouveau;
         }
 
         if (count($pairs) !== $n) {
-            return "⚠️ Envoyez exactement *{$n}* paires (une par participant).\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Envoyez exactement *{$n}* paires (une par participant).\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Vérifier que chaque position source et destination est unique
         $sources = array_keys($pairs);
         $dests   = array_values($pairs);
         if (count(array_unique($sources)) !== $n || count(array_unique($dests)) !== $n) {
-            return "⚠️ Chaque position doit apparaître exactement *une fois* en source et en destination.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Chaque position doit apparaître exactement *une fois* en source et en destination.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         foreach ($pairs as $ancien => $nouveau) {
@@ -1938,7 +1938,7 @@ class BotService
             return $this->afficherMenu($numero);
         }
 
-        return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     private function retourListeCagnottes(string $numero, array $data): string
@@ -1971,7 +1971,7 @@ class BotService
             3️⃣  *Fermer* la cotisation
             4️⃣  Retour à la liste
 
-            _Tapez_ *#️⃣* _pour revenir au menu principal._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -1996,7 +1996,7 @@ class BotService
             }
         }
 
-        return "⚠️ Tapez *1* pour le PDF ou *0* pour revenir.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return "⚠️ Tapez *1* pour le PDF ou *0* pour revenir.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     private function handleGererReversementDest(string $numero, string $texte): string
@@ -2013,17 +2013,17 @@ class BotService
 
         if ($texte === '2') {
             $this->session->set($numero, 'gerer.revers.num', $data);
-            return "Entrez le *numéro* Mobile Money du bénéficiaire :\n_(format : *0XXXXXXXX*)_\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "Entrez le *numéro* Mobile Money du bénéficiaire :\n_(format : *0XXXXXXXX*)_\n\n#️⃣ _pour revenir en arrière_";
         }
 
-        return "⚠️ Tapez *1* pour Mon numéro ou *2* pour Autre numéro.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return "⚠️ Tapez *1* pour Mon numéro ou *2* pour Autre numéro.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     private function handleGererReversementNum(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -2043,7 +2043,7 @@ class BotService
         Quel *montant* souhaitez-vous reverser ? (en FCFA)
         _(min 100 — ne peut pas dépasser le solde disponible)_
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -2051,7 +2051,7 @@ class BotService
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
         if ($montant < 100) {
-            return "⚠️ Montant minimum : *100 FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Montant minimum : *100 FCFA*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data     = $this->session->data($numero);
@@ -2063,7 +2063,7 @@ class BotService
 
         if ((int) $cagnotte->montant_collecte < $montant) {
             $dispo = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
-            return "⚠️ Solde insuffisant. Disponible : *{$dispo} FCFA*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Solde insuffisant. Disponible : *{$dispo} FCFA*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $numeroGerant = $data['numero_payeur'] ?? '';
@@ -2086,7 +2086,7 @@ class BotService
         Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -2096,11 +2096,11 @@ class BotService
         $code = trim($texte);
 
         if (! preg_match('/^\d{6}$/', $code)) {
-            return "⚠️ Entrez le code à *6 chiffres*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
-            return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
+            return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
         }
 
         // OTP valide → exécuter le reversement
@@ -2166,7 +2166,7 @@ class BotService
             if ($texte === '2') {
                 return $this->retourMenuCagnotte($numero, $cagnotte, $data);
             }
-            return "⚠️ Tapez *1* pour confirmer ou *2* pour annuler.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Tapez *1* pour confirmer ou *2* pour annuler.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Solde > 0
@@ -2193,27 +2193,27 @@ class BotService
             Un code a été envoyé au *{$gerantNum}*.{$hint}
             Entrez le code à 6 chiffres pour valider :
 
-            _Tapez_ *#️⃣* _pour annuler._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
         if ($texte === '2') {
             $this->session->set($numero, 'gerer.fermer.num', $data);
-            return "Entrez le *numéro* Mobile Money du bénéficiaire :\n_(format : *0XXXXXXXX*)_\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "Entrez le *numéro* Mobile Money du bénéficiaire :\n_(format : *0XXXXXXXX*)_\n\n#️⃣ _pour revenir en arrière_";
         }
 
         if ($texte === '3') {
             return $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
-        return "⚠️ Tapez *1*, *2* ou *3*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+        return "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     private function handleGererFermerNum(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
         if (! $numeroSaisi) {
-            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data     = $this->session->data($numero);
@@ -2243,7 +2243,7 @@ class BotService
         Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
 
-        _Tapez_ *#️⃣* _pour annuler._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -2253,11 +2253,11 @@ class BotService
         $code = trim($texte);
 
         if (! preg_match('/^\d{6}$/', $code)) {
-            return "⚠️ Entrez le code à *6 chiffres*.\n\n_Tapez_ *#️⃣* _pour annuler._";
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
-            return "❌ Code incorrect ou expiré.\nRessayez ou tapez *#️⃣* pour annuler.";
+            return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
         }
 
         $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
@@ -2321,7 +2321,7 @@ class BotService
         3️⃣  *Fermer* la cotisation
         4️⃣  Retour à la liste
 
-        _Tapez_ *#️⃣* _pour revenir au menu principal._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
@@ -2360,7 +2360,7 @@ class BotService
             Entrez votre *numéro de téléphone* Mobile Money
             (format : *0XXXXXXXX*).
 
-            _Tapez_ *#️⃣* _pour revenir au menu._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -2385,7 +2385,7 @@ class BotService
             Entrez votre *numéro de téléphone* Mobile Money
             (format : *0XXXXXXXX*).
 
-            _Tapez_ *#️⃣* _pour revenir au menu._
+            #️⃣ _pour revenir en arrière_
             TXT;
         }
 
@@ -2404,7 +2404,7 @@ class BotService
         Quel *montant* souhaitez-vous cotiser ?
         _(minimum 100 FCFA — maximum 500 000 FCFA)_
 
-        _Tapez_ *#️⃣* _pour revenir au menu._
+        #️⃣ _pour revenir en arrière_
         TXT;
     }
 
