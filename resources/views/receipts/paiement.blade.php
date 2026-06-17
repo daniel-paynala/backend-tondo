@@ -5,177 +5,217 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html, body {
+body {
   font-family: DejaVu Sans, sans-serif;
-  color: #1A1F1E;
-  background: #F4ECE0;
+  font-size: 12px;
+  color: #1a1a1a;
+  background: #fff;
 }
 
-/* ── Header pleine largeur ───────────────────────────── */
+/* ── Filigrane ────────────────────────────────────── */
+.watermark {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 0;
+  pointer-events: none;
+}
+.watermark-text {
+  font-size: 60px;
+  font-weight: 900;
+  color: #0A6847;
+  opacity: 0.06;
+  letter-spacing: 14px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.page { position: relative; z-index: 1; }
+
+/* ── En-tête ─────────────────────────────────────── */
 .hdr {
-  background: #0F4C5C;
-  padding: 12px 18px 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 3px solid #111;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
 }
 .brand {
-  font-size: 15px;
-  font-weight: 700;
-  color: #F4ECE0;
-}
-.brand-badge {
-  display: inline-block;
-  background: #C97B4A;
-  color: #1A1F1E;
-  font-size: 10px;
-  font-weight: 700;
-  width: 17px;
-  height: 17px;
-  line-height: 17px;
-  text-align: center;
-  border-radius: 3px;
-  margin-right: 5px;
-  vertical-align: middle;
-}
-.hdr-sub {
-  font-size: 6px;
-  color: rgba(244,236,224,0.5);
-  letter-spacing: 0.8px;
-  margin-top: 2px;
-}
-.hdr-status {
-  display: inline-block;
-  background: #6B8E4E;
-  color: #fff;
-  font-size: 7px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 20px;
-  margin-top: 6px;
-}
-
-/* ── Zone de contenu ─────────────────────────────────── */
-.wrap {
-  padding: 10px 18px 16px;
-}
-
-/* ── Bloc montant ────────────────────────────────────── */
-.amount {
-  text-align: center;
-  padding: 10px 0 9px;
-  margin-bottom: 10px;
-  border-bottom: 1px dashed rgba(201,123,74,0.4);
-}
-.amount-lbl {
-  font-size: 6px;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: #0F4C5C;
-  margin-bottom: 4px;
-}
-.amount-num {
-  font-size: 32px;
-  font-weight: 700;
-  color: #0F4C5C;
+  font-size: 25px;
+  font-weight: 900;
+  color: #0A6847;
+  letter-spacing: -0.5px;
   line-height: 1;
 }
-.amount-cur {
-  font-size: 13px;
-  font-weight: 600;
-  color: #C97B4A;
+.brand-tagline {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: #888;
+  margin-top: 3px;
 }
-.amount-note {
-  font-size: 7px;
-  color: #bbb;
+.hdr-right { text-align: right; }
+.hdr-badge {
+  display: inline-block;
+  background: #0A6847;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.5px;
+}
+
+/* ── Bloc montant ─────────────────────────────────── */
+.amount-bloc {
+  background: #0A6847;
+  color: #fff;
+  text-align: center;
+  padding: 14px 14px 12px;
+}
+.amount-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  opacity: 0.75;
+}
+.amount-val {
+  font-size: 25px;
+  font-weight: 900;
+  line-height: 1.1;
   margin-top: 4px;
 }
+.amount-note {
+  font-size: 8px;
+  opacity: 0.6;
+  margin-top: 4px;
+  font-style: italic;
+}
+.amount-brut {
+  font-size: 10px;
+  color: #E8A830;
+  margin-top: 3px;
+}
 
-/* ── Cards ───────────────────────────────────────────── */
+/* ── Cards ────────────────────────────────────────── */
+.section-lbl {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: #aaa;
+  padding: 9px 14px 3px;
+}
+
 .card {
-  background: #fff;
-  border-radius: 5px;
-  padding: 7px 10px;
-  margin-bottom: 6px;
-  border: 1px solid rgba(15,76,92,0.07);
+  margin: 0 14px 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  overflow: hidden;
 }
 .card-title {
-  font-size: 6px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: #0F4C5C;
+  background: #f5f5f5;
+  font-size: 9px;
   font-weight: 700;
-  padding-bottom: 4px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid #f0ede8;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #555;
+  padding: 5px 10px;
+  border-bottom: 1px solid #e8e8e8;
 }
 
-/*
- * Pas de table-layout:fixed ni overflow:hidden — DomPDF coupe les textes
- * avec ces propriétés. word-break:break-all gère les IDs longs.
- */
 table.rows {
   width: 100%;
   border-collapse: collapse;
 }
 table.rows td {
-  padding: 3px 0;
-  font-size: 8px;
-  border-bottom: 1px solid #f8f6f3;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid #f0f0f0;
   vertical-align: top;
 }
 table.rows tr:last-child td { border-bottom: none; }
 table.rows td.k {
   color: #888;
-  width: 38%;
-  padding-right: 8px;
+  font-size: 10px;
+  width: 40%;
+  padding-right: 6px;
 }
 table.rows td.v {
-  font-weight: 600;
-  color: #1A1F1E;
+  font-weight: 700;
+  color: #111;
   word-wrap: break-word;
   word-break: break-all;
 }
-table.rows td.v.accent  { color: #C97B4A; }
-table.rows td.v.primary { color: #0F4C5C; }
-
-.pill {
-  display: inline-block;
-  background: #0F4C5C;
-  color: #F4ECE0;
-  font-size: 7px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 10px;
+table.rows td.v.accent  { color: #E8A830; }
+table.rows td.v.primary { color: #0A6847; }
+table.rows td.v.ref {
+  font-size: 13px;
+  font-weight: 900;
+  color: #0A6847;
 }
 
-/* ── Footer ──────────────────────────────────────────── */
+/* ── Pied de page ─────────────────────────────────── */
 .footer {
   text-align: center;
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(15,76,92,0.12);
+  padding: 10px 14px 12px;
+  border-top: 2px solid #111;
+  margin-top: 12px;
 }
-.footer-brand { font-size: 7px; font-weight: 700; color: #0F4C5C; }
-.footer-text  { font-size: 6px; color: #bbb; margin-top: 2px; line-height: 1.6; }
+.footer-brand {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0A6847;
+}
+.footer-info {
+  font-size: 8px;
+  color: #bbb;
+  margin-top: 4px;
+  line-height: 1.7;
+}
+.footer-anti-falsif {
+  font-size: 7px;
+  color: #ccc;
+  margin-top: 6px;
+  font-style: italic;
+}
 </style>
 </head>
 <body>
 
-<div class="hdr">
-  <div class="brand"><span class="brand-badge">T</span>Tonji</div>
-  <div class="hdr-sub">REÇU DE PAIEMENT · PAYNALA SAS</div>
-  <div class="hdr-status">&#10003; PAIEMENT CONFIRMÉ</div>
+{{-- Filigrane --}}
+<div class="watermark">
+  <div class="watermark-text">TONJI</div>
 </div>
 
-<div class="wrap">
+<div class="page">
 
-  <div class="amount">
+  {{-- En-tête --}}
+  <div class="hdr">
+    <div>
+      <div class="brand">Tonji</div>
+      <div class="brand-tagline">Tontines &amp; cotisations · Paynala SAS</div>
+    </div>
+    <div class="hdr-right">
+      <div class="hdr-badge">&#10003; PAIEMENT CONFIRMÉ</div>
+    </div>
+  </div>
+
+  {{-- Montant --}}
+  <div class="amount-bloc">
     <div class="amount-lbl">Montant cotisé</div>
-    <span class="amount-num">{{ number_format($montant_net, 0, ',', ' ') }}</span>
-    <span class="amount-cur"> FCFA</span>
+    <div class="amount-val">{{ number_format($montant_net, 0, ',', ' ') }}&nbsp;FCFA</div>
+    @if($montant_brut !== $montant_net)
+    <div class="amount-brut">Débité : {{ number_format($montant_brut, 0, ',', ' ') }}&nbsp;FCFA</div>
+    @endif
     <div class="amount-note">* Frais à la charge du cotisant</div>
   </div>
 
+  {{-- Transaction --}}
+  <div class="section-lbl">Transaction</div>
   <div class="card">
-    <div class="card-title">Transaction</div>
+    <div class="card-title">Détails du paiement</div>
     <table class="rows">
       <tr>
         <td class="k">Référence</td>
@@ -189,15 +229,10 @@ table.rows td.v.primary { color: #0F4C5C; }
         <td class="k">Canal</td>
         <td class="v">{{ $canal }}</td>
       </tr>
-      @if($montant_brut !== $montant_net)
-      <tr>
-        <td class="k">Montant débité</td>
-        <td class="v">{{ number_format($montant_brut, 0, ',', ' ') }} FCFA</td>
-      </tr>
-      @endif
     </table>
   </div>
 
+  {{-- Cagnotte --}}
   <div class="card">
     <div class="card-title">Cagnotte</div>
     <table class="rows">
@@ -206,8 +241,8 @@ table.rows td.v.primary { color: #0F4C5C; }
         <td class="v primary">{{ $cagnotte_titre }}</td>
       </tr>
       <tr>
-        <td class="k">Référence</td>
-        <td class="v"><span class="pill"># {{ $cagnotte_reference }}</span></td>
+        <td class="k">N°</td>
+        <td class="v ref">{{ $cagnotte_reference }}</td>
       </tr>
       <tr>
         <td class="k">Type</td>
@@ -216,6 +251,7 @@ table.rows td.v.primary { color: #0F4C5C; }
     </table>
   </div>
 
+  {{-- Cotisant --}}
   <div class="card">
     <div class="card-title">Cotisant</div>
     <table class="rows">
@@ -230,14 +266,18 @@ table.rows td.v.primary { color: #0F4C5C; }
     </table>
   </div>
 
+  {{-- Pied --}}
   <div class="footer">
-    <div class="footer-brand">Tonji · Paynala SAS</div>
-    <div class="footer-text">
-      Reçu généré automatiquement et valant preuve de paiement.<br>
-      support@tonji.ga &nbsp;·&nbsp; www.tonji.ga &nbsp;·&nbsp; Libreville, Gabon
+    <div class="footer-brand">Tonji &middot; Paynala SAS</div>
+    <div class="footer-info">
+      Reçu valant preuve de paiement &nbsp;·&nbsp; support@tonji.ga &nbsp;·&nbsp; Libreville, Gabon
+    </div>
+    <div class="footer-anti-falsif">
+      Document officiel Tonji — toute falsification est passible de poursuites.
     </div>
   </div>
 
-</div>
+</div>{{-- .page --}}
+
 </body>
 </html>
