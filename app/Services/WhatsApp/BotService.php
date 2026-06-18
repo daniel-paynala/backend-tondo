@@ -121,9 +121,9 @@ class BotService
         Que souhaitez-vous faire ?
 
         1️⃣  *Cotiser*
-        2️⃣  *Rejoindre* une cagnotte
-        3️⃣  *Créer* une cagnotte
-        4️⃣  *Gérer* mes cagnottes
+        2️⃣  *Rejoindre* une tontine
+        3️⃣  *Créer* (Tontine ou Cagnotte)
+        4️⃣  *Gérer* (Tontine ou Cagnotte)
         5️⃣  *Aide* & support
 
         _Tapez le numéro de votre choix._
@@ -150,7 +150,7 @@ class BotService
         return <<<TXT
         💰 *Cotiser*
 
-        Entrez le *Numéro de tontine ou de cotisation*
+        Entrez le *Numéro de tontine ou de cagnotte*
         (6 chiffres, fourni par l'organisateur).
 
         #️⃣ _pour revenir en arrière_
@@ -163,11 +163,11 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cotisation *N°{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cagnotte *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         if ($cagnotte->statut === 'cloturee') {
-            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n#️⃣ _pour revenir en arrière_";
+            return "❌ La tontine ou cagnotte *{$cagnotte->titre}* est clôturée.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Stocker les infos cagnotte dans la session
@@ -189,7 +189,7 @@ class BotService
                 ⏳ *La tontine n'a pas encore démarré.*
 
                 Il manque encore *{$manquants} participant(s)* avant le lancement.
-                La cotisation sera ouverte une fois tous les membres inscrits.
+                Les paiements seront disponibles une fois tous les membres inscrits.
                 TXT);
             }
         }
@@ -229,7 +229,7 @@ class BotService
 
         return <<<TXT
         ✅ *{$cagnotte->titre}* · N°{$ref}
-        Type : Cotisation
+        Type : Cagnotte
 
         Quel *montant* souhaitez-vous cotiser ?
         _(minimum 100 FCFA)_
@@ -520,15 +520,15 @@ class BotService
         ✅ *Paiement confirmé !*
 
         {$merci}
-        Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.{$ligneRecu}
+        Votre paiement de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.{$ligneRecu}
 
         ————————————————
         🎉 *Que souhaitez-vous faire ?*
 
         1️⃣  *Cotiser*
-        2️⃣  *Rejoindre* une cagnotte
-        3️⃣  *Créer* une cagnotte
-        4️⃣  *Gérer* mes cagnottes
+        2️⃣  *Rejoindre* une tontine
+        3️⃣  *Créer* (Tontine ou Cagnotte)
+        4️⃣  *Gérer* (Tontine ou Cagnotte)
         5️⃣  *Aide* & support
 
         _Tapez le numéro de votre choix._
@@ -541,9 +541,9 @@ class BotService
     {
         $this->session->set($numero, 'rejoindre.ref');
         return <<<TXT
-        🤝 *Rejoindre une cagnotte*
+        🤝 *Rejoindre une tontine ou une cagnotte*
 
-        Entrez le *Numéro de tontine ou de cotisation*
+        Entrez le *Numéro de tontine ou de cagnotte*
         (6 chiffres, fourni par l'organisateur).
 
         #️⃣ _pour revenir en arrière_
@@ -556,10 +556,10 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cotisation *N°{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cagnotte *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
-        $type = $cagnotte->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation';
+        $type = $cagnotte->type === 'tontine_periodique' ? 'Tontine' : 'Cagnotte';
 
         $this->session->set($numero, 'rejoindre.numero', [
             'cagnotte_id'  => $cagnotte->id,
@@ -708,11 +708,11 @@ class BotService
         ]);
 
         return <<<TXT
-        ✨ *Créer une cagnotte*
+        ✨ *Créer une tontine ou une cagnotte*
 
         Que souhaitez-vous créer ?
 
-        1️⃣  *Cotisation ouverte* — collecte libre, montant variable
+        1️⃣  *Cagnotte ouverte* — collecte libre, montant variable
         2️⃣  *Tontine périodique* — rotation, montant fixe par cycle
 
         _Tapez le numéro de votre choix_ · #️⃣ _pour revenir en arrière_
@@ -749,7 +749,7 @@ class BotService
                 'type' => 'cagnotte_ouverte',
             ]));
             return <<<TXT
-            💰 *Cotisation ouverte*
+            💰 *Cagnotte ouverte*
 
             Quel est le *nom* de votre cagnotte ?
             _(max 120 caractères)_
@@ -772,7 +772,7 @@ class BotService
             TXT;
         }
 
-        return "⚠️ Tapez *1* pour Cotisation ou *2* pour Tontine.\n\n#️⃣ _pour revenir en arrière_";
+        return "⚠️ Tapez *1* pour Cagnotte ou *2* pour Tontine.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     // ── 3.1 Cotisation — champs ───────────────────────────────────────────────
@@ -1145,7 +1145,7 @@ class BotService
             $dateFin  = $dateFin ? (new \DateTimeImmutable($dateFin))->format('d/m/Y') : 'Pas de limite';
 
             $lignes = <<<TXT
-            📝 *Récapitulatif — Cotisation ouverte*
+            📝 *Récapitulatif — Cagnotte ouverte*
 
             Nom : *{$data['titre']}*
             Montant cible : *{$cible}*
@@ -1195,7 +1195,7 @@ class BotService
         }
 
         $type      = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
-        $typeLabel = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cotisation';
+        $typeLabel = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
         $prenom = ucfirst(mb_strtolower($user->prenom));
         $ref    = $cagnotte->reference;
         $botNum = ltrim(config('tondo.whatsapp_numero', ''), '+');
@@ -1245,7 +1245,7 @@ class BotService
         ]);
 
         return <<<TXT
-        📋 *Gérer mes cagnottes*
+        📋 *Gérer mes tontines & cagnottes*
 
         Votre *numéro Mobile Money* ?
         _(format : *0XXXXXXXX*)_
@@ -1404,13 +1404,13 @@ class BotService
 
         if ($cagnottes->isEmpty()) {
             return $this->erreurEtMenu($numero,
-                "📭 Vous n'avez aucune cagnotte active.\nTapez *3* pour en créer une."
+                "📭 Vous n'avez aucune tontine ou cagnotte active.\nTapez *3* pour en créer une."
             );
         }
 
         $liste    = $cagnottes->values();
         $index    = $liste->map(fn ($c, $i) => ($i + 1) . ". *{$c->titre}* · N°{$c->reference} · "
-            . ($c->type === 'tontine_periodique' ? 'Tontine' : 'Cotisation')
+            . ($c->type === 'tontine_periodique' ? 'Tontine' : 'Cagnotte')
         )->implode("\n");
 
         $refs = $liste->pluck('reference')->toArray();
@@ -1418,12 +1418,12 @@ class BotService
         $this->session->set($numero, 'gerer.liste', array_merge($data, ['refs' => $refs]));
 
         return <<<TXT
-        📋 *Vos cagnottes actives*
+        📋 *Vos tontines & cagnottes actives*
 
         {$index}
 
-        Quelle cagnotte souhaitez-vous gérer ?
-        _(tapez le numéro de la liste, ou entrez directement le numéro de la cagnotte)_
+        Quelle tontine ou cagnotte souhaitez-vous gérer ?
+        _(tapez le numéro de la liste, ou entrez directement le numéro de la tontine ou cagnotte)_
 
         #️⃣ _pour revenir en arrière_
         TXT;
@@ -1443,7 +1443,7 @@ class BotService
         } elseif ($choix >= 1 && $choix <= $n) {
             $ref = $refs[$choix - 1];
         } else {
-            return "⚠️ Tapez un chiffre entre *1* et *{$n}*, ou entrez directement le *numéro de la cagnotte*.\n\n#️⃣ _pour revenir en arrière_";
+            return "⚠️ Tapez un chiffre entre *1* et *{$n}*, ou entrez directement le *numéro de la tontine ou cagnotte*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $cagnotte = TondoCagnotte::where('reference', $ref)->first();
@@ -1473,7 +1473,7 @@ class BotService
 
         1️⃣  *Historique* des transactions
         2️⃣  *Initier* un reversement
-        3️⃣  *Fermer* la cotisation
+        3️⃣  *Fermer* la cagnotte
         4️⃣  Retour à la liste
 
         #️⃣ _pour revenir en arrière_
@@ -1502,9 +1502,9 @@ class BotService
                 ]));
 
                 return <<<TXT
-                ⚠️ *Fermer la cotisation ?*
+                ⚠️ *Fermer la cagnotte ?*
 
-                La cotisation *{$cagnotte->titre}* sera clôturée définitivement.
+                La cagnotte *{$cagnotte->titre}* sera clôturée définitivement.
                 Solde : *0 FCFA* — aucun reversement nécessaire.
 
                 1️⃣  Oui, fermer définitivement
@@ -1523,7 +1523,7 @@ class BotService
             ]));
 
             return <<<TXT
-            🔒 *Fermer la cotisation*
+            🔒 *Fermer la cagnotte*
 
             Il reste *{$soldeFmt} FCFA* à reverser.
             Numéro de retrait enregistré : *{$masque}*
@@ -1532,7 +1532,7 @@ class BotService
             2️⃣  Changer le numéro de destination
             3️⃣  Annuler
 
-            _La cotisation sera clôturée après confirmation du reversement._
+            _La cagnotte sera clôturée après confirmation du reversement._
             TXT;
         }
 
@@ -1548,7 +1548,7 @@ class BotService
 
                 1️⃣  *Historique* des transactions
                 2️⃣  *Initier* un reversement
-                3️⃣  *Fermer* la cotisation
+                3️⃣  *Fermer* la cagnotte
                 4️⃣  Retour à la liste
                 TXT;
             }
@@ -2097,7 +2097,7 @@ class BotService
                     'statut'     => 'cloturee',
                     'updated_at' => now(),
                 ]);
-                return "✅ *Cotisation clôturée.*\n\nLa cotisation *{$cagnotte->titre}* a bien été fermée.\n\n"
+                return "✅ *Cagnotte clôturée.*\n\nLa cagnotte *{$cagnotte->titre}* a bien été fermée.\n\n"
                     . $this->retourListeCagnottes($numero, $data);
             }
             if ($texte === '2') {
@@ -2215,10 +2215,10 @@ class BotService
                 montant:    $montant,
             );
         } catch (\RuntimeException $e) {
-            return "❌ " . $e->getMessage() . "\n\nLa cotisation reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            return "❌ " . $e->getMessage() . "\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         } catch (\Throwable $e) {
             Log::error('handleGererFermerOtp: erreur reversement', ['err' => $e->getMessage()]);
-            return "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cotisation reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            return "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
         // Reversement confirmé → clôturer
@@ -2231,12 +2231,12 @@ class BotService
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
 
         return <<<TXT
-        ✅ *Cotisation fermée !*
+        ✅ *Cagnotte fermée !*
 
         *{$montantFmt} FCFA* reversés vers *{$masque}*
         Référence : `{$result['trans_id']}`
 
-        La cotisation *{$cagnotte->titre}* a été clôturée.
+        La cagnotte *{$cagnotte->titre}* a été clôturée.
 
         TXT . "\n" . $this->retourListeCagnottes($numero, $data);
     }
@@ -2255,7 +2255,7 @@ class BotService
 
         1️⃣  *Historique* des transactions
         2️⃣  *Initier* un reversement
-        3️⃣  *Fermer* la cotisation
+        3️⃣  *Fermer* la cagnotte
         4️⃣  Retour à la liste
 
         #️⃣ _pour revenir en arrière_
@@ -2279,7 +2279,7 @@ class BotService
 
         if (! $cagnotte || $cagnotte->statut === 'cloturee') {
             $this->session->set($numero, 'menu');
-            return "❌ Cette cagnotte n'est pas disponible.\n\n" . $this->afficherMenu($numero);
+            return "❌ Cette tontine ou cagnotte n'est pas disponible.\n\n" . $this->afficherMenu($numero);
         }
 
         // Tontine non démarrée → rejoindre directement
@@ -2338,7 +2338,7 @@ class BotService
         return <<<TXT
         💰 *{$cagnotte->titre}* · N°{$ref}
 
-        Quel *montant* souhaitez-vous cotiser ?
+        Quel *montant* souhaitez-vous verser ?
         _(minimum 100 FCFA — maximum 500 000 FCFA)_
 
         #️⃣ _pour revenir en arrière_

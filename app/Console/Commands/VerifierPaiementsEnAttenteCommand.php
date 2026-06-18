@@ -87,9 +87,9 @@ class VerifierPaiementsEnAttenteCommand extends Command
                 🎉 *Que souhaitez-vous faire ?*
 
                 1️⃣  *Cotiser*
-                2️⃣  *Rejoindre* une cagnotte
-                3️⃣  *Créer* une cagnotte
-                4️⃣  *Gérer* mes cagnottes
+                2️⃣  *Rejoindre* une tontine
+                3️⃣  *Créer* (Tontine ou Cagnotte)
+                4️⃣  *Gérer* (Tontine ou Cagnotte)
                 5️⃣  *Aide* & support
 
                 _Tapez le numéro de votre choix._
@@ -133,15 +133,15 @@ class VerifierPaiementsEnAttenteCommand extends Command
         ✅ *Paiement confirmé !*
 
         Merci {$p->prenom} 🙏
-        Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.{$ligneRecu}
+        Votre paiement de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistré.{$ligneRecu}
 
         ————————————————
         🎉 *Que souhaitez-vous faire ?*
 
         1️⃣  *Cotiser*
-        2️⃣  *Rejoindre* une cagnotte
-        3️⃣  *Créer* une cagnotte
-        4️⃣  *Gérer* mes cagnottes
+        2️⃣  *Rejoindre* une tontine
+        3️⃣  *Créer* (Tontine ou Cagnotte)
+        4️⃣  *Gérer* (Tontine ou Cagnotte)
         5️⃣  *Aide* & support
 
         _Tapez le numéro de votre choix._
