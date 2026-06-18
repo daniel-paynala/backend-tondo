@@ -129,17 +129,30 @@ class VerifierPaiementsEnAttenteCommand extends Command
 
         // Reçu PDF en message séparé.
         try {
-            $user    = TondoUser::find($p->user_id);
-            $pdfUrl  = $receiptSvc->generer($user, $cagnotte, [
+            $user   = TondoUser::find($p->user_id);
+            $pdfUrl = $receiptSvc->generer($user, $cagnotte, [
                 'trans_id'    => $p->trans_id,
                 'montant_net' => $p->montant,
             ], 'WhatsApp');
 
-            $twilio->envoyer($p->numero_wa, "📄 *Votre reçu Tonji :*\n{$pdfUrl}");
+            Log::info('tondo:verifier-paiements: reçu généré', [
+                'trans_id' => $p->trans_id,
+                'pdf_url'  => $pdfUrl,
+            ]);
+
+            $ok = $twilio->envoyer($p->numero_wa, "📄 *Votre reçu Tonji :*\n{$pdfUrl}");
+            if (! $ok) {
+                Log::error('tondo:verifier-paiements: échec Twilio envoi reçu (envoyer=false)', [
+                    'trans_id'   => $p->trans_id,
+                    'numero_wa'  => $p->numero_wa,
+                    'pdf_url'    => $pdfUrl,
+                ]);
+            }
         } catch (\Throwable $e) {
-            Log::error('tondo:verifier-paiements: échec envoi reçu', [
+            Log::error('tondo:verifier-paiements: échec génération reçu', [
                 'trans_id' => $p->trans_id,
                 'err'      => $e->getMessage(),
+                'trace'    => $e->getTraceAsString(),
             ]);
         }
     }

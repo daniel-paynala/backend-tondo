@@ -74,7 +74,10 @@ class ReceiptService
 
         $this->nettoyerAnciensRecus($dir);
 
-        file_put_contents($dir . '/' . $filename, $pdf->output());
+        $written = file_put_contents($dir . '/' . $filename, $pdf->output());
+        if ($written === false) {
+            throw new \RuntimeException("Impossible d'écrire le PDF dans {$dir}/{$filename}");
+        }
 
         return url('receipts/' . $filename);
     }
@@ -154,7 +157,10 @@ class ReceiptService
             mkdir($dir, 0755, true);
         }
 
-        file_put_contents($dir . '/' . $filename, $pdf->output());
+        $written = file_put_contents($dir . '/' . $filename, $pdf->output());
+        if ($written === false) {
+            throw new \RuntimeException("Impossible d'écrire le PDF dans {$dir}/{$filename}");
+        }
 
         return url('receipts/' . $filename);
     }
