@@ -900,6 +900,51 @@ class CagnottesController extends Controller
         return response()->json(['message' => 'Vous avez quitté la cagnotte.']);
     }
 
+    /**
+     * Retire un participant de la tontine — réservé au gérant.
+     * Autorisé même si la tontine est en cours (statut en_cours).
+     */
+    public function retirerParticipant(Request $request, string $reference, string $participantId): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->where('user_id', $user->id) // gérant uniquement
+            ->first();
+
+        if (! $cagnotte) {
+            return response()->json(['message' => 'Cagnotte introuvable ou accès non autorisé.'], 404);
+        }
+
+        if ($cagnotte->statut === 'cloturee') {
+            return response()->json(['message' => 'Impossible de modifier une cagnotte clôturée.'], 422);
+        }
+
+        $participant = DB::table('tondo_participants')
+            ->where('id', $participantId)
+            ->where('cagnotte_id', $cagnotte->id)
+            ->first();
+
+        if (! $participant) {
+            return response()->json(['message' => 'Participant introuvable.'], 404);
+        }
+
+        // Empêcher le gérant de se retirer lui-même via cette route.
+        if ($participant->user_id === $user->id) {
+            return response()->json(['message' => 'Le gérant ne peut pas se retirer de sa propre tontine.'], 422);
+        }
+
+        DB::table('tondo_participants')->where('id', $participantId)->delete();
+
+        // Décrémente nombre_inscrits (le créateur n'est pas compté dedans).
+        if ((int) $cagnotte->nombre_inscrits > 0) {
+            $cagnotte->decrement('nombre_inscrits');
+        }
+
+        return response()->json(['message' => 'Participant retiré avec succès.']);
+    }
+
     // ─────────────────────────────────────────────────────────────────
 
     /**
