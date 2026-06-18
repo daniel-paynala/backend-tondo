@@ -468,19 +468,23 @@ class BotService
             $cagnotte = TondoCagnotte::where('reference', $data['reference'])->first();
             $user     = TondoUser::find($data['user_id']);
 
-            // Reçu PDF envoyé en message outbound séparé.
-            $this->envoyerRecuOutbound(
-                numeroWa:    $numero,
-                userId:      $data['user_id'] ?? null,
-                cagnotteRef: $data['reference'] ?? null,
-                transId:     $transId,
-                montant:     (int) ($data['montant'] ?? 0),
-            );
+            $pdfUrl = null;
+            try {
+                $pdfUrl = $this->receiptSvc->generer($user, $cagnotte, [
+                    'trans_id'    => $transId,
+                    'montant_net' => (int) ($data['montant'] ?? 0),
+                ], 'WhatsApp');
+            } catch (\Throwable $e) {
+                Log::error('BotService: échec génération reçu (attente→succes)', [
+                    'trans_id' => $transId,
+                    'err'      => $e->getMessage(),
+                ]);
+            }
 
             return $this->recu($user, $cagnotte, [
                 'trans_id'    => $transId,
                 'montant_net' => $data['montant'],
-            ]);
+            ], pdfUrl: $pdfUrl);
         }
 
         if ($statut === 'echec') {
@@ -503,50 +507,20 @@ class BotService
         TXT;
     }
 
-    // ── Reçu Tonji (PDF) ─────────────────────────────────────────────────────
-
-    private function envoyerRecuOutbound(
-        string  $numeroWa,
-        ?string $userId,
-        ?string $cagnotteRef,
-        string  $transId,
-        int     $montant,
-    ): void {
-        try {
-            $user     = $userId     ? TondoUser::find($userId)                                  : null;
-            $cagnotte = $cagnotteRef ? TondoCagnotte::where('reference', $cagnotteRef)->first() : null;
-
-            $pdfUrl = $this->receiptSvc->generer($user, $cagnotte, [
-                'trans_id'    => $transId,
-                'montant_net' => $montant,
-            ], 'WhatsApp');
-
-            $this->twilio->envoyer($numeroWa, "📄 *Votre reçu Tonji :*\n{$pdfUrl}");
-        } catch (\Throwable $e) {
-            Log::error('BotService: échec envoi reçu outbound', [
-                'trans_id' => $transId,
-                'err'      => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * Génère le PDF et retourne [message_texte, pdf_url].
-     * Le WebhookController inclura le PDF en <Media> dans le TwiML.
-     */
-    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp'): string
+    public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp', ?string $pdfUrl = null): string
     {
         $montant = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
         $titre   = $cagnotte ? $cagnotte->titre : '—';
         $ref     = $cagnotte ? 'N°' . $cagnotte->reference : '';
         $prenom  = $user ? ucfirst(mb_strtolower($user->prenom)) : '';
         $merci   = ($prenom && strtolower($prenom) !== 'anonyme') ? "Merci {$prenom} 🙏" : 'Merci 🙏';
+        $ligneRecu = $pdfUrl ? "\n📄 *Votre reçu :* {$pdfUrl}" : '';
 
         return <<<TXT
         ✅ *Paiement confirmé !*
 
         {$merci}
-        Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.
+        Votre cotisation de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.{$ligneRecu}
 
         ————————————————
         🎉 *Que souhaitez-vous faire ?*

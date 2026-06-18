@@ -105,15 +105,35 @@ class VerifierPaiementsEnAttenteCommand extends Command
         TondoPaiementEnAttente $p,
     ): void {
         $cagnotte   = TondoCagnotte::where('reference', $p->cagnotte_ref)->first();
+        $user       = TondoUser::find($p->user_id);
         $montantFmt = number_format($p->montant, 0, ',', ' ');
         $titre      = $cagnotte?->titre ?? '—';
         $ref        = $cagnotte ? '#' . $cagnotte->reference : '';
+
+        $pdfUrl    = null;
+        $ligneRecu = '';
+        try {
+            $pdfUrl    = $receiptSvc->generer($user, $cagnotte, [
+                'trans_id'    => $p->trans_id,
+                'montant_net' => $p->montant,
+            ], 'WhatsApp');
+            $ligneRecu = "\n📄 *Votre reçu :* {$pdfUrl}";
+            Log::info('tondo:verifier-paiements: reçu généré', [
+                'trans_id' => $p->trans_id,
+                'pdf_url'  => $pdfUrl,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('tondo:verifier-paiements: échec génération reçu', [
+                'trans_id' => $p->trans_id,
+                'err'      => $e->getMessage(),
+            ]);
+        }
 
         $twilio->envoyer($p->numero_wa, <<<TXT
         ✅ *Paiement confirmé !*
 
         Merci {$p->prenom} 🙏
-        Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.
+        Votre cotisation de *{$montantFmt} FCFA* pour *{$titre} {$ref}* a été enregistrée.{$ligneRecu}
 
         ————————————————
         🎉 *Que souhaitez-vous faire ?*
@@ -126,34 +146,5 @@ class VerifierPaiementsEnAttenteCommand extends Command
 
         _Tapez le numéro de votre choix._
         TXT);
-
-        // Reçu PDF en message séparé.
-        try {
-            $user   = TondoUser::find($p->user_id);
-            $pdfUrl = $receiptSvc->generer($user, $cagnotte, [
-                'trans_id'    => $p->trans_id,
-                'montant_net' => $p->montant,
-            ], 'WhatsApp');
-
-            Log::info('tondo:verifier-paiements: reçu généré', [
-                'trans_id' => $p->trans_id,
-                'pdf_url'  => $pdfUrl,
-            ]);
-
-            $ok = $twilio->envoyer($p->numero_wa, "📄 *Votre reçu Tonji :*\n{$pdfUrl}");
-            if (! $ok) {
-                Log::error('tondo:verifier-paiements: échec Twilio envoi reçu (envoyer=false)', [
-                    'trans_id'   => $p->trans_id,
-                    'numero_wa'  => $p->numero_wa,
-                    'pdf_url'    => $pdfUrl,
-                ]);
-            }
-        } catch (\Throwable $e) {
-            Log::error('tondo:verifier-paiements: échec génération reçu', [
-                'trans_id' => $p->trans_id,
-                'err'      => $e->getMessage(),
-                'trace'    => $e->getTraceAsString(),
-            ]);
-        }
     }
 }
