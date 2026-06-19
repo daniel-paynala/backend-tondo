@@ -27,42 +27,27 @@ body {
 }
 .page { position: relative; z-index: 1; }
 
-/* ── Header ───────────────────────────────────────── */
-.hdr { padding: 14px 16px 10px; border-bottom: 2px solid #0A6847; }
+/* ── Header fond vert ─────────────────────────────── */
+.hdr {
+  background: #0A6847;        /* fond vert marque Tonji */
+  padding: 10px 14px 10px;
+}
 .hdr-inner { width: 100%; border-collapse: collapse; }
-.logo-cell { vertical-align: middle; }
-.logo-circle {
-  display: inline-block;
-  width: 28px; height: 28px;
-  border-radius: 14px;
-  background: #0A6847;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 900;
-  text-align: center;
-  line-height: 28px;
-  vertical-align: middle;
-  margin-right: 6px;
-}
-.brand-name {
-  font-size: 22px;
-  font-weight: 900;
-  color: #0A6847;
-  letter-spacing: -0.5px;
-  vertical-align: middle;
-}
+.logo-cell { vertical-align: middle; width: 72px; }
+/* Le logo wordmark est carré 1024×1024 — on fixe la hauteur, largeur auto. */
+.logo-img  { height: 72px; width: 72px; display: block; }
 .hdr-right { text-align: right; vertical-align: middle; }
 .recu-label {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  color: #111;
+  color: #fff;          /* blanc sur fond vert */
 }
 .recu-sub {
   font-size: 9px;
-  color: #888;
-  margin-top: 2px;
+  color: rgba(255,255,255,0.65);  /* blanc atténué */
+  margin-top: 3px;
 }
 
 /* ── Badge confirmé ───────────────────────────────── */
@@ -219,12 +204,18 @@ table.rows td.v {
 
 <div class="page">
 
-  {{-- Header --}}
+  {{-- Header fond vert avec logo original Tonji --}}
   <div class="hdr">
     <table class="hdr-inner">
       <tr>
         <td class="logo-cell">
-          <span class="logo-circle">T</span><span class="brand-name">Tonji</span>
+          @if($logo_data_uri)
+            {{-- Logo wordmark embarqué en base64 (fond vert intégré = seamless) --}}
+            <img src="{{ $logo_data_uri }}" class="logo-img" alt="Tonji" />
+          @else
+            {{-- Fallback texte si le fichier logo est introuvable --}}
+            <span style="color:#fff;font-size:20px;font-weight:900;">Tonji</span>
+          @endif
         </td>
         <td class="hdr-right">
           <div class="recu-label">Reçu de paiement</div>

@@ -52,6 +52,12 @@ class ReceiptService
         // URL cible du QR Code — pointe vers la page de vérification publique du reçu.
         $qrUrl = url('/recu/' . $transId);
 
+        // Logo embarqué en base64 — évite toute requête HTTP externe (isRemoteEnabled=false).
+        $logoPath    = resource_path('images/tonji_wordmark.png');
+        $logoDataUri = file_exists($logoPath)
+            ? 'data:image/png;base64,' . base64_encode(file_get_contents($logoPath))
+            : null;
+
         Log::info('ReceiptService::generer — étape QR code', ['qr_url' => $qrUrl]);
 
         // Data URI base64 du QR Code SVG — embarqué directement dans le PDF.
@@ -81,6 +87,8 @@ class ReceiptService
             'numero_masque'      => $numeroMasque,
             'qr_url'             => $qrUrl,
             'qr_data_uri'        => $qrDataUri,
+            // Logo Tonji en base64 pour l'en-tête du PDF (évite les requêtes HTTP).
+            'logo_data_uri'      => $logoDataUri,
         ];
 
         Log::info('ReceiptService::generer — chargement vue Blade');
