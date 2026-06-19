@@ -27,16 +27,24 @@ class AirtelFeesCalculator
     private array $tranches;
 
     /**
+     * Initialise le calculateur depuis un tableau de config ou depuis config('airtel').
+     *
+     * Les tranches sont triées par montant_min croissant afin que fee()
+     * retourne toujours la première tranche applicable (la plus basse).
+     *
      * @param array<string,mixed>|null $config  Si null, lu depuis config('airtel').
      */
     public function __construct(?array $config = null)
     {
+        // Utilise la config passée en paramètre, ou la config globale 'airtel' par défaut.
         $config ??= config('airtel');
 
         $this->plafondParEnvoi   = (int) $config['plafond_par_envoi'];
         $this->plafondJournalier = (int) $config['plafond_journalier'];
         $this->tranches          = $config['tranches'] ?? [];
 
+        // Tri croissant par montant_min pour garantir que fee() retourne
+        // toujours la tranche la plus basse qui s'applique.
         usort($this->tranches, static function (array $a, array $b): int {
             $aMin = isset($a['montant_min']) ? (int) $a['montant_min'] : 0;
             $bMin = isset($b['montant_min']) ? (int) $b['montant_min'] : 0;
@@ -44,6 +52,14 @@ class AirtelFeesCalculator
         });
     }
 
+    /**
+     * Retourne le plafond journalier de décaissement en FCFA.
+     *
+     * Utilisé par les jobs de retrait pour répartir les payouts
+     * sur plusieurs jours si le total dépasse ce seuil.
+     *
+     * @return int  Montant en FCFA.
+     */
     public function plafondJournalier(): int
     {
         return $this->plafondJournalier;
@@ -63,20 +79,23 @@ class AirtelFeesCalculator
         }
 
         $envois       = [];
-        $reste        = $cashCible;
-        $nombreSplits = 0;
+        $reste        = $cashCible; // Montant restant à décaisser au bénéficiaire.
+        $nombreSplits = 0;          // Nombre d'envois excédant le plafond (splits forcés).
 
+        // Tant que le reste dépasse le plafond par envoi, on génère un
+        // envoi au plafond et on soustrait ce montant net du reste.
         while ($reste > $this->plafondParEnvoi) {
             $fee      = $this->fee($this->plafondParEnvoi);
             $envois[] = [
-                'gross'        => $this->plafondParEnvoi + $fee,
-                'net'          => $this->plafondParEnvoi,
-                'frais_airtel' => $fee,
+                'gross'        => $this->plafondParEnvoi + $fee, // Montant débité au cotisant (net + frais Airtel).
+                'net'          => $this->plafondParEnvoi,         // Montant reçu par le bénéficiaire.
+                'frais_airtel' => $fee,                           // Frais Airtel de cet envoi.
             ];
             $reste -= $this->plafondParEnvoi;
             $nombreSplits++;
         }
 
+        // Dernier envoi (ou unique envoi si cashCible ≤ plafondParEnvoi).
         if ($reste > 0) {
             $fee      = $this->fee($reste);
             $envois[] = [
@@ -88,10 +107,14 @@ class AirtelFeesCalculator
 
         return [
             'envois'             => $envois,
+            // Somme de tous les montants bruts (ce que Paynala débite en tout).
             'total_a_envoyer'    => array_sum(array_column($envois, 'gross')),
+            // Somme de tous les frais Airtel (pour info / back-office).
             'total_frais_airtel' => array_sum(array_column($envois, 'frais_airtel')),
+            // Doit être égal à $cashCible si tout se passe bien.
             'cash_livre'         => array_sum(array_column($envois, 'net')),
             'nombre_envois'      => count($envois),
+            // 0 si un seul envoi suffit, N si le montant a été découpé.
             'nombre_splits'      => $nombreSplits,
         ];
     }
@@ -106,16 +129,21 @@ class AirtelFeesCalculator
     private function fee(int $net): int
     {
         foreach ($this->tranches as $t) {
+            // Borne basse : absente OU net >= montant_min.
             $minOk = (! isset($t['montant_min'])) || $net >= (int) $t['montant_min'];
+            // Borne haute : absente, null explicite OU net <= montant_max.
             $maxOk = (! isset($t['montant_max'])) || $t['montant_max'] === null
                 || $net <= (int) $t['montant_max'];
 
             if ($minOk && $maxOk) {
+                // Type 'pourcentage' : frais = round(net × valeur), ex. 0.03 × 5000 = 150 FCFA.
+                // Type 'forfait'     : frais = valeur FCFA fixe, ex. 5000 FCFA.
                 return $t['type'] === 'pourcentage'
                     ? (int) round((float) $t['valeur'] * $net)
                     : (int) $t['valeur'];
             }
         }
+        // Aucune tranche configurée → pas de frais de retrait.
         return 0;
     }
 }

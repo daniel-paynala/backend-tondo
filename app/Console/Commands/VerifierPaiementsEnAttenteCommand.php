@@ -12,14 +12,38 @@ use App\Services\WhatsApp\TwilioSenderService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Commande cron qui vérifie le statut des paiements WhatsApp en attente
+ * et envoie les confirmations ou messages d'erreur aux utilisateurs.
+ *
+ * Planification : toutes les minutes via schedule:run (routes/console.php).
+ *
+ * Fonctionnement :
+ *  1. Identifie les paiements expirés (> TIMEOUT_MINUTES) → supprime et informe l'utilisateur.
+ *  2. Pour les paiements encore dans le délai, interroge l'API via CotisationService :
+ *     – 'succes'     → supprime, envoie confirmation + reçu PDF, remet session à 'menu'.
+ *     – 'echec'      → supprime, envoie message d'erreur, remet session à 'menu'.
+ *     – 'en_attente' → laisse en DB, le prochain tick (1 min) reprend la vérification.
+ *
+ * Cette commande coexiste avec VerifierPaiementJob (queue) — les deux approches
+ * sont actives pour garantir la résilience en cas de queue worker KO.
+ */
 class VerifierPaiementsEnAttenteCommand extends Command
 {
     protected $signature   = 'tondo:verifier-paiements';
     protected $description = 'Vérifie le statut des paiements WhatsApp en attente et envoie les confirmations.';
 
-    // Abandon après 4 minutes (cron toutes les minutes → ~3 tentatives avant timeout)
+    /** Abandon après 4 minutes (cron toutes les minutes → ~3 tentatives avant timeout). */
     private const TIMEOUT_MINUTES = 4;
 
+    /**
+     * Point d'entrée de la commande — injecté automatiquement par le container IoC Laravel.
+     *
+     * @param  CotisationService   $cotisationSvc Interroge l'API agrégateur pour le statut.
+     * @param  SessionService      $sessionSvc    Gère l'état de conversation WhatsApp.
+     * @param  TwilioSenderService $twilio        Envoie les messages sortants via Twilio.
+     * @param  ReceiptService      $receiptSvc    Génère les reçus PDF.
+     */
     public function handle(
         CotisationService   $cotisationSvc,
         SessionService      $sessionSvc,
@@ -28,9 +52,10 @@ class VerifierPaiementsEnAttenteCommand extends Command
     ): void {
         $expireAt = now()->subMinutes(self::TIMEOUT_MINUTES);
 
-        // Paiements trop vieux : timeout.
+        // ── Paiements trop vieux : timeout ────────────────────────────────────
         $expires = TondoPaiementEnAttente::where('created_at', '<', $expireAt)->get();
         foreach ($expires as $p) {
+            // Supprimer d'abord pour éviter un double-traitement si deux workers tournent.
             $deleted = TondoPaiementEnAttente::where('trans_id', $p->trans_id)->delete();
             if (! $deleted) continue;
 
@@ -46,10 +71,10 @@ class VerifierPaiementsEnAttenteCommand extends Command
             TXT);
         }
 
-        // Paiements encore dans le délai : vérifier le statut.
+        // ── Paiements encore dans le délai : vérifier le statut ──────────────
         $pendants = TondoPaiementEnAttente::where('created_at', '>=', $expireAt)->get();
         foreach ($pendants as $p) {
-            // Si la session a changé (user a tapé OK entre-temps), purger.
+            // Si la session a changé (utilisateur a tapé autre chose entre-temps), purger.
             if ($sessionSvc->etape($p->numero_wa) !== 'cotiser.attente') {
                 TondoPaiementEnAttente::where('trans_id', $p->trans_id)->delete();
                 continue;
@@ -62,11 +87,11 @@ class VerifierPaiementsEnAttenteCommand extends Command
                     'trans_id' => $p->trans_id,
                     'err'      => $e->getMessage(),
                 ]);
-                continue;
+                continue; // On réessaiera au prochain tick.
             }
 
             if ($statut === 'succes') {
-                // Supprimer en premier — évite un double-envoi si OK et cron se chevauchent.
+                // Supprimer en premier — évite un double-envoi si le cron et le job se chevauchent.
                 $deleted = TondoPaiementEnAttente::where('trans_id', $p->trans_id)->delete();
                 if (! $deleted) continue;
 
@@ -95,10 +120,20 @@ class VerifierPaiementsEnAttenteCommand extends Command
                 _Tapez le numéro de votre choix._
                 TXT);
             }
-            // Statut 'en_attente' → on laisse en DB, le prochain tick reprend.
+            // Statut 'en_attente' → on laisse la ligne en DB, le prochain tick reprend.
         }
     }
 
+    /**
+     * Envoie le message de confirmation de paiement et génère le reçu PDF.
+     *
+     * La génération du PDF est optionnelle : si elle échoue, le message de
+     * confirmation est quand même envoyé sans la ligne reçu (dégradé gracieux).
+     *
+     * @param  TwilioSenderService   $twilio     Service d'envoi de messages WhatsApp.
+     * @param  ReceiptService        $receiptSvc Service de génération de reçus PDF.
+     * @param  TondoPaiementEnAttente $p          Enregistrement du paiement confirmé.
+     */
     private function envoyerSucces(
         TwilioSenderService $twilio,
         ReceiptService $receiptSvc,
@@ -108,6 +143,7 @@ class VerifierPaiementsEnAttenteCommand extends Command
         $user       = TondoUser::find($p->user_id);
         $montantFmt = number_format($p->montant, 0, ',', ' ');
         $titre      = $cagnotte?->titre ?? '—';
+        // Préfixe '#' uniquement si la cagnotte est retrouvée.
         $ref        = $cagnotte ? '#' . $cagnotte->reference : '';
 
         $pdfUrl    = null;
@@ -123,6 +159,7 @@ class VerifierPaiementsEnAttenteCommand extends Command
                 'pdf_url'  => $pdfUrl,
             ]);
         } catch (\Throwable $e) {
+            // Échec non bloquant : on continue sans le reçu.
             Log::error('tondo:verifier-paiements: échec génération reçu', [
                 'trans_id' => $p->trans_id,
                 'err'      => $e->getMessage(),

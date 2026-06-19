@@ -16,8 +16,21 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class ForceJsonResponse
 {
+    /**
+     * Injecte l'en-tête `Accept: application/json` avant de passer la requête
+     * au reste de la pile de middlewares et au contrôleur.
+     *
+     * Résultat : ValidationException, AuthenticationException, ThrottleRequests,
+     * et toutes les autres exceptions Laravel renvoient du JSON au lieu d'un
+     * redirect HTML 302 — comportement souhaité pour une API pure (Flutter, curl, etc.).
+     *
+     * @param  Request  $request La requête HTTP entrante.
+     * @param  Closure  $next    Le prochain middleware dans la pile.
+     * @return Response          La réponse HTTP (toujours JSON grâce à cet en-tête).
+     */
     public function handle(Request $request, Closure $next): Response
     {
+        // Forcer Accept: application/json sur toutes les requêtes /api/*.
         $request->headers->set('Accept', 'application/json');
 
         return $next($request);

@@ -39,15 +39,28 @@ class TraiterReversementsAutoCagnottes extends Command
     protected $signature   = 'cotisations:reversements-auto {--dry-run : Simule sans effectuer de transfert ni modifier la base}';
     protected $description = 'Déclenche les reversements automatiques des cotisations ouvertes.';
 
+    /**
+     * Point d'entrée de la commande.
+     *
+     * Sélectionne les cagnottes ouvertes éligibles et déclenche le reversement
+     * selon le mode déterminé par `determinerMode()`.
+     *
+     * @param  PaynalaPaymentService $paynala Service de décaissement Mobile Money.
+     * @param  OneSignalService      $notif   Service de notifications push.
+     * @return int                            Code de retour (self::SUCCESS).
+     */
     public function handle(
         PaynalaPaymentService $paynala,
         OneSignalService      $notif,
     ): int {
         $isDryRun = (bool) $this->option('dry-run');
+        // Heure locale Gabon pour éviter un décalage de date lié à UTC.
         $today    = now()->timezone('Africa/Libreville')->toDateString();
 
         $this->info("[{$today}] Reversements auto cotisations" . ($isDryRun ? ' (dry-run)' : '') . ' …');
 
+        // Critères d'éligibilité : cagnotte ouverte, auto-reversement activé,
+        // solde positif, et numéro de retrait renseigné.
         $cagnottes = TondoCagnotte::where('type', 'cagnotte_ouverte')
             ->where('reversement_auto', true)
             ->whereIn('statut', ['active', 'en_cours'])
@@ -92,27 +105,40 @@ class TraiterReversementsAutoCagnottes extends Command
     // ── Logique de déclenchement ──────────────────────────────────────────────
 
     /**
-     * Retourne le mode de déclenchement applicable, ou null si pas encore le moment.
+     * Retourne le mode de déclenchement applicable pour une cagnotte, ou null si
+     * aucune condition n'est remplie aujourd'hui.
+     *
+     * Priorité décroissante :
+     *  1. 'date'          — date_fin atteinte ou dépassée.
+     *  2. 'montant_cible' — solde >= montant_cible.
+     *  3. 'libre'         — N mois écoulés depuis le dernier reversement réussi.
+     *  4. 'quotidien'     — aucune échéance configurée : reverse le solde chaque jour.
+     *
+     * @param  TondoCagnotte $cagnotte Cagnotte à évaluer.
+     * @param  string        $today   Date du jour au format 'Y-m-d' (Africa/Libreville).
+     * @return string|null            Mode de déclenchement ou null si pas encore le moment.
      */
     private function determinerMode(TondoCagnotte $cagnotte, string $today): ?string
     {
-        // Priorité 1 : date limite atteinte.
+        // Priorité 1 : date limite atteinte ou dépassée.
         if ($cagnotte->date_fin && $cagnotte->date_fin->toDateString() <= $today) {
             return 'date';
         }
 
-        // Priorité 2 : montant cible atteint ou dépassé.
+        // Priorité 2 : montant cible atteint ou dépassé (collecte suffisante).
         if ($cagnotte->montant_cible && (int) $cagnotte->montant_collecte >= (int) $cagnotte->montant_cible) {
             return 'montant_cible';
         }
 
-        // Priorité 3 : fréquence libre (N mois).
+        // Priorité 3 : fréquence libre (tous les N mois depuis le dernier payout réussi).
         if ($cagnotte->reversement_auto_frequence_mois) {
+            // Récupérer la date du dernier reversement réussi pour calculer le suivant.
             $dernierPayout = DB::table('tondo_payout')
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->max('date_creation');
 
+            // Si jamais de reversement, on part de la date de création de la cagnotte.
             $reference = $dernierPayout
                 ? Carbon::parse($dernierPayout)->timezone('Africa/Libreville')
                 : $cagnotte->date_creation->timezone('Africa/Libreville');
@@ -125,7 +151,7 @@ class TraiterReversementsAutoCagnottes extends Command
             }
         }
 
-        // Priorité 4 : systématique quotidien — aucune échéance, on reverse si solde > 0.
+        // Priorité 4 : pas d'échéance configurée → reverse quotidiennement si solde > 0.
         if (! $cagnotte->date_fin && ! $cagnotte->montant_cible && ! $cagnotte->reversement_auto_frequence_mois) {
             return 'quotidien';
         }
@@ -135,25 +161,47 @@ class TraiterReversementsAutoCagnottes extends Command
 
     // ── Exécution du reversement ──────────────────────────────────────────────
 
+    /**
+     * Exécute le reversement pour une cagnotte éligible en trois phases atomiques.
+     *
+     * Phase 1 — Réservation (transaction DB avec row-lock) :
+     *   Vérifie le solde et insère la ligne payout + décrémente montant_collecte.
+     *
+     * Phase 2 — Appel Paynala :
+     *   Envoie le virement Mobile Money. En cas d'échec, marque le payout 'echec'
+     *   et alerte les admins. Le solde n'est PAS restauré automatiquement.
+     *
+     * Phase 3 — Confirmation (transaction DB) :
+     *   Met le payout à 'succes' et clôture la cagnotte si le mode le demande.
+     *
+     * @param  TondoCagnotte         $cagnotte Cagnotte à reverser.
+     * @param  string                $mode     Mode déterminé par determinerMode().
+     * @param  PaynalaPaymentService $paynala  Service de décaissement.
+     * @param  OneSignalService      $notif    Service de notifications push.
+     * @return bool                            True si le reversement a réussi, false sinon.
+     */
     private function traiter(
         TondoCagnotte         $cagnotte,
         string                $mode,
         PaynalaPaymentService $paynala,
         OneSignalService      $notif,
     ): bool {
+        // On reverse l'intégralité du solde collecté.
         $montant    = (int) $cagnotte->montant_collecte;
         $numeroE164 = $cagnotte->numero_retrait;
+        // Convertir E.164 +241XXXXXXXX → local 0XXXXXXXX pour l'API Airtel.
         $msisdnLocal = str_starts_with($numeroE164, '+241')
             ? '0' . substr($numeroE164, 4)
             : ltrim($numeroE164, '+');
 
+        // Générer les identifiants de la transaction.
         $nextNum        = DB::table('tondo_payout')->count() + 1;
         $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
         $idempotencyKey = 'TONDO-AUTO-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
         $payoutId       = (string) Str::uuid();
         $transId        = 'TONDOAUTO' . strtoupper(Str::random(9));
 
-        // Résoudre l'user_id du bénéficiaire (si numéro enregistré).
+        // Résoudre l'user_id du bénéficiaire pour la notification push (optionnel).
         $beneficiaireUserId = DB::table('users')
             ->where('numero', $numeroE164)
             ->value('id');
@@ -295,6 +343,20 @@ class TraiterReversementsAutoCagnottes extends Command
 
     // ── Alerte email ──────────────────────────────────────────────────────────
 
+    /**
+     * Envoie un mail d'alerte critique aux admins quand l'appel Paynala échoue.
+     *
+     * IMPORTANT : le solde a déjà été décrémenté en Phase 1. Un admin doit vérifier
+     * manuellement si l'argent a bougé côté Paynala avant toute action corrective.
+     *
+     * @param  TondoCagnotte $cagnotte        Cagnotte concernée.
+     * @param  string        $payoutId        UUID de la ligne tondo_payout créée.
+     * @param  string        $transId         Identifiant interne de la transaction.
+     * @param  int           $montant         Montant du virement tenté (FCFA).
+     * @param  string        $numeroE164      Numéro E.164 du bénéficiaire.
+     * @param  string        $idempotencyKey  Clé d'idempotence envoyée à Paynala.
+     * @param  string        $errorMessage    Message d'erreur retourné par Paynala.
+     */
     private function envoyerAlertePaynalaKo(
         TondoCagnotte $cagnotte,
         string $payoutId,

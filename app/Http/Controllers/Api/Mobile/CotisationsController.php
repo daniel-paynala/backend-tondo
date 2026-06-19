@@ -33,7 +33,13 @@ class CotisationsController extends Controller
         private readonly OperateurDetectorService $detector,
     ) {}
 
-    /** Commission Paynala lue depuis la config projet (jamais hardcodée). */
+    /**
+     * Lit le taux de commission Paynala depuis la config projet.
+     * Ne jamais hardcoder ce taux — il peut évoluer sans déploiement.
+     *
+     * @param string $projectId UUID du projet Tondo
+     * @return float Taux décimal (ex : 0.02 pour 2 %)
+     */
     private function commissionPaynala(string $projectId): float
     {
         $config = app(TondoConfigService::class)->getOperatorConfig($projectId);
@@ -570,12 +576,21 @@ class CotisationsController extends Controller
         }
     }
 
+    /**
+     * Masque un numéro E.164 pour l'affichage (ex : "+24177****56").
+     * Conserve l'indicatif + les 2 derniers chiffres, remplace le reste par *.
+     *
+     * @param string $phone Numéro E.164 (ex : "+24177123456")
+     * @return string Numéro masqué (ex : "+24177****56")
+     */
     private function maskPhone(string $phone): string
     {
+        // Retire tous les caractères non numériques sauf le +.
         $clean = preg_replace('/[^\d+]/', '', $phone);
         if (strlen($clean) < 6) {
             return $clean;
         }
+        // Préfixe = indicatif + chiffres d'opérateur (tout sauf les 6 derniers).
         $prefix = substr($clean, 0, strlen($clean) - 6);
         $last2  = substr($clean, -2);
 

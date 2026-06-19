@@ -13,7 +13,17 @@ use Illuminate\Support\Facades\Log;
 /**
  * Moteur conversationnel du bot WhatsApp Tonji.
  *
- * Machine à états pilotée par SessionService :
+ * Machine à états pilotée par SessionService. Chaque message entrant
+ * est traité par traiter() qui lit l'étape courante et dispatch vers
+ * le handler correspondant. L'état est persisté en cache Redis (30 min).
+ *
+ * Ordre de priorité dans traiter() :
+ *   1. Deep link "TONJI [ref]" → contourne toute session existante
+ *   2. Mot-clé de retour (#, menu, retour…) → reset + menu
+ *   3. Aucune session / premier message → premiereArrivee()
+ *   4. match() sur l'étape courante → handler spécifique
+ *
+ * Diagramme des états :
  *
  *  [aucune session] ──► MENU
  *
@@ -27,16 +37,21 @@ use Illuminate\Support\Facades\Log;
  *                     └─ cotisation ──► cotiser.montant ──► cotiser.numero
  *                                                               │
  *                                                               ├─ connu ──► [push] ──► cotiser.attente
- *                                                               └─ inconnu ──► cotiser.nom_prenom ──► [push] ──► cotiser.attente
+ *                                                               └─ inconnu ──► compte light + [push] ──► cotiser.attente
  *
- *        ──► 2 ──► rejoindre.ref
+ *        ──► 2 ──► rejoindre.ref ──► rejoindre.numero
  *                     ├─ inconnu    ──► rejoindre.nom_prenom ──► inscription ──► menu
  *                     └─ connu      ──► inscription ──► menu
- *        ──► 3 ──► lien app web
- *        ──► 4 ──► liste cagnottes
+ *        ──► 3 ──► creer.type ──► creer.cotisation.* | creer.tontine.* ──► creer.recap
+ *        ──► 4 ──► gerer.numero ──► gerer.otp ──► gerer.liste ──► gerer.cagnotte | gerer.tontine
  *        ──► 5 ──► aide
  *
  *  cotiser.attente ──► OK ──► vérif statut ──► reçu / échec / toujours en cours
+ *
+ * Deep link :
+ *   "TONJI 315167" → tontine non démarrée → rejoindre.numero
+ *                 → tontine démarrée      → cotiser.numero (montant fixe)
+ *                 → cagnotte ouverte      → cotiser.montant
  */
 class BotService
 {
@@ -53,11 +68,20 @@ class BotService
     // ── Point d'entrée ────────────────────────────────────────────────────────
 
     /**
-     * Traite un message entrant et retourne la réponse.
-     * Retourne soit :
-     *   - string                → message texte simple
-     *   - [string, string]      → [message texte, url PDF à joindre en Media]
+     * Point d'entrée principal — traite un message WhatsApp entrant.
      *
+     * Appelé par le contrôleur webhook pour chaque message reçu de Twilio.
+     * Retourne soit une chaîne (message texte), soit un tableau à deux éléments
+     * [texte, urlPdf] lorsqu'un reçu PDF doit être joint en Media.
+     *
+     * Ordre de traitement (priorité décroissante) :
+     *   1. Deep link "TONJI XXXXXX" → bypasse la session, flux direct
+     *   2. Mot-clé de retour (#, menu…) → reset session, afficher menu
+     *   3. Session nulle ou message vide → premiereArrivee()
+     *   4. Dispatch sur l'étape de session → handler métier
+     *
+     * @param  string $numero  Numéro E.164 de l'expéditeur (ex : +24177123456)
+     * @param  string $texte   Contenu du message reçu (avant trim)
      * @return string|array{0:string,1:string}
      */
     public function traiter(string $numero, string $texte): string|array
@@ -65,20 +89,24 @@ class BotService
         $texte = trim($texte);
         $etape = $this->session->etape($numero);
 
-        // ── Deep link TONJI [ref] — contourne l'état de session ──────────────
+        // ── 1. Deep link TONJI [ref] — contourne l'état de session ───────────
+        // Format attendu : "TONJI 315167" (insensible à la casse, 4-6 chiffres)
         if (preg_match('/^TONJI\s+(\d{4,6})$/i', $texte, $m)) {
             return $this->handleDeepLink($numero, $m[1]);
         }
 
+        // ── 2. Retour menu explicite — n'importe quelle étape ────────────────
         if ($this->estRetourMenu($texte)) {
             $this->session->reset($numero);
             return $this->afficherMenu($numero);
         }
 
+        // ── 3. Aucune session ou message vide → premier contact ──────────────
         if ($etape === null || $texte === '') {
             return $this->premiereArrivee($numero);
         }
 
+        // ── 4. Dispatch sur l'étape de session ───────────────────────────────
         return match (true) {
             $etape === 'menu'                  => $this->handleMenu($numero, $texte),
             $etape === 'cotiser.ref'            => $this->handleCotiserRef($numero, $texte),
@@ -91,12 +119,18 @@ class BotService
             $etape === 'rejoindre.nom_prenom'   => $this->handleRejoindreNomPrenom($numero, $texte),
             str_starts_with($etape, 'creer.')  => $this->routerCreer($numero, $etape, $texte),
             str_starts_with($etape, 'gerer.')  => $this->routerGerer($numero, $etape, $texte),
-            default                             => $this->afficherMenu($numero),
+            default                             => $this->afficherMenu($numero),  // étape inconnue → menu
         };
     }
 
     // ── Première arrivée ──────────────────────────────────────────────────────
 
+    /**
+     * Initialise la session au menu principal lors du premier contact.
+     *
+     * @param  string $numero  Numéro E.164 de l'expéditeur
+     * @return string          Texte du menu principal
+     */
     private function premiereArrivee(string $numero): string
     {
         $this->session->set($numero, 'menu');
@@ -105,12 +139,28 @@ class BotService
 
     // ── Menu principal ────────────────────────────────────────────────────────
 
+    /**
+     * Réinitialise la session et retourne un message d'erreur suivi du menu.
+     * Méthode de convenance pour les cas d'erreur récupérables.
+     *
+     * @param  string $numero   Numéro E.164
+     * @param  string $message  Message d'erreur à afficher avant le menu
+     * @return string           Erreur + menu concaténés
+     */
     private function erreurEtMenu(string $numero, string $message): string
     {
         $this->session->reset($numero);
         return $message . "\n\n" . $this->afficherMenu($numero);
     }
 
+    /**
+     * Affiche le menu principal et positionne la session à l'étape 'menu'.
+     * Méthode à double rôle : initialise l'état ET retourne le texte.
+     * Appelée depuis premiereArrivee(), retourMenu, et fin de parcours réussi.
+     *
+     * @param  string $numero  Numéro E.164
+     * @return string          Texte du menu principal formaté WhatsApp
+     */
     private function afficherMenu(string $numero): string
     {
         $this->session->set($numero, 'menu');
@@ -130,6 +180,13 @@ class BotService
         TXT;
     }
 
+    /**
+     * Dispatch du menu principal selon le choix de l'utilisateur.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Chiffre saisi par l'utilisateur (1-5)
+     * @return string
+     */
     private function handleMenu(string $numero, string $texte): string
     {
         return match (trim($texte)) {
@@ -138,12 +195,19 @@ class BotService
             '3'     => $this->demarrerCreer($numero),
             '4'     => $this->demarrerGerer($numero),
             '5'     => $this->afficherAide($numero),
-            default => $this->afficherMenu($numero),
+            default => $this->afficherMenu($numero),  // saisie invalide → réafficher le menu
         };
     }
 
     // ── 1 — Cotiser : référence ───────────────────────────────────────────────
 
+    /**
+     * Démarre le flux de cotisation : positionne la session à 'cotiser.ref'
+     * et demande le numéro de référence de la tontine/cagnotte.
+     *
+     * @param  string $numero  Numéro E.164
+     * @return string
+     */
     private function demarrerCotiser(string $numero): string
     {
         $this->session->set($numero, 'cotiser.ref');
@@ -157,8 +221,24 @@ class BotService
         TXT;
     }
 
+    /**
+     * Traite la saisie de la référence de tontine/cagnotte.
+     *
+     * Vérifie l'existence et le statut de la cagnotte, puis :
+     *   - Tontine non complète → erreur (les paiements sont bloqués tant que tous
+     *     les participants ne sont pas inscrits). Le +1 est le créateur qui est
+     *     dans tondo_participants mais PAS comptabilisé dans nombre_inscrits.
+     *   - Tontine complète avec montant fixe → saute l'étape 'cotiser.montant',
+     *     va directement à 'cotiser.numero'.
+     *   - Cagnotte ouverte → demande le montant ('cotiser.montant').
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Référence saisie (peut contenir des espaces ou lettres)
+     * @return string
+     */
     private function handleCotiserRef(string $numero, string $texte): string
     {
+        // Extraire uniquement les chiffres (l'utilisateur peut saisir "N°315167")
         $ref      = preg_replace('/\D/', '', $texte);
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
@@ -170,7 +250,7 @@ class BotService
             return "❌ La tontine ou cagnotte *{$cagnotte->titre}* est clôturée.\n\n#️⃣ _pour revenir en arrière_";
         }
 
-        // Stocker les infos cagnotte dans la session
+        // Stocker les infos cagnotte dans la session pour les étapes suivantes
         $this->session->set($numero, 'cotiser.montant', [
             'reference'         => $ref,
             'cagnotte_id'       => $cagnotte->id,
@@ -180,9 +260,9 @@ class BotService
             'montant_par_cycle' => $cagnotte->montant_par_cycle,
         ]);
 
-        // Tontine : bloquer si pas encore complète
+        // Tontine : bloquer si pas encore complète (attente de tous les participants)
         if ($cagnotte->type === 'tontine_periodique') {
-            // +1 car le créateur est dans tondo_participants mais pas dans nombre_inscrits
+            // +1 : le créateur compte dans tondo_participants mais PAS dans nombre_inscrits
             $manquants = ($cagnotte->nombre_participants ?? 0) - (($cagnotte->nombre_inscrits ?? 0) + 1);
             if ($manquants > 0) {
                 return $this->erreurEtMenu($numero, <<<TXT
@@ -194,10 +274,10 @@ class BotService
             }
         }
 
-        // Tontine → montant fixe, pas besoin de le demander
+        // Tontine → montant fixe connu : sauter l'étape montant, demander directement le numéro
         if ($cagnotte->type === 'tontine_periodique' && $cagnotte->montant_par_cycle) {
             $fmt = number_format((int) $cagnotte->montant_par_cycle, 0, ',', ' ');
-            // Passer directement à la demande de numéro
+            // Passer directement à 'cotiser.numero' en pré-remplissant le montant
             $this->session->set($numero, 'cotiser.numero', [
                 'reference'      => $ref,
                 'cagnotte_id'    => $cagnotte->id,
@@ -240,6 +320,15 @@ class BotService
 
     // ── 1 — Cotiser : montant (cotisation uniquement) ─────────────────────────
 
+    /**
+     * Traite la saisie du montant de cotisation (cagnottes ouvertes uniquement).
+     * Les tontines sautent cette étape car le montant est fixe (voir handleCotiserRef).
+     * Limites : minimum 100 FCFA, maximum 500 000 FCFA par transaction.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Montant saisi (peut contenir des espaces, lettres)
+     * @return string
+     */
     private function handleCotiserMontant(string $numero, string $texte): string
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
@@ -267,6 +356,20 @@ class BotService
 
     // ── 1 — Cotiser : numéro de téléphone ────────────────────────────────────
 
+    /**
+     * Traite la saisie du numéro Mobile Money du cotisant.
+     *
+     * Comportement selon le type :
+     *   - Tontine : vérifie que le numéro est bien inscrit comme participant.
+     *     Si non inscrit → erreur (doit passer par "Rejoindre" d'abord).
+     *   - Cotisation : si l'utilisateur est connu → paiement direct.
+     *     Si inconnu → crée un compte light anonyme (nom/prénom vides)
+     *     puis lance le paiement sans collecter l'identité.
+     *
+     * @param  string $numero  Numéro WhatsApp de l'expéditeur (E.164)
+     * @param  string $texte   Numéro Mobile Money saisi
+     * @return string|array{0:string,1:string}
+     */
     private function handleCotiserNumero(string $numero, string $texte): string|array
     {
         $numeroSaisi = $this->normaliserNumero($texte);
@@ -279,10 +382,10 @@ class BotService
         $type     = $data['type'] ?? '';
         $projectId = $data['project_id'] ?? $this->tondoProjectId();
 
-        // Chercher l'utilisateur par ce numéro
+        // Rechercher l'utilisateur par suffixe (9 derniers chiffres, tolérant +241/0)
         $user = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
-        // ── Tontine : vérifier participant + tontine démarrée ────────────────
+        // ── Tontine : vérifier que l'utilisateur est bien un participant inscrit ──
         if ($type === 'tontine_periodique') {
             $estParticipant = $user && DB::table('tondo_participants')
                 ->where('cagnotte_id', $data['cagnotte_id'])
@@ -297,16 +400,17 @@ class BotService
                 TXT);
             }
 
-            // Participant confirmé → push
+            // Participant confirmé → lancer le push Airtel
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
-        // ── Cotisation : utilisateur connu ────────────────────────────────────
+        // ── Cotisation : utilisateur connu → paiement direct ─────────────────
         if ($user) {
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
-        // ── Cotisation : nouvel utilisateur → compte silencieux + paiement direct ──
+        // ── Cotisation : inconnu → compte light anonyme + paiement immédiat ──
+        // Pas de collecte de nom/prénom : cotisation ouverte sans compte préalable
         $user = $this->cotisationSvc->creerCompteLight(
             nom: '',
             prenom: '',
@@ -319,6 +423,18 @@ class BotService
 
     // ── 1 — Cotiser : nom + prénom (nouveau compte light) ────────────────────
 
+    /**
+     * Collecte le nom et prénom pour un nouveau cotisant (étape optionnelle).
+     * Cette étape est aujourd'hui contournée pour les cotisations : un compte
+     * light anonyme est créé directement dans handleCotiserNumero. Ce handler
+     * reste présent pour les cas futurs ou les flows alternatifs.
+     *
+     * Format attendu : deux lignes, nom puis prénom.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nom et prénom saisis (séparés par un saut de ligne)
+     * @return string|array{0:string,1:string}
+     */
     private function handleCotiserNomPrenom(string $numero, string $texte): string|array
     {
         $lignes = array_filter(array_map('trim', explode("\n", $texte)));
@@ -355,6 +471,18 @@ class BotService
 
     // ── 1 — Cotiser : initier le paiement et attendre ────────────────────────
 
+    /**
+     * Enveloppe publique de _lancerPaiement() avec gestion des exceptions.
+     *
+     * En cas d'erreur inattendue : reset la session et retourne un message générique.
+     * Le vrai travail est dans _lancerPaiement() (pattern façade/wrapper).
+     *
+     * @param  string    $numero       Numéro WhatsApp de l'expéditeur
+     * @param  TondoUser $user         Compte utilisateur (peut être light/anonyme)
+     * @param  array     $data         Données de session (cagnotte_id, montant…)
+     * @param  string    $numeroPayeur Numéro Mobile Money sur lequel débiter
+     * @return string|array{0:string,1:string}
+     */
     private function lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string|array
     {
         try {
@@ -370,6 +498,24 @@ class BotService
         }
     }
 
+    /**
+     * Implémentation réelle de l'initiation du paiement.
+     *
+     * Deux résultats possibles depuis CotisationService::initier() :
+     *   - 'succes' (mock) → appelle recu() directement, reset session à 'menu'
+     *   - 'initie' (Airtel push) → place la session à 'cotiser.attente'
+     *     ET insère une ligne TondoPaiementEnAttente (surveillée par le scheduler
+     *     toutes les minutes pour envoyer le reçu automatiquement si confirmé).
+     *
+     * Le numéro de paiement peut différer du numéro WhatsApp de l'expéditeur
+     * (ex : payer pour quelqu'un d'autre depuis son propre WhatsApp).
+     *
+     * @param  string    $numero       Numéro WhatsApp expéditeur
+     * @param  TondoUser $user         Compte utilisateur (ID utilisé pour le paiement)
+     * @param  array     $data         Contexte session (cagnotte_id, montant…)
+     * @param  string    $numeroPayeur Numéro Mobile Money effectivement débité
+     * @return string|array{0:string,1:string}
+     */
     private function _lancerPaiement(string $numero, TondoUser $user, array $data, string $numeroPayeur): string|array
     {
         $cagnotte = TondoCagnotte::find($data['cagnotte_id']);
@@ -379,7 +525,7 @@ class BotService
             return "❌ Erreur : cagnotte introuvable.\n\n#️⃣ _pour revenir en arrière_";
         }
 
-        // Utiliser le numéro saisi comme numéro de paiement
+        // Cloner l'utilisateur pour remplacer son numéro par celui saisi (paiement tiers possible)
         $userPourPaiement         = clone $user;
         $userPourPaiement->numero = $numeroPayeur;
 
@@ -394,13 +540,13 @@ class BotService
         $salut      = $prenom ? "Bonjour *{$prenom}* !" : 'Bonjour !';
         $montantFmt = number_format($data['montant'], 0, ',', ' ');
 
-        // Paiement immédiat (mock)
+        // Paiement immédiat (mock ou opérateur non-Airtel) → reçu synchrone
         if ($resultat['statut'] === 'succes') {
             $this->session->set($numero, 'menu');
             return $this->recu($user, $cagnotte, $resultat);
         }
 
-        // Paiement Airtel → en attente de confirmation
+        // Paiement Airtel → push envoyé, attente de confirmation utilisateur
         $this->session->set($numero, 'cotiser.attente', [
             'trans_id'       => $resultat['trans_id'],
             'project_id'     => $cagnotte->project_id,
@@ -411,7 +557,8 @@ class BotService
             'user_id'        => $user->id,
         ]);
 
-        // Surveillance automatique : vérification toutes les minutes par le scheduler.
+        // Insérer dans la table de surveillance : le scheduler vérifie toutes les minutes
+        // et envoie le reçu automatiquement si Airtel confirme avant que l'utilisateur tape "OK"
         TondoPaiementEnAttente::create([
             'trans_id'    => $resultat['trans_id'],
             'numero_wa'   => $numero,
@@ -438,17 +585,34 @@ class BotService
 
     // ── 1 — Cotiser : vérification après push ────────────────────────────────
 
+    /**
+     * Gère l'étape d'attente après un push Airtel Money.
+     *
+     * L'utilisateur est en étape 'cotiser.attente'. Il doit taper "OK" pour
+     * déclencher une vérification manuelle du statut. Si le statut est 'succes' :
+     *   - Supprime la ligne TondoPaiementEnAttente (évite un double-envoi par le scheduler).
+     *   - Génère le reçu PDF.
+     *   - Retourne le message de confirmation avec reçu joint.
+     *
+     * Si l'utilisateur tape autre chose que "OK", on l'invite à patienter.
+     *
+     * @param  string $numero  Numéro WhatsApp expéditeur
+     * @param  string $texte   Message reçu (attendu : "OK")
+     * @return string|array{0:string,1:string}
+     */
     private function handleCotiserAttente(string $numero, string $texte): string|array
     {
         $data    = $this->session->data($numero);
         $transId = $data['trans_id'] ?? null;
 
         if (! $transId) {
+            // Session corrompue ou expirée
             $this->session->reset($numero);
             return $this->afficherMenu($numero);
         }
 
         if (strtolower(trim($texte)) !== 'ok') {
+            // Tout message autre que "OK" → rappel d'attente
             return <<<TXT
             ⏳ Paiement en attente de confirmation.
 
@@ -461,7 +625,8 @@ class BotService
         $statut = $this->cotisationSvc->verifierStatut($transId, $data['project_id']);
 
         if ($statut === 'succes') {
-            // Supprimer du suivi automatique pour éviter un double-envoi par le scheduler.
+            // Supprimer du suivi automatique AVANT d'envoyer le reçu
+            // pour éviter que le scheduler envoie un second reçu en parallèle
             TondoPaiementEnAttente::where('trans_id', $transId)->delete();
 
             $this->session->set($numero, 'menu');
@@ -507,6 +672,21 @@ class BotService
         TXT;
     }
 
+    /**
+     * Génère le message de confirmation de paiement (reçu WhatsApp).
+     *
+     * Méthode publique : appelée depuis BotService après succès immédiat (mock),
+     * depuis handleCotiserAttente() après confirmation manuelle, et directement
+     * par le scheduler (CheckPaymentsJob) lorsqu'Airtel confirme automatiquement.
+     * Le PDF est optionnel : joint en Media si l'URL est fournie.
+     *
+     * @param  TondoUser|null    $user     Cotisant (null si compte supprimé)
+     * @param  TondoCagnotte|null $cagnotte Cagnotte concernée
+     * @param  array             $resultat  Résultat de initier() (trans_id, montant_net…)
+     * @param  string            $canal     Canal d'origine pour les logs (défaut 'WhatsApp')
+     * @param  string|null       $pdfUrl    URL publique du reçu PDF joint en Media
+     * @return string            Message de confirmation formaté WhatsApp
+     */
     public function recu(?TondoUser $user, ?TondoCagnotte $cagnotte, array $resultat, string $canal = 'WhatsApp', ?string $pdfUrl = null): string
     {
         $montant = number_format((int) ($resultat['montant_net'] ?? 0), 0, ',', ' ');
@@ -537,6 +717,12 @@ class BotService
 
     // ── 2 — Rejoindre ─────────────────────────────────────────────────────────
 
+    /**
+     * Démarre le flux d'inscription à une tontine ou cagnotte.
+     *
+     * @param  string $numero  Numéro E.164
+     * @return string
+     */
     private function demarrerRejoindre(string $numero): string
     {
         $this->session->set($numero, 'rejoindre.ref');
@@ -550,6 +736,13 @@ class BotService
         TXT;
     }
 
+    /**
+     * Traite la saisie de la référence lors du flow "Rejoindre".
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Référence saisie
+     * @return string
+     */
     private function handleRejoindreRef(string $numero, string $texte): string
     {
         $ref      = preg_replace('/\D/', '', $texte);
@@ -579,6 +772,22 @@ class BotService
         TXT;
     }
 
+    /**
+     * Traite la saisie du numéro Mobile Money lors du flow "Rejoindre".
+     *
+     * Vérifie :
+     *   1. Que le numéro n'est pas déjà membre (idempotence).
+     *   2. Pour les tontines : qu'il reste des places disponibles.
+     *      Le +1 correspond au créateur qui est dans tondo_participants
+     *      mais PAS comptabilisé dans nombre_inscrits.
+     *
+     * Si l'utilisateur est inconnu → demander nom + prénom (étape rejoindre.nom_prenom).
+     * Si l'utilisateur est connu → inscription directe + retour menu.
+     *
+     * @param  string $numero  Numéro WhatsApp expéditeur
+     * @param  string $texte   Numéro Mobile Money saisi
+     * @return string
+     */
     private function handleRejoindreNumero(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
@@ -598,7 +807,7 @@ class BotService
         $ref  = $data['cagnotte_ref'] ?? $cagnotte->reference;
         $user = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
-        // Déjà membre ?
+        // Vérifier si déjà inscrit (idempotence)
         if ($user) {
             $dejaMembre = DB::table('tondo_participants')
                 ->where('cagnotte_id', $cagnotte->id)
@@ -610,7 +819,7 @@ class BotService
             }
         }
 
-        // Tontine : vérifier places libres (+1 créateur non compté dans nombre_inscrits)
+        // Tontine : vérifier places disponibles (+1 = créateur non compté dans nombre_inscrits)
         if ($cagnotte->type === 'tontine_periodique') {
             if (($cagnotte->nombre_inscrits ?? 0) + 1 >= ($cagnotte->nombre_participants ?? 0)) {
                 return $this->erreurEtMenu($numero, "❌ *{$cagnotte->titre}* est complet.\nPlus aucune place disponible.");
@@ -651,6 +860,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte nom + prénom pour un nouvel utilisateur qui rejoint une cagnotte/tontine.
+     * Crée un compte light puis inscrit le participant.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nom et prénom (séparés par un saut de ligne)
+     * @return string
+     */
     private function handleRejoindreNomPrenom(string $numero, string $texte): string
     {
         $lignes = array_filter(array_map('trim', explode("\n", $texte)));
@@ -701,6 +918,13 @@ class BotService
 
     // ── 3 — Créer ─────────────────────────────────────────────────────────────
 
+    /**
+     * Démarre le flux de création d'une tontine ou cagnotte.
+     * Positionne la session à 'creer.type' et propose le choix du type.
+     *
+     * @param  string $numero  Numéro E.164
+     * @return string
+     */
     private function demarrerCreer(string $numero): string
     {
         $this->session->set($numero, 'creer.type', [
@@ -719,6 +943,22 @@ class BotService
         TXT;
     }
 
+    /**
+     * Routeur interne pour toutes les sous-étapes du flow "Créer".
+     * Toutes les étapes commençant par 'creer.' arrivent ici depuis traiter().
+     *
+     * Flow cotisation : creer.type → creer.cotisation.nom → creer.numero → creer.recap
+     * Flow tontine    : creer.type → creer.tontine.nom → creer.tontine.nb_participants
+     *                   → creer.tontine.montant_cycle → creer.tontine.periodicite
+     *                   → [creer.tontine.jour_mois si mensuelle] → creer.numero
+     *                   → [creer.nom_prenom si inconnu] → [creer.certification]
+     *                   → creer.recap
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $etape   Étape courante (ex : 'creer.tontine.nom')
+     * @param  string $texte   Message reçu
+     * @return string
+     */
     private function routerCreer(string $numero, string $etape, string $texte): string
     {
         return match ($etape) {
@@ -740,6 +980,13 @@ class BotService
         };
     }
 
+    /**
+     * Traite le choix du type (1=cagnotte, 2=tontine) et oriente vers le bon sous-flow.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1" ou "2"
+     * @return string
+     */
     private function handleCreerType(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -777,6 +1024,15 @@ class BotService
 
     // ── 3.1 Cotisation — champs ───────────────────────────────────────────────
 
+    /**
+     * Collecte le nom de la cagnotte et saute directement à l'identification du créateur.
+     * Dans le flow WhatsApp simplifié, montant_cible et date_fin ne sont pas demandés
+     * (ils sont initialisés à 0/null). Seul le nom est collecté.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nom de la cagnotte (3-120 caractères)
+     * @return string
+     */
     private function handleCreerCotisationNom(string $numero, string $texte): string
     {
         $titre = trim($texte);
@@ -785,6 +1041,7 @@ class BotService
         }
 
         $data = $this->session->data($numero);
+        // montant_cible = 0 et date_fin = null : pas de limite par défaut (WhatsApp flow simplifié)
         $this->session->set($numero, 'creer.numero', array_merge($data, [
             'titre'         => $titre,
             'montant_cible' => 0,
@@ -794,6 +1051,16 @@ class BotService
         return $this->demanderNumeroCreateur();
     }
 
+    /**
+     * Collecte le montant cible de la cagnotte (optionnel, 0 = pas de limite).
+     * Note : cette étape n'est pas atteinte dans le flow WhatsApp simplifié actuel
+     * (handleCreerCotisationNom saute directement à creer.numero). Elle reste
+     * disponible pour une version future plus complète.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Montant saisi (0 = pas de limite)
+     * @return string
+     */
     private function handleCreerCotisationMontantCible(string $numero, string $texte): string
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
@@ -815,6 +1082,13 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte la date de fin de la cagnotte (format JJ/MM/AAAA ou "0" pour sans limite).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Date saisie ou "0"
+     * @return string
+     */
     private function handleCreerCotisationDateFin(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -840,6 +1114,13 @@ class BotService
 
     // ── 3.1 Tontine — champs ─────────────────────────────────────────────────
 
+    /**
+     * Collecte le nom de la tontine.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nom saisi (3-120 caractères)
+     * @return string
+     */
     private function handleCreerTontineNom(string $numero, string $texte): string
     {
         $titre = trim($texte);
@@ -860,6 +1141,13 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte le nombre de participants de la tontine (2-200).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nombre saisi
+     * @return string
+     */
     private function handleCreerTontineNbParticipants(string $numero, string $texte): string
     {
         $nb = (int) preg_replace('/\D/', '', $texte);
@@ -880,6 +1168,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte le montant que chaque bénéficiaire recevra à son tour (cashBack).
+     * C'est le montant NET — les frais seront calculés par AirtelFeesCalculator.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Montant saisi (100-2 500 000 FCFA)
+     * @return string
+     */
     private function handleCreerTontineMontantCycle(string $numero, string $texte): string
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
@@ -903,6 +1199,15 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte la périodicité de la tontine (1=hebdo, 2=bi-hebdo, 3=mensuelle).
+     * Pour les options 1 et 2 (hebdomadaire), le jour est fixé à lundi.
+     * Pour l'option 3 (mensuelle), demande le jour du mois (étape suivante).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1", "2" ou "3"
+     * @return string
+     */
     private function handleCreerTontinePeriodicite(string $numero, string $texte): string
     {
         if (! in_array($texte, ['1', '2', '3'])) {
@@ -937,6 +1242,14 @@ class BotService
         return $this->demanderNumeroCreateur();
     }
 
+    /**
+     * Collecte le jour du mois pour une tontine mensuelle.
+     * Trois choix : 1 → le 5, 2 → le 7, 3 → le 15.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1", "2" ou "3"
+     * @return string
+     */
     private function handleCreerTontineJourMois(string $numero, string $texte): string
     {
         if (! in_array($texte, ['1', '2', '3'])) {
@@ -955,6 +1268,12 @@ class BotService
 
     // ── 3.2 Identification du créateur (partagé cotisation + tontine) ─────────
 
+    /**
+     * Retourne le message demandant le numéro Mobile Money du créateur.
+     * Partagé entre le flow cotisation et le flow tontine.
+     *
+     * @return string
+     */
     private function demanderNumeroCreateur(): string
     {
         return <<<TXT
@@ -965,6 +1284,18 @@ class BotService
         TXT;
     }
 
+    /**
+     * Traite la saisie du numéro Mobile Money du créateur.
+     *
+     * Cas possibles :
+     *   - Utilisateur connu avec profil complet → afficher le récapitulatif directement.
+     *   - Utilisateur connu avec profil vide (compte light anonyme) → demander nom/prénom.
+     *   - Utilisateur inconnu → demander nom/prénom (création d'un compte full).
+     *
+     * @param  string $numero  Numéro E.164 (expéditeur WhatsApp)
+     * @param  string $texte   Numéro Mobile Money saisi
+     * @return string
+     */
     private function handleCreerNumero(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
@@ -977,7 +1308,7 @@ class BotService
         $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
         if ($user) {
-            // Compte light (profil vide) — compléter avant de pouvoir créer
+            // Compte light avec profil vide → compléter l'identité avant création
             if (trim($user->nom) === '' || trim($user->prenom) === '') {
                 $this->session->set($numero, 'creer.nom_prenom', array_merge($data, [
                     'user_id'       => $user->id,
@@ -1026,6 +1357,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte nom + prénom du créateur (inconnu ou profil incomplet).
+     * Passe ensuite à l'étape de certification de majorité.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nom et prénom (deux lignes)
+     * @return string
+     */
     private function handleCreerNomPrenom(string $numero, string $texte): string
     {
         $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
@@ -1047,6 +1386,16 @@ class BotService
         return $this->messageCertification();
     }
 
+    /**
+     * Traite la certification de majorité du créateur (doit taper "1").
+     * Sur confirmation : crée un compte full avec certifie_majeur=true
+     * (date de naissance placeholder '2000-01-01' en l'absence de collecte réelle via WA).
+     * Affiche ensuite le récapitulatif final.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1" pour certifier
+     * @return string
+     */
     private function handleCreerCertification(string $numero, string $texte): string
     {
         if ($texte !== '1') {
@@ -1056,6 +1405,7 @@ class BotService
         $data      = $this->session->data($numero);
         $projectId = $data['project_id'] ?? $this->tondoProjectId();
 
+        // Créer compte full — date de naissance placeholder (pas collectée via WA)
         $user = $this->cotisationSvc->creerCompteFull(
             nom:           $data['nom'],
             prenom:        $data['prenom'],
@@ -1074,6 +1424,13 @@ class BotService
         return $this->construireRecap($merged, $numeroRetrait);
     }
 
+    /**
+     * Retourne le message demandant un numéro de retrait alternatif.
+     * Proposé quand l'utilisateur veut reverser sur un numéro différent.
+     *
+     * @param  string $prenom  Prénom de l'utilisateur pour la salutation
+     * @return string
+     */
     private function demanderNumeroRetrait(string $prenom): string
     {
         $salut = $prenom ? "Bonjour *{$prenom}* !" : 'Bonjour !';
@@ -1089,6 +1446,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte le numéro de retrait alternatif (si l'utilisateur veut reverser ailleurs).
+     * "0" = utiliser le même numéro que celui saisi pour l'identification.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Numéro alternatif ou "0"
+     * @return string
+     */
     private function handleCreerNumeroRetrait(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -1111,6 +1476,15 @@ class BotService
 
     // ── 3.3 Récap + CGU ──────────────────────────────────────────────────────
 
+    /**
+     * Construit le message de récapitulatif avant confirmation.
+     * Le contenu diffère selon le type (tontine vs cagnotte).
+     * Suivi du texte CGU simplifié avec lien et instructions de validation.
+     *
+     * @param  array  $data           Données de session (titre, type, participants…)
+     * @param  string $numeroRetrait  Numéro sur lequel sera versé le montant collecté
+     * @return string
+     */
     private function construireRecap(array $data, string $numeroRetrait): string
     {
         $masque = $this->maskPhoneNum($numeroRetrait);
@@ -1157,6 +1531,12 @@ class BotService
         return $lignes . "\n\n" . $this->cguTexte();
     }
 
+    /**
+     * Retourne le texte court des CGU avec lien et instructions de validation.
+     * Conforme à RÈGLE 4-bis : résumé direct + lien vers version complète.
+     *
+     * @return string
+     */
     private function cguTexte(): string
     {
         return <<<TXT
@@ -1168,6 +1548,20 @@ class BotService
 
     // ── 3.4 Création effective ────────────────────────────────────────────────
 
+    /**
+     * Traite la confirmation du récapitulatif et crée la cagnotte/tontine.
+     *
+     * Sur "1" : appelle CreerCagnotteService::creer() puis retourne le message
+     * de succès avec le deep link WhatsApp à partager aux participants.
+     * Le deep link est construit avec le numéro du bot (config tondo.whatsapp_numero).
+     *
+     * Sur "0" : annulation, retour menu.
+     * Autre valeur : réaffiche le récapitulatif avec rappel de confirmation.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1" (confirmer), "0" (annuler), autre (rappel)
+     * @return string
+     */
     private function handleCreerRecap(string $numero, string $texte): string
     {
         if ($texte === '0') {
@@ -1175,6 +1569,7 @@ class BotService
         }
 
         if ($texte !== '1') {
+            // Toute autre saisie → réafficher le récap avec invitation à confirmer
             $data = $this->session->data($numero);
             return $this->construireRecap($data, $data['numero_retrait'] ?? '') .
                 "\n\n⚠️ Tapez *1* pour confirmer ou *0* pour annuler.";
@@ -1198,6 +1593,7 @@ class BotService
         $typeLabel = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
         $prenom = ucfirst(mb_strtolower($user->prenom));
         $ref    = $cagnotte->reference;
+        // Construire le deep link WhatsApp pour que les participants rejoignent directement
         $botNum = ltrim(config('tondo.whatsapp_numero', ''), '+');
         $lienWa = $botNum
             ? "\nhttps://wa.me/{$botNum}?text=" . rawurlencode("TONJI {$ref}")
@@ -1217,6 +1613,13 @@ class BotService
 
     // ── 3 — Helpers ──────────────────────────────────────────────────────────
 
+    /**
+     * Parse une date au format JJ/MM/AAAA ou JJ-MM-AAAA.
+     * Valide que le jour et le mois sont cohérents (rejet de 31/02 etc.).
+     *
+     * @param  string $texte  Date saisie par l'utilisateur
+     * @return \DateTimeImmutable|null  null si format invalide ou date incohérente
+     */
     private function parseDate(string $texte): ?\DateTimeImmutable
     {
         if (preg_match('/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/', $texte, $m)) {
@@ -1231,6 +1634,12 @@ class BotService
         return null;
     }
 
+    /**
+     * Vérifie qu'une date de naissance correspond à un utilisateur majeur (≥ 18 ans).
+     *
+     * @param  \DateTimeImmutable $naissance  Date de naissance
+     * @return bool
+     */
     private function estMajeur(\DateTimeImmutable $naissance): bool
     {
         return $naissance->diff(new \DateTimeImmutable('today'))->y >= 18;
@@ -1238,6 +1647,13 @@ class BotService
 
     // ── 4 — Gérer ─────────────────────────────────────────────────────────────
 
+    /**
+     * Démarre le flow de gestion des cagnottes/tontines.
+     * Exige une vérification OTP avant d'afficher la liste (sécurité).
+     *
+     * @param  string $numero  Numéro E.164
+     * @return string
+     */
     private function demarrerGerer(string $numero): string
     {
         $this->session->set($numero, 'gerer.numero', [
@@ -1254,6 +1670,19 @@ class BotService
         TXT;
     }
 
+    /**
+     * Routeur interne pour toutes les sous-étapes du flow "Gérer".
+     * Toutes les étapes commençant par 'gerer.' arrivent ici depuis traiter().
+     *
+     * Flow principal : gerer.numero → gerer.otp → gerer.liste → gerer.cagnotte | gerer.tontine
+     * Flow reversement : gerer.revers.dest → [gerer.revers.num] → gerer.revers.mont → gerer.revers.otp
+     * Flow fermer : gerer.fermer.confirm → [gerer.fermer.num] → gerer.fermer.otp
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $etape   Étape courante (ex : 'gerer.revers.mont')
+     * @param  string $texte   Message reçu
+     * @return string
+     */
     private function routerGerer(string $numero, string $etape, string $texte): string
     {
         return match ($etape) {
@@ -1278,6 +1707,14 @@ class BotService
         };
     }
 
+    /**
+     * Traite la saisie du numéro Mobile Money pour le flow Gérer.
+     * Envoie un OTP et passe à l'étape 'gerer.otp'.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Numéro Mobile Money saisi
+     * @return string
+     */
     private function handleGererNumero(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
@@ -1305,6 +1742,15 @@ class BotService
         TXT;
     }
 
+    /**
+     * Vérifie le code OTP saisi pour le flow Gérer.
+     * Sur succès : affiche la liste des cagnottes gérées.
+     * Si l'utilisateur est inconnu (nouveau) : demande nom + prénom.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Code OTP à 6 chiffres
+     * @return string
+     */
     private function handleGererOtp(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -1318,7 +1764,7 @@ class BotService
             return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
         }
 
-        // OTP validé — continuer le flow normal
+        // OTP validé — poursuivre avec la liste des cagnottes
         $numeroSaisi = $data['numero_payeur'] ?? '';
         $projectId   = $data['project_id'] ?? $this->tondoProjectId();
         $user        = $this->utilisateurParNumero($numeroSaisi, $projectId);
@@ -1346,6 +1792,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte nom + prénom pour un nouveau gérant (inconnu à l'OTP).
+     * Passe à la certification de majorité.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Nom et prénom (deux lignes)
+     * @return string
+     */
     private function handleGererNomPrenom(string $numero, string $texte): string
     {
         $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
@@ -1363,6 +1817,13 @@ class BotService
         return $this->messageCertification();
     }
 
+    /**
+     * Certification de majorité dans le flow Gérer (même logique que dans Créer).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1" pour certifier
+     * @return string
+     */
     private function handleGererCertification(string $numero, string $texte): string
     {
         if ($texte !== '1') {
@@ -1385,6 +1846,11 @@ class BotService
         ]));
     }
 
+    /**
+     * Retourne le message de certification de majorité (partagé creer + gerer).
+     *
+     * @return string
+     */
     private function messageCertification(): string
     {
         return <<<TXT
@@ -1398,6 +1864,17 @@ class BotService
         TXT;
     }
 
+    /**
+     * Affiche la liste numérotée des cagnottes/tontines gérées par l'utilisateur.
+     *
+     * Stocke le tableau des références dans la session (clé 'refs') pour permettre
+     * une sélection soit par numéro de position (1, 2…) soit par référence directe.
+     *
+     * @param  string    $numero  Numéro E.164
+     * @param  TondoUser $user    Utilisateur authentifié (gérant)
+     * @param  array     $data    Données de session courantes
+     * @return string
+     */
     private function afficherListeCagnottes(string $numero, TondoUser $user, array $data): string
     {
         $cagnottes = $this->gererCagnotteSvc->cagnottesGerees($user);
@@ -1429,6 +1906,19 @@ class BotService
         TXT;
     }
 
+    /**
+     * Traite la sélection d'une cagnotte depuis la liste.
+     *
+     * Accepte deux formes de saisie :
+     *   - Position dans la liste (ex : "2" pour la 2e cagnotte)
+     *   - Référence directe (ex : "315167")
+     * La référence directe est prioritaire sur la position.
+     * Redirige ensuite vers le menu cagnotte ou tontine selon le type.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Saisie utilisateur (position ou référence)
+     * @return string
+     */
     private function handleGererListe(string $numero, string $texte): string
     {
         $data  = $this->session->data($numero);
@@ -1437,7 +1927,7 @@ class BotService
         $input = trim($texte);
         $choix = (int) $input;
 
-        // Numéro de cagnotte saisi directement → priorité sur le choix positionnel
+        // Référence saisie directement → priorité sur la sélection positionnelle
         if (in_array($input, $refs, true)) {
             $ref = $input;
         } elseif ($choix >= 1 && $choix <= $n) {
@@ -1480,6 +1970,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Menu principal d'une cagnotte sélectionnée (historique, reversement, fermeture).
+     * Options : 1=historique, 2=reversement, 3=fermer, 4=retour liste.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Choix (1-4)
+     * @return string
+     */
     private function handleGererCagnotte(string $numero, string $texte): string
     {
         $data     = $this->session->data($numero);
@@ -1618,11 +2116,29 @@ class BotService
 
     // ── 4 — Gérer > Tontine ───────────────────────────────────────────────────
 
+    /**
+     * Affiche le menu de gestion d'une tontine selon son état courant.
+     *
+     * Trois états possibles (stockés dans la session sous 'tontine_etat') :
+     *   - 'attente' : tontine incomplète, pas encore pleine
+     *   - 'pleine'  : tous les participants inscrits, prête à démarrer
+     *   - 'demarree': tontine active (date_debut renseignée ou solde > 0)
+     *
+     * Note sur le comptage :
+     *   inscrits = nombre_inscrits + 1 (le +1 = le créateur qui est dans
+     *   tondo_participants mais PAS comptabilisé dans nombre_inscrits).
+     *
+     * @param  string       $numero   Numéro E.164
+     * @param  TondoCagnotte $cagnotte Tontine à afficher
+     * @param  array        $data     Données de session
+     * @return string
+     */
     private function afficherMenuTontine(string $numero, TondoCagnotte $cagnotte, array $data): string
     {
-        // +1 car le créateur est dans tondo_participants mais pas compté dans nombre_inscrits
+        // +1 : le créateur est dans tondo_participants mais pas dans nombre_inscrits
         $inscrits = (int) $cagnotte->nombre_inscrits + 1;
         $max      = (int) $cagnotte->nombre_participants;
+        // Tontine démarrée si date_debut est renseignée OU si des fonds ont déjà été collectés
         $lancee   = ! is_null($cagnotte->date_debut) || (int) $cagnotte->montant_collecte > 0;
 
         $etat = $lancee ? 'demarree' : ($inscrits >= $max ? 'pleine' : 'attente');
@@ -1681,6 +2197,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Dispatch des actions du menu tontine selon son état.
+     * L'état ('attente', 'pleine', 'demarree') est lu depuis la session.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Choix saisi
+     * @return string
+     */
     private function handleGererTontine(string $numero, string $texte): string
     {
         $data     = $this->session->data($numero);
@@ -1721,6 +2245,13 @@ class BotService
         };
     }
 
+    /**
+     * Marque la tontine comme démarrée (date_debut = now()) et réaffiche son menu.
+     *
+     * @param  string       $numero   Numéro E.164
+     * @param  TondoCagnotte $cagnotte Tontine à démarrer
+     * @return string
+     */
     private function executerDemarrerTontine(string $numero, TondoCagnotte $cagnotte): string
     {
         DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
@@ -1739,6 +2270,14 @@ class BotService
         TXT . "\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
     }
 
+    /**
+     * Clôture une tontine (statut → 'cloturee') et retourne la liste des cagnottes.
+     * Utilisée pour les tontines en attente ou pleines (avant démarrage).
+     *
+     * @param  string       $numero   Numéro E.164
+     * @param  TondoCagnotte $cagnotte Tontine à supprimer
+     * @return string
+     */
     private function executerSupprimerTontine(string $numero, TondoCagnotte $cagnotte): string
     {
         DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
@@ -1756,6 +2295,15 @@ class BotService
         TXT . "\n" . $this->retourListeCagnottes($numero, $data);
     }
 
+    /**
+     * Affiche la liste ordonnée des participants et invite à saisir les permutations.
+     * Les IDs des participants sont stockés en session pour validation ultérieure.
+     *
+     * @param  string       $numero   Numéro E.164
+     * @param  TondoCagnotte $cagnotte Tontine concernée
+     * @param  array        $data     Données de session
+     * @return string
+     */
     private function demarrerEditionOrdre(string $numero, TondoCagnotte $cagnotte, array $data): string
     {
         $participants = DB::table('tondo_participants')
@@ -1795,6 +2343,20 @@ class BotService
         TXT;
     }
 
+    /**
+     * Applique les permutations d'ordre de passage fournies par le gérant.
+     *
+     * Format attendu : une paire X-Y par ligne (position actuelle - nouvelle position).
+     * Toutes les N positions doivent être couvertes (bijection complète).
+     * Validation :
+     *   - Format X-Y requis pour chaque ligne.
+     *   - Positions dans la plage [1, N].
+     *   - Chaque source et destination apparaît exactement une fois (pas de doublon).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Paires de permutations (une par ligne, ex : "3-1\n1-3")
+     * @return string
+     */
     private function handleGererTontineOrdre(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -1820,7 +2382,7 @@ class BotService
             return "⚠️ Envoyez exactement *{$n}* paires (une par participant).\n\n#️⃣ _pour revenir en arrière_";
         }
 
-        // Vérifier que chaque position source et destination est unique
+        // Vérifier la bijection : chaque position source et destination doit être unique
         $sources = array_keys($pairs);
         $dests   = array_values($pairs);
         if (count(array_unique($sources)) !== $n || count(array_unique($dests)) !== $n) {
@@ -1841,6 +2403,15 @@ class BotService
         return "✅ *Ordre mis à jour !*\n\n" . $this->afficherMenuTontine($numero, $cagnotte, $data);
     }
 
+    /**
+     * Affiche l'historique des 5 dernières transactions d'une tontine
+     * avec génération du PDF complet.
+     *
+     * @param  string       $numero   Numéro E.164
+     * @param  TondoCagnotte $cagnotte Tontine concernée
+     * @param  array        $data     Données de session
+     * @return string
+     */
     private function demarrerHistoriqueTontine(string $numero, TondoCagnotte $cagnotte, array $data): string
     {
         $paiements = $this->gererCagnotteSvc->historiquePaiements($cagnotte);
@@ -1894,6 +2465,13 @@ class BotService
         TXT;
     }
 
+    /**
+     * Gère les actions depuis l'écran historique d'une tontine (retour menu ou retour principal).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "0" (retour menu tontine) ou "3" (menu principal)
+     * @return string
+     */
     private function handleGererTontineHistorique(string $numero, string $texte): string
     {
         $data     = $this->session->data($numero);
@@ -1915,6 +2493,14 @@ class BotService
         return "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_";
     }
 
+    /**
+     * Retourne à la liste des cagnottes gérées.
+     * Récupère l'utilisateur depuis la session et réaffiche la liste.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  array  $data    Données de session (doit contenir user_id)
+     * @return string
+     */
     private function retourListeCagnottes(string $numero, array $data): string
     {
         $user = TondoUser::find($data['user_id'] ?? null);
@@ -1924,6 +2510,14 @@ class BotService
         return $this->afficherListeCagnottes($numero, $user, $data);
     }
 
+    /**
+     * Gère les actions depuis l'écran historique d'une cagnotte.
+     * "0" → retour menu cagnotte.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "0" pour retourner
+     * @return string
+     */
     private function handleGererHistorique(string $numero, string $texte): string
     {
         $data     = $this->session->data($numero);
@@ -1936,6 +2530,13 @@ class BotService
         return "⚠️ Tapez *0* pour revenir au menu.\n\n#️⃣ _pour revenir en arrière_";
     }
 
+    /**
+     * Traite le choix de destination du reversement (1=mon numéro, 2=autre numéro).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   "1" ou "2"
+     * @return string
+     */
     private function handleGererReversementDest(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -1956,6 +2557,13 @@ class BotService
         return "⚠️ Tapez *1* pour Mon numéro ou *2* pour Autre numéro.\n\n#️⃣ _pour revenir en arrière_";
     }
 
+    /**
+     * Collecte le numéro du bénéficiaire alternatif pour le reversement.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Numéro Mobile Money saisi
+     * @return string
+     */
     private function handleGererReversementNum(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
@@ -1972,6 +2580,12 @@ class BotService
         return $this->demanderMontantReversement($masque);
     }
 
+    /**
+     * Retourne le message demandant le montant à reverser.
+     *
+     * @param  string $masque  Numéro bénéficiaire masqué (pour affichage)
+     * @return string
+     */
     private function demanderMontantReversement(string $masque): string
     {
         return <<<TXT
@@ -1984,6 +2598,14 @@ class BotService
         TXT;
     }
 
+    /**
+     * Collecte le montant du reversement, vérifie qu'il ne dépasse pas le solde,
+     * puis envoie un OTP de confirmation au gérant.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Montant saisi
+     * @return string
+     */
     private function handleGererReversementMontant(string $numero, string $texte): string
     {
         $montant = (int) preg_replace('/\D/', '', $texte);
@@ -2027,6 +2649,15 @@ class BotService
         TXT;
     }
 
+    /**
+     * Valide l'OTP du gérant et exécute le reversement.
+     * En cas d'échec RuntimeException → message d'erreur + retour menu cagnotte.
+     * En cas d'erreur inattendue → log critical + message générique.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Code OTP à 6 chiffres
+     * @return string
+     */
     private function handleGererReversementOtp(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -2040,7 +2671,7 @@ class BotService
             return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
         }
 
-        // OTP valide → exécuter le reversement
+        // OTP valide → appeler GererCagnotteService::initierReversement
         $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
         $gerant   = TondoUser::find($data['user_id'] ?? null);
 
@@ -2080,6 +2711,20 @@ class BotService
 
     // ── 4bis — Gérer > Fermer cotisation ──────────────────────────────────────
 
+    /**
+     * Gère l'écran de confirmation de fermeture d'une cagnotte.
+     *
+     * Deux cas selon le solde :
+     *   - Solde = 0 : confirmation simple (1=fermer, 2=annuler).
+     *   - Solde > 0 : le gérant choisit où verser le solde avant fermeture.
+     *     1=numéro de retrait enregistré → OTP direct
+     *     2=autre numéro → étape gerer.fermer.num
+     *     3=annuler
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Choix saisi
+     * @return string
+     */
     private function handleGererFermerConfirm(string $numero, string $texte): string
     {
         $data     = $this->session->data($numero);
@@ -2106,9 +2751,9 @@ class BotService
             return "⚠️ Tapez *1* pour confirmer ou *2* pour annuler.\n\n#️⃣ _pour revenir en arrière_";
         }
 
-        // Solde > 0
+        // Solde > 0 : choisir la destination avant fermeture
         if ($texte === '1') {
-            // Garder le numéro de retrait enregistré
+            // Utiliser le numéro de retrait enregistré (immutable depuis la création)
             $dest         = $cagnotte->numero_retrait ?? ($data['numero_payeur'] ?? '');
             $numeroGerant = $data['numero_payeur'] ?? '';
             [$otp, $hint] = $this->envoyerOtp($numeroGerant);
@@ -2146,6 +2791,14 @@ class BotService
         return "⚠️ Tapez *1*, *2* ou *3*.\n\n#️⃣ _pour revenir en arrière_";
     }
 
+    /**
+     * Collecte le numéro alternatif de destination lors de la fermeture avec solde.
+     * Envoie un OTP de confirmation au gérant.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Numéro bénéficiaire saisi
+     * @return string
+     */
     private function handleGererFermerNum(string $numero, string $texte): string
     {
         $numeroSaisi = $this->normaliserNumero($texte);
@@ -2184,6 +2837,17 @@ class BotService
         TXT;
     }
 
+    /**
+     * Valide l'OTP de fermeture, exécute le reversement du solde restant,
+     * puis clôture la cagnotte.
+     *
+     * En cas d'échec du reversement : la cagnotte reste ouverte (protection
+     * contre une clôture sans que les fonds aient été envoyés).
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Code OTP à 6 chiffres
+     * @return string
+     */
     private function handleGererFermerOtp(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -2205,6 +2869,7 @@ class BotService
         }
 
         $numeroRetrait = $data['fermer_numero'] ?? '';
+        // Reverser l'intégralité du solde disponible
         $montant       = (int) $cagnotte->montant_collecte;
 
         try {
@@ -2215,13 +2880,14 @@ class BotService
                 montant:    $montant,
             );
         } catch (\RuntimeException $e) {
+            // Reversement échoué → ne pas clôturer, la cagnotte reste ouverte
             return "❌ " . $e->getMessage() . "\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         } catch (\Throwable $e) {
             Log::error('handleGererFermerOtp: erreur reversement', ['err' => $e->getMessage()]);
             return "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
-        // Reversement confirmé → clôturer
+        // Reversement réussi → clôturer la cagnotte
         DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
             'statut'     => 'cloturee',
             'updated_at' => now(),
@@ -2241,6 +2907,14 @@ class BotService
         TXT . "\n" . $this->retourListeCagnottes($numero, $data);
     }
 
+    /**
+     * Retourne au menu principal d'une cagnotte et repositionne la session à 'gerer.cagnotte'.
+     *
+     * @param  string       $numero   Numéro E.164
+     * @param  TondoCagnotte $cagnotte Cagnotte concernée
+     * @param  array        $data     Données de session
+     * @return string
+     */
     private function retourMenuCagnotte(string $numero, TondoCagnotte $cagnotte, array $data): string
     {
         $collecte = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
@@ -2265,13 +2939,24 @@ class BotService
     // ── Deep links TONJI [ref] ────────────────────────────────────────────────
 
     /**
-     * Point d'entrée deep link : détecte le type et l'état de la cagnotte,
-     * puis injecte la session au bon endroit du flow existant.
+     * Traite un deep link WhatsApp ("TONJI XXXXXX").
      *
-     * Règles :
-     *  - Tontine non démarrée (date_debut IS NULL) → rejoindre.numero
-     *  - Tontine démarrée                           → cotiser.numero (montant fixe)
-     *  - Cotisation ouverte                         → deeplink.choix (rejoindre OU cotiser)
+     * Contourne l'état de session existant et injecte directement l'utilisateur
+     * au bon endroit du flow selon l'état de la cagnotte :
+     *
+     *   - Tontine non démarrée (date_debut IS NULL) :
+     *     → session 'rejoindre.numero' (inscription comme nouveau participant)
+     *
+     *   - Tontine démarrée (date_debut renseignée) :
+     *     → session 'cotiser.numero' avec montant fixe pré-rempli
+     *     (le participant doit déjà être inscrit, vérifié dans handleCotiserNumero)
+     *
+     *   - Cagnotte ouverte :
+     *     → session 'cotiser.montant' (l'inscription se fait automatiquement au paiement)
+     *
+     * @param  string $numero  Numéro WhatsApp expéditeur (E.164)
+     * @param  string $ref     Référence extraite du message "TONJI [ref]"
+     * @return string
      */
     private function handleDeepLink(string $numero, string $ref): string
     {
@@ -2282,7 +2967,7 @@ class BotService
             return "❌ Cette tontine ou cagnotte n'est pas disponible.\n\n" . $this->afficherMenu($numero);
         }
 
-        // Tontine non démarrée → rejoindre directement
+        // Cas 1 : tontine non démarrée → flux d'inscription
         if ($cagnotte->type === 'tontine_periodique' && is_null($cagnotte->date_debut)) {
             $this->session->set($numero, 'rejoindre.numero', [
                 'cagnotte_id'  => $cagnotte->id,
@@ -2301,7 +2986,7 @@ class BotService
             TXT;
         }
 
-        // Tontine démarrée → cotiser montant fixe directement
+        // Cas 2 : tontine démarrée → paiement direct au montant fixe
         if ($cagnotte->type === 'tontine_periodique' && ! is_null($cagnotte->date_debut)) {
             $montant = (int) $cagnotte->montant_par_cycle;
             $fmt     = number_format($montant, 0, ',', ' ');
@@ -2326,7 +3011,7 @@ class BotService
             TXT;
         }
 
-        // Cotisation → cotiser directement (rejoindre est automatique au paiement)
+        // Cas 3 : cagnotte ouverte → paiement libre (l'inscription est automatique au paiement)
         $this->session->set($numero, 'cotiser.montant', [
             'reference'      => $cagnotte->reference,
             'cagnotte_id'    => $cagnotte->id,
@@ -2347,6 +3032,12 @@ class BotService
 
     // ── 5 — Aide ──────────────────────────────────────────────────────────────
 
+    /**
+     * Affiche le message d'aide et de support, puis retourne au menu.
+     *
+     * @param  string $numero  Numéro E.164
+     * @return string
+     */
     private function afficherAide(string $numero): string
     {
         return <<<TXT
@@ -2364,14 +3055,23 @@ class BotService
     // ── Utilitaires OTP ──────────────────────────────────────────────────────
 
     /**
-     * En prod : envoie un vrai SMS via Twilio Verify, retourne [null, ''].
-     * En non-prod : génère 123456, pas d'envoi, retourne le code + hint affiché.
+     * Envoie un OTP au numéro indiqué et retourne le code + un hint d'affichage.
      *
-     * @return array{0: string|null, 1: string}  [otp_local|null, hint_message]
+     * En production (TONDO_OTP_BYPASS absent) :
+     *   - Appelle TwilioVerifyService::sendOtp() → SMS réel.
+     *   - Retourne [null, ''] : le code n'est pas stocké localement.
+     *
+     * En développement/test (TONDO_OTP_BYPASS=123456 dans .env) :
+     *   - Aucun envoi SMS.
+     *   - Retourne [bypass_code, hint_affiché_dans_le_message].
+     *   - Permet les tests sans coût Twilio (code fixe universel).
+     *
+     * @param  string $numeroE164  Numéro E.164 destinataire de l'OTP
+     * @return array{0: string|null, 1: string}  [code_local_ou_null, hint_affiché]
      */
     private function envoyerOtp(string $numeroE164): array
     {
-        // Bypass explicite via TONDO_OTP_BYPASS=123456 dans .env (test multi-utilisateurs)
+        // Bypass explicite via TONDO_OTP_BYPASS=123456 dans .env (tests multi-utilisateurs)
         $bypass = config('tondo.otp_bypass');
         if ($bypass) {
             return [$bypass, "\n_(Test : code = *{$bypass}*)_"];
@@ -2390,13 +3090,25 @@ class BotService
     }
 
     /**
-     * Si TONDO_OTP_BYPASS est défini : accepte ce code universel.
-     * Sinon : vérifie via Twilio Verify.
+     * Vérifie un code OTP saisi par l'utilisateur.
+     *
+     * En bypass (développement) :
+     *   - Accepte le code de bypass OU le code local stocké en session (même valeur).
+     *
+     * En production :
+     *   - Délègue à TwilioVerifyService::checkOtp() (vérifie côté Twilio).
+     *   - Retourne false en cas d'exception (ne propage pas l'erreur).
+     *
+     * @param  string      $numeroE164  Numéro E.164 sur lequel l'OTP a été envoyé
+     * @param  string      $codeSaisi   Code entré par l'utilisateur
+     * @param  string|null $otpLocal    Code stocké en session (bypass uniquement)
+     * @return bool
      */
     private function verifierOtp(string $numeroE164, string $codeSaisi, ?string $otpLocal): bool
     {
         $bypass = config('tondo.otp_bypass');
         if ($bypass) {
+            // Accepter le code bypass ou le code stocké localement (identiques en pratique)
             return $codeSaisi === $bypass || $codeSaisi === ($otpLocal ?? $bypass);
         }
 
@@ -2410,11 +3122,26 @@ class BotService
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
 
+    /**
+     * Détermine si le message est un mot-clé de retour au menu.
+     * Insensible à la casse. Déclenche un reset de session dans traiter().
+     *
+     * @param  string $texte  Message reçu (déjà trimé)
+     * @return bool
+     */
     private function estRetourMenu(string $texte): bool
     {
         return in_array(mb_strtolower(trim($texte)), ['#', 'menu', 'retour', 'annuler', 'cancel', 'stop'], true);
     }
 
+    /**
+     * Recherche un utilisateur par son numéro WhatsApp (expéditeur).
+     * Utilise le projet tondo par défaut.
+     * Méthode de convenance — préférer utilisateurParNumero() lorsque le projectId est connu.
+     *
+     * @param  string $numero  Numéro E.164 de l'expéditeur WhatsApp
+     * @return TondoUser|null
+     */
     private function utilisateur(string $numero): ?TondoUser
     {
         $suffixe   = substr(preg_replace('/\D/', '', $numero), -9);
@@ -2425,8 +3152,20 @@ class BotService
             ->first();
     }
 
+    /**
+     * Recherche un utilisateur par numéro E.164 et projet, avec tolérance de préfixe.
+     *
+     * La recherche utilise les 9 derniers chiffres du numéro (suffixe) pour tolérer
+     * les variantes +241XXXXXXXX vs 0XXXXXXXX. Cette approche est possible car
+     * les numéros gabonais ont toujours la même partie locale (sans préfixe).
+     *
+     * @param  string $numeroE164  Numéro normalisé E.164
+     * @param  string $projectId   UUID du projet Tondo
+     * @return TondoUser|null
+     */
     private function utilisateurParNumero(string $numeroE164, string $projectId): ?TondoUser
     {
+        // 9 derniers chiffres = suffixe local, identique quelle que soit la forme du préfixe
         $suffixe = substr(preg_replace('/\D/', '', $numeroE164), -9);
 
         return TondoUser::where('project_id', $projectId)
@@ -2434,54 +3173,84 @@ class BotService
             ->first();
     }
 
+    /**
+     * Normalise une saisie téléphonique en format E.164 (+241XXXXXXXX pour le Gabon).
+     *
+     * Règles de conversion (ordre de priorité) :
+     *   1. Commence par '+' → conserver tel quel (déjà E.164)
+     *   2. Commence par '00' → remplacer par '+' (format international alternatif)
+     *   3. Commence par '0' + 9-11 chiffres → Gabon local (0XXXXXXXX → +241XXXXXXXX)
+     *   4. 8 chiffres sans préfixe → Gabon court (77XXXXXX → +24177XXXXXX)
+     *   5. ≥ 10 chiffres sans '+' → international complet (ex : 24177XXXXXX → +24177XXXXXX)
+     *   6. Sinon → null (numéro invalide)
+     *
+     * @param  string $texte  Saisie brute de l'utilisateur
+     * @return string|null    Numéro E.164 ou null si invalide
+     */
     private function normaliserNumero(string $texte): ?string
     {
         $texte    = trim($texte);
         $chiffres = preg_replace('/\D/', '', $texte);
 
         if (strlen($chiffres) < 6) {
-            return null;
+            return null;   // trop court pour être un numéro valide
         }
 
-        // Numéro international avec + → on garde tel quel
+        // 1. Numéro international avec '+' → conserver
         if (str_starts_with($texte, '+')) {
             return '+' . $chiffres;
         }
 
-        // 00XXXXXXXXXXX → traiter comme international
+        // 2. Format international avec '00' → remplacer par '+'
         if (str_starts_with($chiffres, '00')) {
             return '+' . substr($chiffres, 2);
         }
 
-        // Gabon local commençant par 0 : 0XXXXXXXX (9 à 11 chiffres)
+        // 3. Format Gabon local : 0XXXXXXXX (9 à 11 chiffres avec le zéro)
         if (str_starts_with($chiffres, '0') && strlen($chiffres) >= 9 && strlen($chiffres) <= 11) {
-            return '+241' . substr($chiffres, 1);
+            return '+241' . substr($chiffres, 1);   // retire le '0', ajoute indicatif Gabon
         }
 
-        // Gabon sans 0 : 77XXXXXX (8 chiffres)
+        // 4. Numéro gabonais sans préfixe : 77XXXXXX (8 chiffres)
         if (strlen($chiffres) === 8) {
             return '+241' . $chiffres;
         }
 
-        // Numéro complet sans + (ex: 24177XXXXXX ou 221XXXXXXXXX)
+        // 5. Numéro international complet sans '+' (ex : 24177XXXXXX ou 221XXXXXXXXX)
         if (strlen($chiffres) >= 10) {
             return '+' . $chiffres;
         }
 
-        return null;
+        return null;   // format non reconnu
     }
 
+    /**
+     * Retourne l'UUID du projet Tondo, mis en cache statique pour éviter
+     * une requête DB répétée à chaque message reçu.
+     *
+     * @return string  UUID du projet (chaîne vide si introuvable)
+     */
     private function tondoProjectId(): string
     {
         static $id = null;
         if ($id === null) {
+            // Lecture unique depuis la DB, puis mise en cache statique pour la durée de la requête
             $id = DB::table('projects')->where('slug', 'tondo')->value('id') ?? '';
         }
         return $id;
     }
 
+    /**
+     * Inscrit un participant à une cagnotte/tontine de façon idempotente.
+     * Si le participant est déjà inscrit, ne fait rien (pas d'erreur, pas de doublon).
+     * Incrémente nombre_inscrits seulement si l'inscription est nouvelle.
+     *
+     * @param  TondoUser    $user     Participant à inscrire
+     * @param  TondoCagnotte $cagnotte Cagnotte/tontine cible
+     */
     private function inscrireParticipant(TondoUser $user, TondoCagnotte $cagnotte): void
     {
+        // Vérification d'idempotence : ne rien faire si déjà inscrit
         $deja = DB::table('tondo_participants')
             ->where('cagnotte_id', $cagnotte->id)
             ->where('user_id', $user->id)
@@ -2509,10 +3278,24 @@ class BotService
             ->increment('nombre_inscrits');
     }
 
+    /**
+     * Masque les chiffres centraux d'un numéro pour l'affichage (protection vie privée).
+     *
+     * Conserve le préfixe et les 2 derniers chiffres, masque le reste avec des '*'.
+     * Exemple : +24177123456 → +241771****56
+     *
+     * Identique à CotisationService::maskPhone() et CreerCagnotteService::maskPhone() —
+     * dupliqué pour éviter une dépendance circulaire entre services WhatsApp.
+     *
+     * @param  string $phone  Numéro E.164 ou local
+     * @return string         Numéro masqué
+     */
     private function maskPhoneNum(string $phone): string
     {
+        // Conserver uniquement les chiffres et le '+'
         $clean = preg_replace('/[^\d+]/', '', $phone);
         if (strlen($clean) < 6) return $clean;
+        // Préfixe = tout sauf les 6 derniers caractères (4 masqués + 2 visibles)
         $prefix = substr($clean, 0, strlen($clean) - 6);
         return $prefix . str_repeat('*', strlen($clean) - strlen($prefix) - 2) . substr($clean, -2);
     }

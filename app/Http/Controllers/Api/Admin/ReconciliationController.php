@@ -19,6 +19,25 @@ use Illuminate\Support\Facades\DB;
  */
 class ReconciliationController extends Controller
 {
+    /**
+     * GET /api/admin/cagnottes/{reference}/reconcile
+     *
+     * Réconciliation financière d'une cagnotte spécifique.
+     * Compare `montant_collecte` (colonne dénormalisée) avec le calcul
+     * depuis les tables sources : SUM(payin succes) - SUM(payout succes).
+     *
+     * Un écart non nul signale :
+     *  - un bug dans la logique de crédit/débit
+     *  - une manipulation directe de la base de données
+     *  - une transaction restée en statut 'initie' trop longtemps
+     *
+     * @param string $reference Référence numérique à 6 chiffres de la cagnotte
+     * @return JsonResponse {
+     *   reference, titre, solde_actuel, solde_attendu, ecart, is_ok,
+     *   total_payin_succes, total_payout_succes,
+     *   payouts_initie_anciens, payins_initie_anciens
+     * }
+     */
     public function show(Request $request, string $reference): JsonResponse
     {
         $cagnotte = TondoCagnotte::where('reference', $reference)->first();
@@ -27,13 +46,13 @@ class ReconciliationController extends Controller
             return response()->json(['message' => 'Cagnotte introuvable.'], 404);
         }
 
-        // Total collecté depuis les payins confirmés.
+        // Total collecté depuis les payins confirmés (cotisations reçues).
         $totalPayin = (int) DB::table('tondo_payin')
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->sum('montant');
 
-        // Total décaissé depuis les payouts confirmés.
+        // Total décaissé depuis les payouts confirmés (reversements effectués).
         $totalPayout = (int) DB::table('tondo_payout')
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
@@ -48,13 +67,15 @@ class ReconciliationController extends Controller
             ->where('date_creation', '<', now()->subMinutes(15))
             ->get(['id', 'trans_id', 'montant', 'numero_tel', 'date_creation']);
 
-        // Payins initiés depuis plus de 10 minutes (polling timed-out côté mobile).
+        // Payins initiés depuis plus de 10 minutes — le mobile a probablement
+        // arrêté de poller. À investiguer manuellement si le montant est élevé.
         $payinsInitieAnciens = DB::table('tondo_payin')
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'initie')
             ->where('date_creation', '<', now()->subMinutes(10))
             ->get(['id', 'trans_id', 'montant', 'numero_tel', 'date_creation']);
 
+        // Calcul de l'écart : positif = excédent, négatif = manque.
         $soldeAttendu = $totalPayin - $totalPayout;
         $soldeActuel  = (int) $cagnotte->montant_collecte;
         $ecart        = $soldeActuel - $soldeAttendu;
@@ -77,11 +98,18 @@ class ReconciliationController extends Controller
     /**
      * GET /api/admin/reconcile
      *
-     * Réconciliation globale : liste toutes les cagnottes avec un écart non nul.
-     * Utile pour un audit périodique ou en cas d'incident.
+     * Réconciliation globale : liste toutes les cagnottes présentant un écart
+     * entre `montant_collecte` et les transactions sources.
+     *
+     * Utile pour un audit périodique ou pour investiguer un incident de paiement.
+     * Charge toutes les cagnottes en mémoire — à optimiser en SQL brut si le
+     * volume dépasse quelques milliers.
+     *
+     * @return JsonResponse { anomalies_count: int, anomalies: array }
      */
     public function index(): JsonResponse
     {
+        // Charge uniquement les colonnes nécessaires pour limiter la mémoire.
         $cagnottes = TondoCagnotte::all(['id', 'reference', 'titre', 'montant_collecte']);
 
         $anomalies = [];
@@ -100,6 +128,7 @@ class ReconciliationController extends Controller
             $soldeAttendu = $totalPayin - $totalPayout;
             $ecart        = (int) $cagnotte->montant_collecte - $soldeAttendu;
 
+            // On n'inclut que les cagnottes avec un écart détecté.
             if ($ecart !== 0) {
                 $anomalies[] = [
                     'reference'     => $cagnotte->reference,

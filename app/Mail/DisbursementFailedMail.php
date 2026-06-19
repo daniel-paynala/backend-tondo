@@ -19,6 +19,15 @@ class DisbursementFailedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
+    /**
+     * @param  string $payoutId           UUID de la ligne tondo_payout créée en Phase 1.
+     * @param  string $transId            Identifiant interne Tondo de la transaction.
+     * @param  string $cagnotteReference  Référence numérique courte de la cagnotte.
+     * @param  int    $montant            Montant du virement tenté (FCFA).
+     * @param  string $numeroBeneficiaire Numéro E.164 du bénéficiaire du virement.
+     * @param  string $idempotencyKey     Clé d'idempotence envoyée à Paynala (pour retry manuel).
+     * @param  string $errorMessage       Message d'erreur retourné par l'API Paynala.
+     */
     public function __construct(
         public readonly string $payoutId,
         public readonly string $transId,
@@ -29,6 +38,11 @@ class DisbursementFailedMail extends Mailable
         public readonly string $errorMessage,
     ) {}
 
+    /**
+     * Définit l'objet et les métadonnées de l'email.
+     *
+     * Le préfixe [TONDO ALERTE] facilite le filtrage dans la boîte admin.
+     */
     public function envelope(): Envelope
     {
         return new Envelope(
@@ -36,11 +50,22 @@ class DisbursementFailedMail extends Mailable
         );
     }
 
+    /**
+     * Définit le template de l'email.
+     *
+     * Le template texte brut `mail.disbursement-failed` affiche tous les champs
+     * publics de cette classe via les variables disponibles dans la vue.
+     */
     public function content(): Content
     {
         return new Content(text: 'mail.disbursement-failed');
     }
 
+    /**
+     * Pas de pièces jointes pour cet email d'alerte.
+     *
+     * @return array<int, \Illuminate\Mail\Mailables\Attachment>
+     */
     public function attachments(): array
     {
         return [];

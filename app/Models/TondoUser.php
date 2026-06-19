@@ -45,11 +45,23 @@ class TondoUser extends Authenticatable
         'date_naissance' => 'date',
     ];
 
+    /**
+     * Retourne toutes les cagnottes/tontines créées par cet utilisateur.
+     *
+     * Un utilisateur peut être à la fois gérant de plusieurs cagnottes
+     * et participant dans d'autres (via TondoParticipant).
+     */
     public function cagnottes(): HasMany
     {
         return $this->hasMany(TondoCagnotte::class, 'user_id');
     }
 
+    /**
+     * Retourne le projet auquel appartient cet utilisateur (multi-tenant).
+     *
+     * Pour Tondo, project.slug = 'tondo'. La FK `project_id` assure
+     * l'isolation des données entre projets sur la même infra Supabase.
+     */
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');

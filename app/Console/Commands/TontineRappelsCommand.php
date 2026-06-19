@@ -27,16 +27,28 @@ class TontineRappelsCommand extends Command
     protected $signature   = 'tontines:rappels {--dry-run : Affiche les rappels sans les envoyer}';
     protected $description = 'Envoie les rappels de cotisation aux participants en retard ou proches de l\'échéance.';
 
-    /** Jours à surveiller : négatif = retard, 0 = aujourd'hui, positif = à venir. */
+    /**
+     * Jours à surveiller (en jours relatifs à la date de retrait).
+     * Négatif = retard (retrait déjà passé), 0 = aujourd'hui, positif = à venir.
+     */
     private const JOURS = [-1, 0, 2, 5];
 
+    /**
+     * Point d'entrée de la commande.
+     *
+     * @param  TontineService  $tontineService Calcule la prochaine date de retrait.
+     * @param  OneSignalService $notif          Envoie les notifications push.
+     * @return int Code de retour (self::SUCCESS ou self::FAILURE).
+     */
     public function handle(TontineService $tontineService, OneSignalService $notif): int
     {
         $isDryRun = (bool) $this->option('dry-run');
+        // Heure locale Gabon pour éviter les décalages UTC.
         $today    = now()->timezone('Africa/Libreville')->startOfDay();
 
         $this->info("[{$today->toDateString()}] Rappels de cotisation tontines" . ($isDryRun ? ' (dry-run)' : '') . ' …');
 
+        // Seules les tontines périodiques actives avec une périodicité définie sont traitées.
         $tontines = TondoCagnotte::where('type', 'tontine_periodique')
             ->where('statut', 'en_cours')
             ->whereNotNull('periodicite')
@@ -47,6 +59,7 @@ class TontineRappelsCommand extends Command
         $envoyes = 0;
 
         foreach ($tontines as $cagnotte) {
+            // Nombre de cycles déjà réglés = nombre de payouts 'succes' pour cette tontine.
             $cyclesCompletes = (int) DB::table('tondo_payout')
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
@@ -54,6 +67,7 @@ class TontineRappelsCommand extends Command
 
             $prochaineDateStr = $tontineService->prochaineDate($cagnotte, $cyclesCompletes);
             if (! $prochaineDateStr) {
+                // Rotation terminée ou date indéterminable — ignorer.
                 continue;
             }
 
@@ -62,18 +76,20 @@ class TontineRappelsCommand extends Command
                 ->createFromFormat('Y-m-d', $prochaineDateStr)
                 ->startOfDay();
 
+            // Différence signée : négatif = retrait déjà passé, positif = dans N jours.
             $joursRestants = (int) $today->diffInDays($prochaineDate, false);
 
+            // On n'envoie de rappel que pour les jalons définis dans JOURS.
             if (! in_array($joursRestants, self::JOURS, true)) {
                 continue;
             }
 
-            // Participants qui n'ont pas encore cotisé ce cycle.
+            // Participants avec compte Tondo actif qui n'ont pas encore cotisé ce cycle.
             $nonPayes = DB::table('tondo_participants')
                 ->join('users', 'tondo_participants.user_id', '=', 'users.id')
                 ->where('tondo_participants.cagnotte_id', $cagnotte->id)
                 ->whereIn('tondo_participants.statut_paiement', ['en_attente', 'en_retard'])
-                ->whereNotNull('tondo_participants.user_id')
+                ->whereNotNull('tondo_participants.user_id') // Exclure les comptes light (pas de push).
                 ->pluck('users.id')
                 ->filter()
                 ->values()
@@ -121,6 +137,14 @@ class TontineRappelsCommand extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * Retourne le titre et le corps de la notification selon le délai restant.
+     *
+     * @param  string $titreCagnotte Nom de la tontine affiché dans le message.
+     * @param  int    $joursRestants Jours relatifs à la date de retrait (négatif = retard).
+     * @param  string $dateStr       Date ISO 'Y-m-d' du prochain retrait.
+     * @return array{string, string} [titre, corps] de la notification.
+     */
     private function messageRappel(string $titreCagnotte, int $joursRestants, string $dateStr): array
     {
         return match (true) {
@@ -137,12 +161,19 @@ class TontineRappelsCommand extends Command
                 "Le retrait de « {$titreCagnotte} » est dans 2 jours (le {$this->formatDate($dateStr)}). Pensez à cotiser avant la date.",
             ],
             default => [
+                // Cas par défaut = J-5.
                 'Rappel — 5 jours pour cotiser',
                 "Le prochain retrait de « {$titreCagnotte} » aura lieu le {$this->formatDate($dateStr)}. Anticipez votre cotisation.",
             ],
         };
     }
 
+    /**
+     * Formate une date ISO 'Y-m-d' en chaîne lisible francophone (ex : "3 fév 2026").
+     *
+     * @param  string $iso Date au format 'Y-m-d'.
+     * @return string      Date formatée en français court.
+     */
     private function formatDate(string $iso): string
     {
         $mois = ['jan', 'fév', 'mar', 'avr', 'mai', 'jun', 'jul', 'aoû', 'sep', 'oct', 'nov', 'déc'];

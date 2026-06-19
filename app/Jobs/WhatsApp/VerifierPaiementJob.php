@@ -27,12 +27,25 @@ class VerifierPaiementJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    /** Délai entre deux vérifications (secondes). */
     private const INTERVALLE_SECONDES = 10;
-    private const MAX_TENTATIVES      = 18;  // 18 × 10s = 3 min
 
+    /** Nombre maximum de tentatives avant timeout (18 × 10s = 3 minutes). */
+    private const MAX_TENTATIVES      = 18;
+
+    /**
+     * @param  string $transId     Identifiant de transaction Airtel à vérifier.
+     * @param  string $numeroWa    Numéro WhatsApp E.164 de l'utilisateur.
+     * @param  string $projectId   UUID du projet (isolation multi-tenant).
+     * @param  string $cagnotteRef Référence numérique courte de la cagnotte.
+     * @param  int    $montant     Montant cotisé (FCFA), affiché dans la confirmation.
+     * @param  string $prenom      Prénom de l'utilisateur (message de confirmation).
+     * @param  string $userId      UUID de l'utilisateur Tondo.
+     * @param  int    $tentative   Numéro de tentative courant (1 par défaut au premier dispatch).
+     */
     public function __construct(
         private readonly string $transId,
-        private readonly string $numeroWa,     // E.164 du compte WhatsApp de l'utilisateur
+        private readonly string $numeroWa,
         private readonly string $projectId,
         private readonly string $cagnotteRef,
         private readonly int    $montant,
@@ -41,13 +54,26 @@ class VerifierPaiementJob implements ShouldQueue
         private readonly int    $tentative = 1,
     ) {}
 
+    /**
+     * Vérifie le statut du paiement et agit en conséquence.
+     *
+     * – Succès  : envoie la confirmation + dispatche EnvoyerRecuJob avec délai.
+     * – Échec   : envoie un message d'erreur + remet la session à 'menu'.
+     * – Attente : se re-programme après INTERVALLE_SECONDES jusqu'à MAX_TENTATIVES.
+     * – Timeout : réinitialise la session + informe l'utilisateur.
+     *
+     * @param  CotisationService   $cotisationSvc Interroge l'API agrégateur.
+     * @param  SessionService      $sessionSvc    Gère l'état de conversation WhatsApp.
+     * @param  TwilioSenderService $twilio        Envoie les messages sortants.
+     * @param  ReceiptService      $receiptSvc    Génère les reçus PDF (via EnvoyerRecuJob).
+     */
     public function handle(
         CotisationService  $cotisationSvc,
         SessionService     $sessionSvc,
         TwilioSenderService $twilio,
         ReceiptService     $receiptSvc,
     ): void {
-        // Si la session a déjà été réinitialisée (user a tapé OK entre-temps), on abandonne.
+        // Si la session a déjà été réinitialisée (l'utilisateur a navigué entre-temps), abandonner.
         if ($sessionSvc->etape($this->numeroWa) !== 'cotiser.attente') {
             Log::info('VerifierPaiementJob: session déjà réinitialisée, abandon', [
                 'trans_id' => $this->transId,
@@ -73,14 +99,14 @@ class VerifierPaiementJob implements ShouldQueue
             return;
         }
 
-        // Toujours en attente
+        // Toujours en attente — vérifier si on a atteint la limite.
         if ($this->tentative >= self::MAX_TENTATIVES) {
             $sessionSvc->reset($this->numeroWa);
             $this->envoyerTimeout($twilio);
             return;
         }
 
-        // Re-programmer dans 30 secondes
+        // Re-programmer le job après INTERVALLE_SECONDES avec le compteur incrémenté.
         self::dispatch(
             transId:     $this->transId,
             numeroWa:    $this->numeroWa,
@@ -95,6 +121,16 @@ class VerifierPaiementJob implements ShouldQueue
 
     // ── Notifications sortantes ───────────────────────────────────────────────
 
+    /**
+     * Envoie le message de confirmation de paiement puis dispatche le reçu PDF.
+     *
+     * La confirmation est envoyée immédiatement. Le PDF est envoyé dans un job
+     * séparé avec 4 secondes de délai pour ne pas bloquer le message principal.
+     *
+     * @param  TwilioSenderService $twilio     Service d'envoi WhatsApp.
+     * @param  ReceiptService      $receiptSvc Service de génération PDF (via job).
+     * @return bool                            True si Twilio a accepté le message.
+     */
     private function envoyerSucces(TwilioSenderService $twilio, ReceiptService $receiptSvc): bool
     {
         $cagnotte   = TondoCagnotte::where('reference', $this->cagnotteRef)->first();
@@ -102,7 +138,7 @@ class VerifierPaiementJob implements ShouldQueue
         $titre      = $cagnotte?->titre ?? '—';
         $ref        = $cagnotte ? '#' . $cagnotte->reference : '';
 
-        // 1. Confirmation immédiate — sans PDF pour ne pas bloquer.
+        // 1. Confirmation immédiate — sans PDF pour ne pas bloquer la réponse.
         $texte = <<<TXT
         ✅ *Paiement confirmé !*
 
@@ -138,6 +174,12 @@ class VerifierPaiementJob implements ShouldQueue
         return true;
     }
 
+    /**
+     * Envoie un message d'erreur quand le paiement est refusé ou échoue côté opérateur.
+     *
+     * @param  TwilioSenderService $twilio Service d'envoi WhatsApp.
+     * @return bool                        True si Twilio a accepté le message.
+     */
     private function envoyerEchec(TwilioSenderService $twilio): bool
     {
         return $twilio->envoyer($this->numeroWa, <<<TXT
@@ -158,6 +200,13 @@ class VerifierPaiementJob implements ShouldQueue
         TXT);
     }
 
+    /**
+     * Informe l'utilisateur que le délai de confirmation de 3 minutes est dépassé.
+     *
+     * Appelle reset() sur la session avant de dispatcher ce message (dans handle()).
+     *
+     * @param  TwilioSenderService $twilio Service d'envoi WhatsApp.
+     */
     private function envoyerTimeout(TwilioSenderService $twilio): void
     {
         $twilio->envoyer($this->numeroWa, <<<TXT

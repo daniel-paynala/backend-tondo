@@ -28,39 +28,46 @@ class OperateurDetectorService
      */
     public function detect(string $projectId, string $phoneE164): ?array
     {
-        // Retire le "+" initial pour comparer.
+        // Retire le "+" initial pour comparer digit à digit (ex : "+241…" → "241…").
         $phone = ltrim($phoneE164, '+');
 
+        // On charge uniquement les configs qui ont à la fois un indicatif et des préfixes définis.
         $configs = TondoProjectConfig::where('project_id', $projectId)
             ->whereNotNull('indicatif')
             ->whereNotNull('prefixes')
             ->get();
 
         foreach ($configs as $config) {
+            // Normalise l'indicatif stocké en DB (peut contenir un "+" : "+241" → "241").
             $indicatif = ltrim((string) $config->indicatif, '+');
 
+            // Si le numéro ne commence pas par cet indicatif, passer à la config suivante.
             if (! str_starts_with($phone, $indicatif)) {
                 continue;
             }
 
-            // Partie locale sans le zéro initial.
+            // Partie locale sans le zéro initial (ex : "241" → "77123456").
             $localSansZero = substr($phone, strlen($indicatif));
-            // Normalise : ajoute le zéro initial pour correspondre au format "077".
+            // Normalise : ajoute le zéro initial pour correspondre au format "077123456"
+            // utilisé dans la table des préfixes Airtel Gabon.
             $localAvecZero = '0' . $localSansZero;
 
+            // prefixes est stocké en JSON en DB ; on s'assure d'avoir un tableau.
             $prefixes = is_array($config->prefixes) ? $config->prefixes : [];
             foreach ($prefixes as $prefix) {
                 $prefix = (string) $prefix;
+                // La partie locale avec zéro commence-t-elle par ce préfixe ?
                 if (str_starts_with($localAvecZero, $prefix)) {
                     return [
-                        'operateur' => $config->operateur,
-                        'pays'      => $config->pays,
-                        'indicatif' => $indicatif,
+                        'operateur' => $config->operateur, // Ex : 'airtel'.
+                        'pays'      => $config->pays,      // Ex : 'GA'.
+                        'indicatif' => $indicatif,         // Ex : '241'.
                     ];
                 }
             }
         }
 
+        // Aucune config ne correspond à ce numéro.
         return null;
     }
 }

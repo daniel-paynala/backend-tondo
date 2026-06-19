@@ -19,6 +19,12 @@ use Illuminate\Http\JsonResponse;
  */
 class StubController extends Controller
 {
+    /**
+     * Retourne une réponse 501 Not Implemented pour un endpoint non encore codé.
+     *
+     * @param string $what Libellé lisible de l'endpoint (ex : 'profil', 'cotisations')
+     * @return JsonResponse { status: 'not_implemented', message: string } (501)
+     */
     public function notImplemented(string $what = 'endpoint'): JsonResponse
     {
         return response()->json([

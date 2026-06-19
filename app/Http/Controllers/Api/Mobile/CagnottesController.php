@@ -1095,15 +1095,26 @@ class CagnottesController extends Controller
         ]);
     }
 
+    /**
+     * PATCH /api/mobile/cagnottes/{reference}/reversement-auto
+     *
+     * Active ou désactive le reversement automatique sur une cotisation ouverte.
+     * Body : { reversement_auto: boolean }
+     *
+     * Réservé au gérant. Uniquement applicable aux cagnottes ouvertes
+     * en statut `active` ou `en_cours`.
+     *
+     * @return JsonResponse { cagnotte: array }
+     */
     public function patchReversementAuto(Request $request, string $reference): JsonResponse
     {
         $user = $request->user();
 
         $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
             ->where('reference', $reference)
-            ->where('type', 'cagnotte_ouverte')
-            ->where('user_id', $user->id)
-            ->whereIn('statut', ['active', 'en_cours'])
+            ->where('type', 'cagnotte_ouverte')       // tontines périodiques exclues
+            ->where('user_id', $user->id)              // gérant uniquement
+            ->whereIn('statut', ['active', 'en_cours'])// cagnottes clôturées exclues
             ->first();
 
         if (! $cagnotte) {
@@ -1120,6 +1131,13 @@ class CagnottesController extends Controller
         return response()->json(['cagnotte' => $this->serialize($cagnotte)]);
     }
 
+    /**
+     * Sérialise un modèle TondoCagnotte en tableau JSON exposable au client.
+     * Normalise les types (int, bool, ISO8601) pour garantir la cohérence
+     * entre les différentes réponses API qui retournent une cagnotte.
+     *
+     * @return array Représentation JSON de la cagnotte
+     */
     private function serialize(TondoCagnotte $c): array
     {
         return [

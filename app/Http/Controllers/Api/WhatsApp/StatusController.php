@@ -27,23 +27,38 @@ class StatusController extends Controller
     /**
      * POST /api/whatsapp/status
      *
-     * Reçoit les mises à jour de statut Twilio et les persiste dans
-     * tondo_whatsapp_logs. Twilio attend un 2xx — on renvoie 204 (pas de corps).
+     * Reçoit les mises à jour de statut de livraison des messages sortants
+     * envoyés par Tondo via Twilio WhatsApp. Twilio appelle cet endpoint
+     * en POST pour chaque changement d'état d'un message.
+     *
+     * Paramètres Twilio (form-encoded) :
+     *  - MessageSid    : identifiant unique du message Twilio
+     *  - MessageStatus : sent | delivered | read | failed | undelivered
+     *  - To            : destinataire (whatsapp:+241XXXXXXXXX)
+     *  - From          : expéditeur (numéro WhatsApp Tondo)
+     *  - ErrorCode     : code d'erreur Twilio (seulement si failed/undelivered)
+     *  - ErrorMessage  : description de l'erreur
+     *
+     * Twilio attend impérativement un 2xx — on retourne 204 (aucun corps).
+     * En cas de signature invalide, on retourne 200 vide pour éviter les retries.
+     *
+     * @return Response 204 No Content (ou 200 vide si signature invalide)
      */
     public function recevoir(Request $request): Response
     {
-        // Vérification signature (même algo que WebhookController)
+        // Validation de la signature — même algorithme que WebhookController.
         if (! $this->signatureValide($request)) {
             Log::warning('WhatsApp status callback : signature invalide', [
                 'ip'  => $request->ip(),
                 'sig' => $request->header('X-Twilio-Signature'),
             ]);
-            // 200 vide pour éviter les retries Twilio
+            // 200 vide pour éviter les retries Twilio sans révéler d'info.
             return response('', 200);
         }
 
         $messageSid = $request->input('MessageSid');
         $statut     = $request->input('MessageStatus');
+        // Suppression du préfixe "whatsapp:" sur les deux numéros.
         $to         = str_replace('whatsapp:', '', $request->input('To', ''));
         $from       = str_replace('whatsapp:', '', $request->input('From', ''));
         $errorCode  = $request->input('ErrorCode');
@@ -56,9 +71,11 @@ class StatusController extends Controller
             'error_code' => $errorCode,
         ]);
 
-        // Persister dans tondo_whatsapp_logs si la table existe
+        // Persistance dans tondo_whatsapp_logs (upsert sur message_sid).
+        // Le try/catch tolère une table absente (migration non encore jouée).
         try {
             DB::table('tondo_whatsapp_logs')->updateOrInsert(
+                // Clé de déduplication : un seul enregistrement par message.
                 ['message_sid' => $messageSid],
                 [
                     'statut'        => $statut,
@@ -71,21 +88,30 @@ class StatusController extends Controller
                 ],
             );
         } catch (\Throwable $e) {
-            // Table pas encore créée — on ne fait que logger, pas de crash
+            // Table pas encore créée en base — on log en debug, pas d'erreur critique.
             Log::debug('tondo_whatsapp_logs non disponible : ' . $e->getMessage());
         }
 
+        // 204 : Twilio considère la livraison réussie, pas de retry.
         return response('', 204);
     }
 
-    // ── Signature Twilio (identique à WebhookController) ─────────────────────
+    // ── Validation de signature Twilio (identique à WebhookController) ────────
 
+    /**
+     * Valide la signature X-Twilio-Signature.
+     *
+     * Bypass automatique en environnement `local` pour faciliter le dev.
+     * Utilise `services.twilio.auth_token` (clé principale, pas wa_auth_token).
+     */
     private function signatureValide(Request $request): bool
     {
+        // Bypass automatique en local — pas besoin de configurer Twilio pour développer.
         if (app()->environment('local')) {
             return true;
         }
 
+        // Clé principale Twilio (différente de la clé spécifique WhatsApp de WebhookController).
         $authToken = config('services.twilio.auth_token');
         $signature = $request->header('X-Twilio-Signature', '');
 
@@ -95,6 +121,7 @@ class StatusController extends Controller
 
         $url    = $request->url();
         $params = $request->post();
+        // Tri alphabétique des clés — requis par la spec de signature Twilio.
         ksort($params);
         $data = $url . implode('', array_map(
             fn ($k, $v) => $k . $v,
@@ -102,6 +129,7 @@ class StatusController extends Controller
             array_values($params),
         ));
 
+        // HMAC-SHA1 encodé en base64, comparaison en temps constant.
         $calcule = base64_encode(hash_hmac('sha1', $data, $authToken, true));
 
         return hash_equals($calcule, $signature);

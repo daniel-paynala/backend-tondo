@@ -32,16 +32,29 @@ class TraiterRetraitsTontines extends Command
     protected $signature   = 'tontines:traiter-retraits {--dry-run : Simule sans effectuer de transfert ni modifier la base}';
     protected $description = 'Déclenche les retraits périodiques des tontines dont l\'échéance est aujourd\'hui.';
 
+    /**
+     * Point d'entrée de la commande.
+     *
+     * Parcourt toutes les tontines actives et déclenche le retrait si la date
+     * du cycle courant correspond à aujourd'hui et que tous les participants ont cotisé.
+     *
+     * @param  PaynalaPaymentService $paynala       Service de décaissement Mobile Money.
+     * @param  OneSignalService      $notif          Service de notifications push.
+     * @param  TontineService        $tontineService Calcule les dates de cycle.
+     * @return int                                   Code de retour (self::SUCCESS).
+     */
     public function handle(
         PaynalaPaymentService $paynala,
         OneSignalService      $notif,
         TontineService        $tontineService,
     ): int {
         $isDryRun = (bool) $this->option('dry-run');
+        // Heure locale Gabon pour éviter un décalage de date lié à UTC.
         $today    = now()->timezone('Africa/Libreville')->toDateString();
 
         $this->info("[{$today}] Traitement des retraits tontines" . ($isDryRun ? ' (dry-run)' : '') . ' …');
 
+        // Seules les tontines périodiques en cours avec une périodicité configurée.
         $tontines = TondoCagnotte::where('type', 'tontine_periodique')
             ->where('statut', 'en_cours')
             ->whereNotNull('periodicite')
@@ -53,18 +66,19 @@ class TraiterRetraitsTontines extends Command
         $ignores = 0;
 
         foreach ($tontines as $cagnotte) {
+            // Nombre de cycles réglés = nombre de payouts 'succes' enregistrés.
             $cyclesCompletes = (int) DB::table('tondo_payout')
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->count();
 
-            // Rotation déjà terminée — rien à faire.
+            // Rotation déjà terminée — tous les participants ont reçu leur mise.
             if ($cyclesCompletes >= (int) $cagnotte->nombre_inscrits && (int) $cagnotte->nombre_inscrits > 0) {
                 $ignores++;
                 continue;
             }
 
-            // Est-ce la date de retrait aujourd'hui ?
+            // Vérifier si la date de retrait du cycle courant est bien aujourd'hui.
             $prochaineDate = $tontineService->prochaineDate($cagnotte, $cyclesCompletes);
             if ($prochaineDate !== $today) {
                 $ignores++;
@@ -351,6 +365,18 @@ class TraiterRetraitsTontines extends Command
 
     // ── Alertes mail ──────────────────────────────────────────────────────────
 
+    /**
+     * Envoie un mail d'alerte quand le retrait est suspendu faute de cotisations complètes.
+     *
+     * Destinataires : tous les admins actifs + le gérant de la cagnotte (s'il a un email).
+     *
+     * @param  TondoCagnotte $cagnotte       Tontine concernée.
+     * @param  int           $cycle          Numéro du cycle en cours.
+     * @param  int           $nombrePayes    Nombre de participants ayant cotisé.
+     * @param  int           $nombreTotal    Nombre total de participants attendus.
+     * @param  array         $nonPayes       Liste des participants non payés (nom, prénom, numéro masqué).
+     * @param  string        $dateRetrait    Date prévue du retrait (format 'Y-m-d').
+     */
     private function envoyerAlerteIncomplete(
         TondoCagnotte $cagnotte,
         int    $cycle,
@@ -362,7 +388,7 @@ class TraiterRetraitsTontines extends Command
         try {
             $destinataires = $this->destinatairesAdmins();
 
-            // Ajouter le gérant s'il a un email.
+            // Ajouter le gérant s'il a un email — il doit être informé de la situation.
             $gerantEmail = DB::table('users')
                 ->where('id', $cagnotte->user_id)
                 ->value('email');
@@ -371,6 +397,7 @@ class TraiterRetraitsTontines extends Command
             }
 
             if (! empty($destinataires)) {
+                // array_unique évite les doublons si le gérant est aussi admin.
                 Mail::to(array_unique($destinataires))->send(new RetraitImpossibleMail(
                     cagnotteReference: $cagnotte->reference,
                     cagnotteTitre:     $cagnotte->titre,
@@ -386,6 +413,20 @@ class TraiterRetraitsTontines extends Command
         }
     }
 
+    /**
+     * Envoie un mail d'alerte critique quand l'appel Paynala échoue après réservation.
+     *
+     * IMPORTANT : le solde a déjà été décrémenté en Phase 1. Un admin doit vérifier
+     * manuellement si l'argent a bougé côté Paynala avant toute action corrective.
+     *
+     * @param  TondoCagnotte $cagnotte        Tontine concernée.
+     * @param  string        $payoutId        UUID de la ligne tondo_payout créée.
+     * @param  string        $transId         Identifiant interne de la transaction.
+     * @param  int           $montant         Montant du virement tenté (FCFA).
+     * @param  string        $numeroE164      Numéro E.164 du bénéficiaire.
+     * @param  string        $idempotencyKey  Clé d'idempotence envoyée à Paynala.
+     * @param  string        $errorMessage    Message d'erreur retourné par Paynala.
+     */
     private function envoyerAlertePaynalaKo(
         TondoCagnotte $cagnotte,
         string $payoutId,
@@ -413,6 +454,11 @@ class TraiterRetraitsTontines extends Command
         }
     }
 
+    /**
+     * Retourne la liste des emails des admins actifs pour les alertes.
+     *
+     * @return string[] Tableau d'adresses email.
+     */
     private function destinatairesAdmins(): array
     {
         return DB::table('tondo_admins')

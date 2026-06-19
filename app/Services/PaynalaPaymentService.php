@@ -20,8 +20,17 @@ class PaynalaPaymentService
     private string $clientSecret;
     private string $operatorKey;
 
+    /**
+     * Initialise le client depuis les variables d'environnement Laravel.
+     *
+     * - PAYNALA_BASE_URL     : URL de base de l'API (staging par défaut).
+     * - PAYNALA_CLIENT_ID    : identifiant OAuth2.
+     * - PAYNALA_CLIENT_SECRET: secret OAuth2.
+     * - PAYNALA_OPERATOR_KEY : clé opérateur requise pour l'endpoint disburse.
+     */
     public function __construct()
     {
+        // Le trailing slash est retiré pour éviter les doubles slashes dans les URLs construites.
         $this->baseUrl      = rtrim(config('services.paynala.base_url', 'https://testapi.paynala.com/functions/v1'), '/');
         $this->clientId     = (string) config('services.paynala.client_id', '');
         $this->clientSecret = (string) config('services.paynala.client_secret', '');
@@ -58,6 +67,8 @@ class PaynalaPaymentService
                 'last_name'  => $lastName,
             ]);
 
+        // On vérifie à la fois le code HTTP et le flag `success` du corps JSON,
+        // car l'API peut retourner 200 avec success:false sur certaines erreurs métier.
         if (! $response->successful() || ! ($response->json('success') ?? false)) {
             $msg = $response->json('error.message')
                 ?? $response->json('message')
@@ -82,6 +93,7 @@ class PaynalaPaymentService
             ->timeout(4)
             ->get("{$this->baseUrl}/payment_status_v2", ['request_id' => $requestId]);
 
+        // 404 = l'API ne connaît pas ce requestId → le paiement n'a jamais existé.
         if ($response->status() === 404) {
             return ['status' => 'FAILED', 'message' => 'Paiement introuvable.'];
         }
@@ -93,6 +105,7 @@ class PaynalaPaymentService
             throw new \RuntimeException($msg);
         }
 
+        // Si `data` est absent, on suppose que le paiement est toujours en attente.
         return $response->json('data', ['status' => 'PENDING']);
     }
 
@@ -276,6 +289,15 @@ class PaynalaPaymentService
 
     // ─────────────────────────────────────────────────────────────────
 
+    /**
+     * Récupère (ou régénère) un token OAuth2 client_credentials depuis l'API Paynala.
+     *
+     * Le token est mis en cache 160 s. L'API l'expire à 170 s côté serveur,
+     * ce qui laisse une marge de 10 s pour éviter toute utilisation d'un
+     * token expiré en transit.
+     *
+     * @throws \RuntimeException  Si l'API d'authentification échoue.
+     */
     private function getToken(): string
     {
         // Cache 160 s < expiration 170 s → jamais de token expiré en transit.
