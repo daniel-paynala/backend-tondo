@@ -7,6 +7,7 @@ use App\Models\TondoUser;
 use Barryvdh\DomPDF\Facade\Pdf;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -30,18 +31,36 @@ class ReceiptService
         array          $transaction,
         string         $canal = 'App mobile',
     ): string {
+        $transId = $transaction['trans_id'] ?? Str::random(8);
+
+        // Point d'entrée loggé — confirme que generer() est bien appelé.
+        Log::info('ReceiptService::generer — début', [
+            'trans_id'  => $transId,
+            'canal'     => $canal,
+            'user_id'   => $user?->id,
+            'cagnotte'  => $cagnotte?->reference,
+        ]);
+
         // Nom affiché : "NOM Prénom" ; "Client" si aucun compte lié.
-        $nomCotisant = $user
+        $nomCotisant  = $user
             ? mb_strtoupper($user->nom) . ' ' . ucfirst(mb_strtolower($user->prenom))
             : 'Client';
 
         // Le numéro est masqué pour protéger la vie privée (ex : "+241****56").
         $numeroMasque = $user ? $this->maskPhone($user->numero ?? '') : '—';
 
-        // trans_id = référence Airtel Money ; on en génère un temporaire si absent.
-        $transId = $transaction['trans_id'] ?? Str::random(8);
         // URL cible du QR Code — pointe vers la page de vérification publique du reçu.
-        $qrUrl   = url('/recu/' . $transId);
+        $qrUrl = url('/recu/' . $transId);
+
+        Log::info('ReceiptService::generer — étape QR code', ['qr_url' => $qrUrl]);
+
+        // Data URI base64 du QR Code SVG — embarqué directement dans le PDF.
+        $qrDataUri = $this->genererQrDataUri($qrUrl);
+
+        Log::info('ReceiptService::generer — QR généré', [
+            'qr_length' => strlen($qrDataUri),
+            'qr_prefix' => substr($qrDataUri, 0, 30),
+        ]);
 
         // Tableau de données passé à la vue Blade receipts/paiement.blade.php.
         $data = [
@@ -61,9 +80,10 @@ class ReceiptService
             'nom_cotisant'       => $nomCotisant,
             'numero_masque'      => $numeroMasque,
             'qr_url'             => $qrUrl,
-            // Data URI base64 du QR Code SVG — embarqué directement dans le PDF.
-            'qr_data_uri'        => $this->genererQrDataUri($qrUrl),
+            'qr_data_uri'        => $qrDataUri,
         ];
+
+        Log::info('ReceiptService::generer — chargement vue Blade');
 
         // Rendu PDF format A6 portrait (taille ticket) avec DomPDF.
         $pdf = Pdf::loadView('receipts.paiement', $data)
@@ -75,23 +95,42 @@ class ReceiptService
                 'dpi'             => 150,
             ]);
 
+        Log::info('ReceiptService::generer — rendu DomPDF en cours');
+
         $filename = 'recu-tonji-' . $transId . '.pdf';
         // Dossier public/receipts/ — accessible via URL sans auth.
         $dir      = public_path('receipts');
 
+        Log::info('ReceiptService::generer — dossier cible', [
+            'dir'       => $dir,
+            'is_dir'    => is_dir($dir),
+            'is_writable' => is_writable(dirname($dir)),
+        ]);
+
         if (! is_dir($dir)) {
-            mkdir($dir, 0755, true);
+            $mkdirOk = mkdir($dir, 0755, true);
+            Log::info('ReceiptService::generer — mkdir', ['ok' => $mkdirOk, 'dir' => $dir]);
+            if (! $mkdirOk) {
+                throw new \RuntimeException("Impossible de créer le dossier {$dir}");
+            }
         }
 
         // Purge les anciens reçus avant d'écrire le nouveau.
         $this->nettoyerAnciensRecus($dir);
 
-        $written = file_put_contents($dir . '/' . $filename, $pdf->output());
+        // output() déclenche le rendu DomPDF — c'est l'étape la plus risquée.
+        $pdfContent = $pdf->output();
+        Log::info('ReceiptService::generer — output() ok', ['bytes' => strlen((string) $pdfContent)]);
+
+        $written = file_put_contents($dir . '/' . $filename, $pdfContent);
         if ($written === false) {
             throw new \RuntimeException("Impossible d'écrire le PDF dans {$dir}/{$filename}");
         }
 
-        return url('receipts/' . $filename);
+        $url = url('receipts/' . $filename);
+        Log::info('ReceiptService::generer — succès', ['url' => $url, 'bytes_written' => $written]);
+
+        return $url;
     }
 
     /**
@@ -195,9 +234,11 @@ class ReceiptService
     public function genererQrDataUri(string $url): string
     {
         $opts = new QROptions();
-        $opts->outputType  = 'svg';   // Format vectoriel — lisible à toutes les tailles.
-        $opts->scale       = 5;       // Agrandissement du module (pixel du QR).
-        $opts->imageBase64 = true;    // Encapsule le SVG en data URI base64.
+        // v6 : outputInterface remplace outputType (QRMarkupSVG::class = format SVG).
+        $opts->outputInterface = \chillerlan\QRCode\Output\QRMarkupSVG::class;
+        $opts->scale           = 5;    // Taille d'un module (pixel QR) — lisible à toutes les tailles.
+        // v6 : outputBase64 remplace imageBase64 — retourne un data URI "data:image/svg+xml;base64,…".
+        $opts->outputBase64    = true;
 
         return (new QRCode($opts))->render($url);
     }

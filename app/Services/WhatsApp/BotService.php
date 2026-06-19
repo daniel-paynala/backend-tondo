@@ -640,9 +640,13 @@ class BotService
                     'montant_net' => (int) ($data['montant'] ?? 0),
                 ], 'WhatsApp');
             } catch (\Throwable $e) {
+                // Stack trace complète pour faciliter le diagnostic depuis les logs.
                 Log::error('BotService: échec génération reçu (attente→succes)', [
                     'trans_id' => $transId,
                     'err'      => $e->getMessage(),
+                    'class'    => get_class($e),
+                    'file'     => $e->getFile() . ':' . $e->getLine(),
+                    'trace'    => $e->getTraceAsString(),
                 ]);
             }
 

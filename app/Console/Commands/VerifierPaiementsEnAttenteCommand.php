@@ -160,9 +160,13 @@ class VerifierPaiementsEnAttenteCommand extends Command
             ]);
         } catch (\Throwable $e) {
             // Échec non bloquant : on continue sans le reçu.
+            // Stack trace complète pour diagnostiquer l'origine exacte de l'erreur.
             Log::error('tondo:verifier-paiements: échec génération reçu', [
                 'trans_id' => $p->trans_id,
                 'err'      => $e->getMessage(),
+                'class'    => get_class($e),
+                'file'     => $e->getFile() . ':' . $e->getLine(),
+                'trace'    => $e->getTraceAsString(),
             ]);
         }
 
