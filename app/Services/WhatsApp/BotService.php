@@ -2060,7 +2060,8 @@ class BotService
             $cinq    = $paiements->take(5);
             $lignes  = $cinq->map(function ($p) {
                 $brut = trim($p->cotisant ?? '');
-                $nom  = $brut === '' ? 'Anonyme' : $brut;
+                // Nom absent ou générique → afficher le numéro de téléphone du paiement.
+                $nom  = ($brut === '' || $brut === 'Client') ? ($p->numero_tel ?? '—') : $brut;
                 return \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
                     ' · ' . $nom .
                     ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*';
@@ -2437,11 +2438,14 @@ class BotService
         $nbTotal = $paiements->count();
         $total   = number_format((int) $paiements->sum('montant'), 0, ',', ' ');
         $cinq    = $paiements->take(5);
-        $lignes  = $cinq->map(fn ($p) =>
-            \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
-            ' · ' . $p->cotisant .
-            ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*'
-        )->implode("\n");
+        $lignes  = $cinq->map(function ($p) {
+            $brut = trim($p->cotisant ?? '');
+            // Nom absent ou générique → afficher le numéro de téléphone du paiement.
+            $nom  = ($brut === '' || $brut === 'Client') ? ($p->numero_tel ?? '—') : $brut;
+            return \Carbon\Carbon::parse($p->updated_at)->format('d/m') .
+                ' · ' . $nom .
+                ' · *' . number_format((int) $p->montant, 0, ',', ' ') . ' FCFA*';
+        })->implode("\n");
 
         $suite = $nbTotal > 5
             ? "\n_... et " . ($nbTotal - 5) . " transaction(s) supplémentaire(s) — consultez le PDF pour l'historique complet._"
