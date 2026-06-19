@@ -712,7 +712,7 @@ class BotService
 
         Que souhaitez-vous créer ?
 
-        1️⃣  *Cagnotte ouverte* — collecte libre, montant variable
+        1️⃣  *Cagnotte* — collecte libre, montant variable
         2️⃣  *Tontine périodique* — rotation, montant fixe par cycle
 
         _Tapez le numéro de votre choix_ · #️⃣ _pour revenir en arrière_
@@ -749,7 +749,7 @@ class BotService
                 'type' => 'cagnotte_ouverte',
             ]));
             return <<<TXT
-            💰 *Cagnotte ouverte*
+            💰 *Cagnotte*
 
             Quel est le *nom* de votre cagnotte ?
             _(max 120 caractères)_
@@ -1145,7 +1145,7 @@ class BotService
             $dateFin  = $dateFin ? (new \DateTimeImmutable($dateFin))->format('d/m/Y') : 'Pas de limite';
 
             $lignes = <<<TXT
-            📝 *Récapitulatif — Cagnotte ouverte*
+            📝 *Récapitulatif — Cagnotte*
 
             Nom : *{$data['titre']}*
             Montant cible : *{$cible}*
