@@ -35,25 +35,19 @@ body { background: #f0f0f0; font-family: -apple-system, 'Helvetica Neue', Arial,
   box-shadow: 0 2px 16px rgba(0,0,0,0.10);
 }
 
-/* Header */
+/* Header fond vert — logo officiel Tonji */
 .hdr {
-  padding: 18px 20px 14px;
-  border-bottom: 2px solid #0A6847;
+  background: #0A6847;
+  padding: 10px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-.logo { display: flex; align-items: center; gap: 8px; }
-.logo-circle {
-  width: 34px; height: 34px; border-radius: 17px;
-  background: #0A6847;
-  color: #fff; font-size: 16px; font-weight: 900;
-  display: flex; align-items: center; justify-content: center;
-}
-.brand-name { font-size: 24px; font-weight: 900; color: #0A6847; letter-spacing: -0.5px; }
+/* Logo wordmark carré 1024×1024 — fond vert intégré, seamless */
+.logo-img { height: 64px; width: 64px; display: block; }
 .hdr-right { text-align: right; }
-.recu-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111; }
-.recu-sub   { font-size: 10px; color: #888; margin-top: 2px; }
+.recu-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #fff; }
+.recu-sub   { font-size: 10px; color: rgba(255,255,255,0.65); margin-top: 2px; }
 
 /* Badge confirmé */
 .confirmed {
@@ -135,11 +129,9 @@ body { background: #f0f0f0; font-family: -apple-system, 'Helvetica Neue', Arial,
 
   <div class="card">
 
+    {{-- Header fond vert avec logo officiel Tonji --}}
     <div class="hdr">
-      <div class="logo">
-        <div class="logo-circle">T</div>
-        <div class="brand-name">Tonji</div>
-      </div>
+      <img src="/images/tonji_wordmark.png" class="logo-img" alt="Tonji" />
       <div class="hdr-right">
         <div class="recu-label">Reçu de paiement</div>
         <div class="recu-sub">Paynala SAS</div>
@@ -171,7 +163,7 @@ body { background: #f0f0f0; font-family: -apple-system, 'Helvetica Neue', Arial,
     <div class="section">
       <div class="section-title">Cagnotte</div>
       <div class="row"><span class="row-k">Nom</span><span class="row-v">{{ $cagnotte_titre }}</span></div>
-      <div class="row"><span class="row-k">Référence</span><span class="row-v">#{{ $cagnotte_reference }}</span></div>
+      <div class="row"><span class="row-k">Référence</span><span class="row-v">N°{{ $cagnotte_reference }}</span></div>
       <div class="row"><span class="row-k">Type</span><span class="row-v">{{ $type_cagnotte }}</span></div>
     </div>
 

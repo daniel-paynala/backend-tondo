@@ -12,19 +12,20 @@ body {
   background: #fff;
 }
 
-/* ── Filigrane pleine page ────────────────────────── */
-/* 4 bandes fixed à positions différentes — couvre toute la hauteur.
-   Sur PDF multi-pages, position:fixed répète sur chaque page DomPDF. */
+/* ── Filigrane tuilé pleine page ─────────────────────
+   Lignes répétées toutes les ~9%, alternées en décalé.
+   Petite taille + opacité basse = effet estompe/flou. */
 .wm {
   position: fixed;
-  left: 0; right: 0;
-  text-align: center;
-  font-size: 62px;
-  font-weight: 900;
-  color: #0A6847;
-  opacity: 0.05;
-  letter-spacing: 14px;
+  left: -5px; right: -5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a6b4a;
+  opacity: 0.055;
+  letter-spacing: 9px;
   z-index: 0;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .page { position: relative; z-index: 1; }
@@ -202,11 +203,18 @@ table.hist td.montant {
 </head>
 <body>
 
-{{-- Filigrane pleine page — 4 bandes à des hauteurs différentes --}}
-<div class="wm" style="top:2%">TONJI</div>
-<div class="wm" style="top:27%">TONJI</div>
-<div class="wm" style="top:54%">TONJI</div>
-<div class="wm" style="top:80%">TONJI</div>
+{{-- Filigrane tuilé — 11 lignes espacées de ~9%, alternées en décalé --}}
+<div class="wm" style="top:1%">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:10%; padding-left:28px">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:19%">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:28%; padding-left:28px">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:37%">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:46%; padding-left:28px">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:55%">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:64%; padding-left:28px">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:73%">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:82%; padding-left:28px">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
+<div class="wm" style="top:91%">TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI &nbsp; TONJI</div>
 
 <div class="page">
 
