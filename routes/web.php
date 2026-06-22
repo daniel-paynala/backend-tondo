@@ -8,12 +8,18 @@ Route::get('/', function () {
 });
 
 /*
- * Vérification de reçu — public, sans authentification.
+ * Vérification de reçu — ENTIÈREMENT PUBLIC, zéro authentification.
  *
- *  GET /recu/{transId}       → page web avec QR + bouton téléchargement
- *  GET /recu/{transId}/pdf   → régénère le PDF et redirige vers le lien de téléchargement
+ * Ces routes sont ouvertes à tous (lien WhatsApp partagé, QR code scanné
+ * par n'importe qui). withoutMiddleware() exclut explicitement tout
+ * middleware d'auth qui pourrait être ajouté au groupe web plus tard.
+ *
+ *  GET /recu/{transId}       → page web de vérification avec QR + bouton téléchargement
+ *  GET /recu/{transId}/pdf   → régénère le PDF et redirige vers l'URL publique
  */
-Route::prefix('recu')->group(function () {
-    Route::get('/{transId}',      [ReceiptViewController::class, 'show']);
-    Route::get('/{transId}/pdf',  [ReceiptViewController::class, 'pdf']);
-});
+Route::prefix('recu')
+    ->withoutMiddleware(['auth', 'auth:sanctum', 'auth:api', 'auth.basic'])
+    ->group(function () {
+        Route::get('/{transId}',      [ReceiptViewController::class, 'show']);
+        Route::get('/{transId}/pdf',  [ReceiptViewController::class, 'pdf']);
+    });
