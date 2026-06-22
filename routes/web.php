@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ReceiptViewController;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -18,7 +19,10 @@ Route::get('/', function () {
  *  GET /recu/{transId}/pdf   → régénère le PDF et redirige vers l'URL publique
  */
 Route::prefix('recu')
-    ->withoutMiddleware(['auth', 'auth:sanctum', 'auth:api', 'auth.basic'])
+    ->withoutMiddleware([
+        StartSession::class,          // pas de session → pas de table "sessions" requise
+        'auth', 'auth:sanctum', 'auth:api', 'auth.basic',
+    ])
     ->group(function () {
         Route::get('/{transId}',      [ReceiptViewController::class, 'show']);
         Route::get('/{transId}/pdf',  [ReceiptViewController::class, 'pdf']);
