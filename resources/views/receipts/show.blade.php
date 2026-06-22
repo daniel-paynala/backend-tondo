@@ -129,9 +129,13 @@ body { background: #f0f0f0; font-family: -apple-system, 'Helvetica Neue', Arial,
 
   <div class="card">
 
-    {{-- Header fond vert avec logo officiel Tonji --}}
+    {{-- Header fond vert avec logo officiel Tonji (base64 — pas de dépendance Nginx) --}}
     <div class="hdr">
-      <img src="/images/tonji_wordmark.png" class="logo-img" alt="Tonji" />
+      @if(!empty($logo_data_uri))
+        <img src="{{ $logo_data_uri }}" class="logo-img" alt="Tonji" />
+      @else
+        <span style="color:#fff;font-size:22px;font-weight:900;letter-spacing:-0.5px">Tonji</span>
+      @endif
       <div class="hdr-right">
         <div class="recu-label">Reçu de paiement</div>
         <div class="recu-sub">Paynala SAS</div>

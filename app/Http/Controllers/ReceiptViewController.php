@@ -40,7 +40,13 @@ class ReceiptViewController extends Controller
             abort(404, 'Reçu introuvable ou transaction non confirmée.');
         }
 
-        // Passe toutes les données directement à la vue (pas de compact() volontairement).
+        // Logo embarqué en base64 — évite toute dépendance à Nginx pour servir
+        // /images/tonji_wordmark.png (les *.png sont routés vers Next.js par Nginx).
+        $logoPath = resource_path('images/tonji_wordmark.png');
+        $donnees['logo_data_uri'] = file_exists($logoPath)
+            ? 'data:image/png;base64,' . base64_encode(file_get_contents($logoPath))
+            : null;
+
         return view('receipts.show', $donnees);
     }
 
