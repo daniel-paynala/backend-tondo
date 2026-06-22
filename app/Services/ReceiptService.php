@@ -207,6 +207,12 @@ class ReceiptService
             return null;
         }
 
+        // Injecter le logo en base64 — requis par paiement.blade.php.
+        $logoPath = resource_path('images/tonji_wordmark.png');
+        $donnees['logo_data_uri'] = file_exists($logoPath)
+            ? 'data:image/png;base64,' . base64_encode(file_get_contents($logoPath))
+            : null;
+
         $pdf = Pdf::loadView('receipts.paiement', $donnees)
             ->setPaper('A6', 'portrait')
             ->setOptions([
