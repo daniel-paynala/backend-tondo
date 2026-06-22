@@ -12,24 +12,19 @@ body {
   background: #fff;
 }
 
-/* ── Filigrane ────────────────────────────────────── */
-.watermark {
+/* ── Filigrane pleine page ────────────────────────── */
+/* 4 bandes fixed à positions différentes — couvre toute la hauteur.
+   Sur PDF multi-pages, position:fixed répète sur chaque page DomPDF. */
+.wm {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 0;
-  pointer-events: none;
-}
-.watermark-text {
-  font-size: 60px;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: 62px;
   font-weight: 900;
   color: #0A6847;
-  opacity: 0.06;
+  opacity: 0.05;
   letter-spacing: 14px;
-  text-transform: uppercase;
-  white-space: nowrap;
+  z-index: 0;
 }
 
 .page { position: relative; z-index: 1; }
@@ -207,10 +202,11 @@ table.hist td.montant {
 </head>
 <body>
 
-{{-- Filigrane --}}
-<div class="watermark">
-  <div class="watermark-text">TONJI</div>
-</div>
+{{-- Filigrane pleine page — 4 bandes à des hauteurs différentes --}}
+<div class="wm" style="top:2%">TONJI</div>
+<div class="wm" style="top:27%">TONJI</div>
+<div class="wm" style="top:54%">TONJI</div>
+<div class="wm" style="top:80%">TONJI</div>
 
 <div class="page">
 

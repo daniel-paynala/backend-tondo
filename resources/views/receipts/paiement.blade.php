@@ -7,24 +7,26 @@
 
 body {
   font-family: DejaVu Sans, sans-serif;
-  font-size: 10px;
+  font-size: 12px; /* +20% vs 10px d'origine */
   color: #111;
   background: #fff;
 }
 
-/* ── Filigrane ────────────────────────────────────── */
+/* ── Filigrane pleine page ────────────────────────── */
+/* 4 bandes fixed à positions différentes couvrent toute la hauteur.
+   position:fixed répète sur chaque page DomPDF sans transform. */
 .wm {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
+  left: 0; right: 0;
   text-align: center;
-  padding-top: 42%;
-  font-size: 52px;
+  font-size: 62px;
   font-weight: 900;
   color: #0A6847;
   opacity: 0.05;
   letter-spacing: 14px;
   z-index: 0;
 }
+
 .page { position: relative; z-index: 1; }
 
 /* ── Header fond vert ─────────────────────────────── */
@@ -38,14 +40,14 @@ body {
 .logo-img  { height: 72px; width: 72px; display: block; }
 .hdr-right { text-align: right; vertical-align: middle; }
 .recu-label {
-  font-size: 11px;
+  font-size: 13px; /* +20% vs 11px */
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1.5px;
   color: #fff;          /* blanc sur fond vert */
 }
 .recu-sub {
-  font-size: 9px;
+  font-size: 11px; /* +20% vs 9px */
   color: rgba(255,255,255,0.65);  /* blanc atténué */
   margin-top: 3px;
 }
@@ -58,19 +60,19 @@ body {
 }
 .check-circle {
   display: inline-block;
-  width: 20px; height: 20px;
-  border-radius: 10px;
+  width: 22px; height: 22px; /* +20% vs 20px */
+  border-radius: 11px;
   background: #0A6847;
   color: #fff;
-  font-size: 13px;
+  font-size: 15px; /* +20% vs 13px */
   font-weight: 900;
-  line-height: 20px;
+  line-height: 22px;
   text-align: center;
   vertical-align: middle;
   margin-right: 6px;
 }
 .confirmed-text {
-  font-size: 16px;
+  font-size: 19px; /* +20% vs 16px */
   font-weight: 900;
   color: #111;
   vertical-align: middle;
@@ -86,43 +88,36 @@ body {
   text-align: center;
 }
 .amount-lbl {
-  font-size: 8px;
+  font-size: 10px; /* +20% vs 8px */
   text-transform: uppercase;
   letter-spacing: 2px;
   color: #888;
   margin-bottom: 6px;
 }
 .amount-num {
-  font-size: 25px;
+  font-size: 30px; /* +20% vs 25px */
   font-weight: 900;
   color: #111;
   line-height: 1;
 }
 .amount-cur {
-  font-size: 14px;
+  font-size: 17px; /* +20% vs 14px */
   font-weight: 700;
   color: #555;
 }
 .amount-note {
-  font-size: 8px;
+  font-size: 10px; /* +20% vs 8px */
   color: #bbb;
   margin-top: 6px;
   font-style: italic;
 }
-@if($montant_brut !== $montant_net)
-.amount-brut {
-  font-size: 9px;
-  color: #E8A830;
-  margin-top: 3px;
-}
-@endif
 
 /* ── Sections ─────────────────────────────────────── */
 .section {
   padding: 10px 16px 0;
 }
 .section-title {
-  font-size: 9px;
+  font-size: 11px; /* +20% vs 9px */
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1.5px;
@@ -138,7 +133,7 @@ table.rows {
 }
 table.rows td {
   padding: 5px 0;
-  font-size: 10px;
+  font-size: 12px; /* +20% vs 10px */
   border-bottom: 1px solid #f5f5f5;
   vertical-align: top;
 }
@@ -147,7 +142,7 @@ table.rows td.k {
   color: #888;
   width: 38%;
   padding-right: 8px;
-  font-size: 9px;
+  font-size: 11px; /* +20% vs 9px */
 }
 table.rows td.v {
   font-weight: 700;
@@ -157,7 +152,7 @@ table.rows td.v {
   word-break: break-all;
 }
 
-/* ── QR Code ──────────────────────────────────────── */
+/* ── QR Code (+50%) ───────────────────────────────── */
 .qr-box {
   margin: 10px 14px 0;
   background: #f8f8f8;
@@ -166,22 +161,22 @@ table.rows td.v {
   padding: 10px 12px;
 }
 .qr-inner { width: 100%; border-collapse: collapse; }
-.qr-img-cell { width: 60px; vertical-align: middle; padding-right: 10px; }
-.qr-img { width: 56px; height: 56px; }
+.qr-img-cell { width: 92px; vertical-align: middle; padding-right: 10px; } /* 60→92 (+50%) */
+.qr-img { width: 84px; height: 84px; }   /* 56→84 (+50%) */
 .qr-text-cell { vertical-align: middle; }
 .qr-title {
-  font-size: 10px;
+  font-size: 12px; /* +20% vs 10px */
   font-weight: 900;
   color: #111;
   margin-bottom: 3px;
 }
 .qr-desc {
-  font-size: 8px;
+  font-size: 10px; /* +20% vs 8px */
   color: #888;
   line-height: 1.5;
 }
 .qr-link {
-  font-size: 8px;
+  font-size: 10px; /* +20% vs 8px */
   color: #0A6847;
   margin-top: 3px;
   word-break: break-all;
@@ -194,13 +189,17 @@ table.rows td.v {
   margin-top: 10px;
   border-top: 1px solid #eee;
 }
-.footer-main { font-size: 8px; color: #888; line-height: 1.6; }
-.footer-info { font-size: 8px; color: #bbb; margin-top: 3px; }
+.footer-main { font-size: 10px; color: #888; line-height: 1.6; } /* +20% vs 8px */
+.footer-info { font-size: 10px; color: #bbb; margin-top: 3px; } /* +20% vs 8px */
 </style>
 </head>
 <body>
 
-<div class="wm">TONJI</div>
+{{-- Filigrane pleine page — 4 bandes couvrent toute la hauteur (haut, 30%, 60%, 90%) --}}
+<div class="wm" style="top:2%">TONJI</div>
+<div class="wm" style="top:27%">TONJI</div>
+<div class="wm" style="top:54%">TONJI</div>
+<div class="wm" style="top:80%">TONJI</div>
 
 <div class="page">
 
@@ -237,7 +236,7 @@ table.rows td.v {
     <span class="amount-num">{{ number_format($montant_net, 0, ',', ' ') }}</span>
     <span class="amount-cur"> FCFA</span>
     @if($montant_brut !== $montant_net)
-    <div style="font-size:9px;color:#E8A830;margin-top:3px">Débité : {{ number_format($montant_brut, 0, ',', ' ') }} FCFA</div>
+    <div style="font-size:11px;color:#E8A830;margin-top:3px">Débité : {{ number_format($montant_brut, 0, ',', ' ') }} FCFA</div>
     @endif
     <div class="amount-note">* Frais à la charge du cotisant</div>
   </div>
@@ -248,7 +247,7 @@ table.rows td.v {
     <table class="rows">
       <tr>
         <td class="k">Référence</td>
-        <td class="v" style="word-break:break-all;font-size:9px">{{ $trans_id }}</td>
+        <td class="v" style="word-break:break-all;font-size:10px">{{ $trans_id }}</td>
       </tr>
       <tr>
         <td class="k">Date &amp; heure</td>
@@ -295,7 +294,7 @@ table.rows td.v {
     </table>
   </div>
 
-  {{-- QR Code --}}
+  {{-- QR Code (+50% : 84×84px) --}}
   <div class="qr-box">
     <table class="qr-inner">
       <tr>
