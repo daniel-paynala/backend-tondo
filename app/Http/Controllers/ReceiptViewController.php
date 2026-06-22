@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Services\ReceiptService;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 /**
@@ -52,21 +51,24 @@ class ReceiptViewController extends Controller
 
     /**
      * GET /recu/{transId}/pdf
-     * Régénère le PDF à la demande et redirige vers l'URL de téléchargement.
-     *
-     * La redirection (302) vers l'URL publique du fichier permet au navigateur
-     * et à WhatsApp de télécharger le PDF directement sans passer par Laravel.
+     * Génère le PDF en mémoire et le streame directement — aucune écriture disque,
+     * aucune dépendance aux permissions de public/receipts/.
      */
-    public function pdf(string $transId): RedirectResponse|\Illuminate\Http\Response
+    public function pdf(string $transId): \Illuminate\Http\Response
     {
-        // Régénère (ou utilise le cache disque s'il existe encore) le fichier PDF.
-        $url = $this->receiptSvc->regenPdf($transId);
+        $bytes = $this->receiptSvc->regenPdf($transId);
 
-        if (! $url) {
+        if (! $bytes) {
             abort(404, 'Transaction introuvable ou non confirmée.');
         }
 
-        // Redirection vers public/receipts/recu-tonji-{transId}.pdf.
-        return redirect($url);
+        $filename = 'recu-tonji-' . $transId . '.pdf';
+
+        // Headers standard pour le téléchargement d'un PDF.
+        return response($bytes, 200, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Content-Length'      => strlen($bytes),
+        ]);
     }
 }

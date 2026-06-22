@@ -198,7 +198,10 @@ class ReceiptService
     }
 
     /**
-     * Régénère le PDF depuis le trans_id et retourne l'URL publique.
+     * Génère le PDF en mémoire et retourne les bytes bruts — aucune écriture disque.
+     * Le contrôleur streame directement la réponse sans passer par public/receipts/.
+     *
+     * @return string|null  Contenu binaire PDF, ou null si le trans_id est inconnu.
      */
     public function regenPdf(string $transId): ?string
     {
@@ -213,27 +216,15 @@ class ReceiptService
             ? 'data:image/png;base64,' . base64_encode(file_get_contents($logoPath))
             : null;
 
-        $pdf = Pdf::loadView('receipts.paiement', $donnees)
+        // output() retourne les bytes du PDF sans toucher au disque.
+        return Pdf::loadView('receipts.paiement', $donnees)
             ->setPaper('A6', 'portrait')
             ->setOptions([
                 'defaultFont'     => 'DejaVu Sans',
                 'isRemoteEnabled' => false,
                 'dpi'             => 150,
-            ]);
-
-        $filename = 'recu-tonji-' . $transId . '.pdf';
-        $dir      = public_path('receipts');
-
-        if (! is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-
-        $written = file_put_contents($dir . '/' . $filename, $pdf->output());
-        if ($written === false) {
-            throw new \RuntimeException("Impossible d'écrire le PDF dans {$dir}/{$filename}");
-        }
-
-        return url('receipts/' . $filename);
+            ])
+            ->output();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
