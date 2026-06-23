@@ -6,7 +6,7 @@ use App\Models\TondoCagnotte;
 use App\Models\TondoPaiementEnAttente;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
-use App\Services\TwilioVerifyService;
+use App\Services\OtpService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -31,8 +31,8 @@ use Illuminate\Support\Facades\Log;
  *                     │
  *                     ├─ tontine ──► cotiser.numero
  *                     │                  │
- *                     │                  ├─ non-participant ──► "pas inscrit" + menu
- *                     │                  └─ participant ──► [push] ──► cotiser.attente
+ *                     │                  ├─ non-membre ──► "pas inscrit" + menu
+ *                     │                  └─ membre ──► [push] ──► cotiser.attente
  *                     │
  *                     └─ cotisation ──► cotiser.montant ──► cotiser.numero
  *                                                               │
@@ -61,7 +61,7 @@ class BotService
         private ReceiptService       $receiptSvc,
         private CreerCagnotteService $creerCagnotteSvc,
         private GererCagnotteService $gererCagnotteSvc,
-        private TwilioVerifyService  $twilioVerify,
+        private OtpService           $otpService,
         private TwilioSenderService  $twilio,
     ) {}
 
@@ -226,7 +226,7 @@ class BotService
      *
      * Vérifie l'existence et le statut de la cagnotte, puis :
      *   - Tontine non complète → erreur (les paiements sont bloqués tant que tous
-     *     les participants ne sont pas inscrits). Le +1 est le créateur qui est
+     *     les membres ne sont pas inscrits). Le +1 est le créateur qui est
      *     dans tondo_participants mais PAS comptabilisé dans nombre_inscrits.
      *   - Tontine complète avec montant fixe → saute l'étape 'cotiser.montant',
      *     va directement à 'cotiser.numero'.
@@ -260,7 +260,7 @@ class BotService
             'montant_par_cycle' => $cagnotte->montant_par_cycle,
         ]);
 
-        // Tontine : bloquer si pas encore complète (attente de tous les participants)
+        // Tontine : bloquer si pas encore complète (attente de tous les membres)
         if ($cagnotte->type === 'tontine_periodique') {
             // +1 : le créateur compte dans tondo_participants mais PAS dans nombre_inscrits
             $manquants = ($cagnotte->nombre_participants ?? 0) - (($cagnotte->nombre_inscrits ?? 0) + 1);
@@ -268,7 +268,7 @@ class BotService
                 return $this->erreurEtMenu($numero, <<<TXT
                 ⏳ *La tontine n'a pas encore démarré.*
 
-                Il manque encore *{$manquants} participant(s)* avant le lancement.
+                Il manque encore *{$manquants} membre(s)* avant le lancement.
                 Les paiements seront disponibles une fois tous les membres inscrits.
                 TXT);
             }
@@ -360,7 +360,7 @@ class BotService
      * Traite la saisie du numéro Mobile Money du cotisant.
      *
      * Comportement selon le type :
-     *   - Tontine : vérifie que le numéro est bien inscrit comme participant.
+     *   - Tontine : vérifie que le numéro est bien inscrit comme membre.
      *     Si non inscrit → erreur (doit passer par "Rejoindre" d'abord).
      *   - Cotisation : si l'utilisateur est connu → paiement direct.
      *     Si inconnu → crée un compte light anonyme (nom/prénom vides)
@@ -385,14 +385,14 @@ class BotService
         // Rechercher l'utilisateur par suffixe (9 derniers chiffres, tolérant +241/0)
         $user = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
-        // ── Tontine : vérifier que l'utilisateur est bien un participant inscrit ──
+        // ── Tontine : vérifier que l'utilisateur est bien un membre inscrit ──
         if ($type === 'tontine_periodique') {
-            $estParticipant = $user && DB::table('tondo_participants')
+            $estMembre = $user && DB::table('tondo_participants')
                 ->where('cagnotte_id', $data['cagnotte_id'])
                 ->where('user_id', $user->id)
                 ->exists();
 
-            if (! $estParticipant) {
+            if (! $estMembre) {
                 return $this->erreurEtMenu($numero, <<<TXT
                 ❌ *Vous n'êtes pas encore inscrit à cette tontine.*
 
@@ -400,7 +400,7 @@ class BotService
                 TXT);
             }
 
-            // Participant confirmé → lancer le push Airtel
+            // Membre confirmé → lancer le push Airtel
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
@@ -832,7 +832,7 @@ class BotService
 
         // Utilisateur connu → inscrire directement
         if ($user) {
-            $this->inscrireParticipant($user, $cagnotte);
+            $this->inscrireMembre($user, $cagnotte);
             $prenom = ucfirst(mb_strtolower($user->prenom));
             $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
 
@@ -866,7 +866,7 @@ class BotService
 
     /**
      * Collecte nom + prénom pour un nouvel utilisateur qui rejoint une cagnotte/tontine.
-     * Crée un compte light puis inscrit le participant.
+     * Crée un compte light puis inscrit le membre.
      *
      * @param  string $numero  Numéro E.164
      * @param  string $texte   Nom et prénom (séparés par un saut de ligne)
@@ -907,7 +907,7 @@ class BotService
             projectId: $projectId,
         );
 
-        $this->inscrireParticipant($user, $cagnotte);
+        $this->inscrireMembre($user, $cagnotte);
 
         $ref  = $data['cagnotte_ref'] ?? $cagnotte->reference;
         $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
@@ -952,7 +952,7 @@ class BotService
      * Toutes les étapes commençant par 'creer.' arrivent ici depuis traiter().
      *
      * Flow cotisation : creer.type → creer.cotisation.nom → creer.numero → creer.recap
-     * Flow tontine    : creer.type → creer.tontine.nom → creer.tontine.nb_participants
+     * Flow tontine    : creer.type → creer.tontine.nom → creer.tontine.nb_membres
      *                   → creer.tontine.montant_cycle → creer.tontine.periodicite
      *                   → [creer.tontine.jour_mois si mensuelle] → creer.numero
      *                   → [creer.nom_prenom si inconnu] → [creer.certification]
@@ -971,7 +971,7 @@ class BotService
             'creer.cotisation.montant_cible'   => $this->handleCreerCotisationMontantCible($numero, $texte),
             'creer.cotisation.date_fin'        => $this->handleCreerCotisationDateFin($numero, $texte),
             'creer.tontine.nom'             => $this->handleCreerTontineNom($numero, $texte),
-            'creer.tontine.nb_participants' => $this->handleCreerTontineNbParticipants($numero, $texte),
+            'creer.tontine.nb_membres' => $this->handleCreerTontineNbMembres($numero, $texte),
             'creer.tontine.montant_cycle'   => $this->handleCreerTontineMontantCycle($numero, $texte),
             'creer.tontine.periodicite'     => $this->handleCreerTontinePeriodicite($numero, $texte),
             'creer.tontine.jour_mois'       => $this->handleCreerTontineJourMois($numero, $texte),
@@ -1133,12 +1133,12 @@ class BotService
         }
 
         $data = $this->session->data($numero);
-        $this->session->set($numero, 'creer.tontine.nb_participants', array_merge($data, [
+        $this->session->set($numero, 'creer.tontine.nb_membres', array_merge($data, [
             'titre' => $titre,
         ]));
 
         return <<<TXT
-        Nombre de *participants* ?
+        Nombre de *membres* ?
         _(entre 2 et 200)_
 
         #️⃣ _pour revenir en arrière_
@@ -1146,17 +1146,17 @@ class BotService
     }
 
     /**
-     * Collecte le nombre de participants de la tontine (2-200).
+     * Collecte le nombre de membres de la tontine (2-200).
      *
      * @param  string $numero  Numéro E.164
      * @param  string $texte   Nombre saisi
      * @return string
      */
-    private function handleCreerTontineNbParticipants(string $numero, string $texte): string
+    private function handleCreerTontineNbMembres(string $numero, string $texte): string
     {
         $nb = (int) preg_replace('/\D/', '', $texte);
         if ($nb < 2 || $nb > 200) {
-            return "⚠️ Nombre invalide. Entre *2* et *200* participants.\n\n#️⃣ _pour revenir en arrière_";
+            return "⚠️ Nombre invalide. Entre *2* et *200* membres.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $data = $this->session->data($numero);
@@ -1165,7 +1165,7 @@ class BotService
         ]));
 
         return <<<TXT
-        Montant *récupéré par participant* ? _(sans les frais)_
+        Montant *récupéré par membre* ? _(sans les frais)_
         (en FCFA)
 
         #️⃣ _pour revenir en arrière_
@@ -1485,7 +1485,7 @@ class BotService
      * Le contenu diffère selon le type (tontine vs cagnotte).
      * Suivi du texte CGU simplifié avec lien et instructions de validation.
      *
-     * @param  array  $data           Données de session (titre, type, participants…)
+     * @param  array  $data           Données de session (titre, type, membres…)
      * @param  string $numeroRetrait  Numéro sur lequel sera versé le montant collecté
      * @return string
      */
@@ -1510,7 +1510,7 @@ class BotService
             📝 *Récapitulatif — Tontine périodique*
 
             Nom : *{$data['titre']}*
-            Participants : *{$data['nombre_participants']}*
+            Membres : *{$data['nombre_participants']}*
             Montant/cycle : *{$montant} FCFA*
             Fréquence : *{$freq}*
             Numéro de retrait : *{$masque}*
@@ -1556,7 +1556,7 @@ class BotService
      * Traite la confirmation du récapitulatif et crée la cagnotte/tontine.
      *
      * Sur "1" : appelle CreerCagnotteService::creer() puis retourne le message
-     * de succès avec le deep link WhatsApp à partager aux participants.
+     * de succès avec le deep link WhatsApp à partager aux membres.
      * Le deep link est construit avec le numéro du bot (config tondo.whatsapp_numero).
      *
      * Sur "0" : annulation, retour menu.
@@ -1597,7 +1597,7 @@ class BotService
         $typeLabel = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
         $prenom = ucfirst(mb_strtolower($user->prenom));
         $ref    = $cagnotte->reference;
-        // Construire le deep link WhatsApp pour que les participants rejoignent directement
+        // Construire le deep link WhatsApp pour que les membres rejoignent directement
         $botNum = ltrim(config('tondo.whatsapp_numero', ''), '+');
         $lienWa = $botNum
             ? "\nhttps://wa.me/{$botNum}?text=" . rawurlencode("TONJI {$ref}")
@@ -1610,7 +1610,7 @@ class BotService
         Votre {$type} est active.
 
         *Numéro de {$typeLabel} : N°{$ref}*
-        Partagez ce lien à vos participants :{$lienWa}
+        Partagez ce lien à vos membres :{$lienWa}
 
         TXT . "\n" . $this->afficherMenu($numero);
     }
@@ -2126,7 +2126,7 @@ class BotService
      *
      * Trois états possibles (stockés dans la session sous 'tontine_etat') :
      *   - 'attente' : tontine incomplète, pas encore pleine
-     *   - 'pleine'  : tous les participants inscrits, prête à démarrer
+     *   - 'pleine'  : tous les membres inscrits, prête à démarrer
      *   - 'demarree': tontine active (date_debut renseignée ou solde > 0)
      *
      * Note sur le comptage :
@@ -2158,7 +2158,7 @@ class BotService
         if ($lancee) {
             return <<<TXT
             🔄 *{$titre}* · N°{$ref}
-            Participants : {$inscrits}/{$max} · Tontine en cours
+            Membres : {$inscrits}/{$max} · Tontine en cours
 
             Que souhaitez-vous faire ?
 
@@ -2173,12 +2173,12 @@ class BotService
         if ($inscrits >= $max) {
             return <<<TXT
             ⏳ *{$titre}* · N°{$ref}
-            Participants : {$inscrits}/{$max} ✅ Complet — Prête à démarrer !
+            Membres : {$inscrits}/{$max} ✅ Complet — Prête à démarrer !
 
             Que souhaitez-vous faire ?
 
             1️⃣  Démarrer la tontine
-            2️⃣  Éditer l'ordre des participants
+            2️⃣  Éditer l'ordre des membres
             3️⃣  Supprimer la tontine
             4️⃣  Retour au menu précédant
             5️⃣  Menu principal
@@ -2190,7 +2190,7 @@ class BotService
         $manquants = $max - $inscrits;
         return <<<TXT
         ⏳ *{$titre}* · N°{$ref}
-        Participants : {$inscrits}/{$max} _(il manque {$manquants})_
+        Membres : {$inscrits}/{$max} _(il manque {$manquants})_
 
         Que souhaitez-vous faire ?
 
@@ -2301,8 +2301,8 @@ class BotService
     }
 
     /**
-     * Affiche la liste ordonnée des participants et invite à saisir les permutations.
-     * Les IDs des participants sont stockés en session pour validation ultérieure.
+     * Affiche la liste ordonnée des membres et invite à saisir les permutations.
+     * Les IDs des membres sont stockés en session pour validation ultérieure.
      *
      * @param  string       $numero   Numéro E.164
      * @param  TondoCagnotte $cagnotte Tontine concernée
@@ -2326,11 +2326,11 @@ class BotService
         $n = count($ids);
 
         $this->session->set($numero, 'gerer.tontine.ordre', array_merge($data, [
-            'participant_ids' => $ids,
+            'membre_ids' => $ids,
         ]));
 
         return <<<TXT
-        📋 *Ordre actuel des participants*
+        📋 *Ordre actuel des membres*
 
         {$liste}
 
@@ -2365,7 +2365,7 @@ class BotService
     private function handleGererTontineOrdre(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
-        $ids  = $data['participant_ids'] ?? [];
+        $ids  = $data['membre_ids'] ?? [];
         $n    = count($ids);
 
         $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
@@ -2384,7 +2384,7 @@ class BotService
         }
 
         if (count($pairs) !== $n) {
-            return "⚠️ Envoyez exactement *{$n}* paires (une par participant).\n\n#️⃣ _pour revenir en arrière_";
+            return "⚠️ Envoyez exactement *{$n}* paires (une par membre).\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Vérifier la bijection : chaque position source et destination doit être unique
@@ -2953,11 +2953,11 @@ class BotService
      * au bon endroit du flow selon l'état de la cagnotte :
      *
      *   - Tontine non démarrée (date_debut IS NULL) :
-     *     → session 'rejoindre.numero' (inscription comme nouveau participant)
+     *     → session 'rejoindre.numero' (inscription comme nouveau membre)
      *
      *   - Tontine démarrée (date_debut renseignée) :
      *     → session 'cotiser.numero' avec montant fixe pré-rempli
-     *     (le participant doit déjà être inscrit, vérifié dans handleCotiserNumero)
+     *     (le membre doit déjà être inscrit, vérifié dans handleCotiserNumero)
      *
      *   - Cagnotte ouverte :
      *     → session 'cotiser.montant' (l'inscription se fait automatiquement au paiement)
@@ -3086,9 +3086,11 @@ class BotService
         }
 
         try {
-            $this->twilioVerify->sendOtp($numeroE164);
+            // OtpService délègue au driver configuré (dev / twilio / paynala).
+            $this->otpService->sendOtp($numeroE164);
         } catch (\Throwable $e) {
-            Log::warning('envoyerOtp: échec Twilio Verify', [
+            Log::warning('envoyerOtp: échec OtpService', [
+                'driver' => $this->otpService->driver(),
                 'numero' => $numeroE164,
                 'err'    => $e->getMessage(),
             ]);
@@ -3121,9 +3123,12 @@ class BotService
         }
 
         try {
-            return $this->twilioVerify->checkOtp($numeroE164, $codeSaisi);
+            return $this->otpService->checkOtp($numeroE164, $codeSaisi);
         } catch (\Throwable $e) {
-            Log::error('verifierOtp: erreur checkOtp Twilio', ['err' => $e->getMessage()]);
+            Log::error('verifierOtp: erreur OtpService', [
+                'driver' => $this->otpService->driver(),
+                'err'    => $e->getMessage(),
+            ]);
             return false;
         }
     }
@@ -3249,14 +3254,14 @@ class BotService
     }
 
     /**
-     * Inscrit un participant à une cagnotte/tontine de façon idempotente.
-     * Si le participant est déjà inscrit, ne fait rien (pas d'erreur, pas de doublon).
+     * Inscrit un membre à une cagnotte/tontine de façon idempotente.
+     * Si le membre est déjà inscrit, ne fait rien (pas d'erreur, pas de doublon).
      * Incrémente nombre_inscrits seulement si l'inscription est nouvelle.
      *
-     * @param  TondoUser    $user     Participant à inscrire
+     * @param  TondoUser    $user     Membre à inscrire
      * @param  TondoCagnotte $cagnotte Cagnotte/tontine cible
      */
-    private function inscrireParticipant(TondoUser $user, TondoCagnotte $cagnotte): void
+    private function inscrireMembre(TondoUser $user, TondoCagnotte $cagnotte): void
     {
         // Vérification d'idempotence : ne rien faire si déjà inscrit
         $deja = DB::table('tondo_participants')

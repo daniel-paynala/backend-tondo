@@ -7,7 +7,7 @@ use App\Models\Project;
 use App\Models\TondoUser;
 use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
-use App\Services\TwilioVerifyService;
+use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -90,61 +90,70 @@ class AuthController extends Controller
             ]);
         }
 
-        // KYC Airtel — désactivé temporairement pour laisser tous les numéros
-        // s'inscrire. À réactiver quand le service sera stable côté Paynala.
-        // if ($intent === 'signup') {
-        //     $projectId = Project::tondoId();
-        //     $detected  = app(OperateurDetectorService::class)->detect($projectId, $phone);
-        //     if ($detected && $detected['operateur'] === 'airtel') {
-        //         $msisdn = '0' . ltrim($data['numero'], '0');
-        //         $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
-        //         // null = service indisponible → on laisse passer sans bloquer.
-        //         // false = numéro sans compte Airtel Money → on bloque.
-        //         if ($kycOk === false) {
-        //             throw ValidationException::withMessages([
-        //                 'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif. Veuillez utiliser un numéro avec un compte Airtel Money pour vous inscrire.',
-        //             ]);
-        //         }
-        //     }
-        // }
+        // Vérification opérateur au moment du signup :
+        //  - Airtel  : KYC en cache (déjà appelé par kycCheck depuis l'app) → on ne re-appelle pas ici.
+        //  - Moov    : si la config Moov n'est pas active pour ce projet → inscription bloquée.
+        //  - Inconnu : on laisse passer (KYC indisponible ou opérateur hors périmètre).
+        if ($intent === 'signup') {
+            $projectId = Project::tondoId();
+            $detected  = app(OperateurDetectorService::class)->detect($projectId, $phone);
 
-        $driver = config('services.otp.driver', 'dev');
+            if ($detected) {
+                $operateur = $detected['operateur'];
+                $pays      = $detected['pays'];
 
-        if ($driver === 'twilio') {
-            $twilioPhone = $this->twilioRecipient($phone);
-            try {
-                app(TwilioVerifyService::class)->sendOtp($twilioPhone);
-            } catch (Throwable $e) {
-                Log::error("[mobile] request-otp twilio failed for {$twilioPhone} (saisi: {$phone}): {$e->getMessage()}");
-                throw ValidationException::withMessages([
-                    'numero' => 'Impossible d\'envoyer le code SMS. Vérifiez le numéro et réessayez.',
-                ]);
+                // Vérifie si cet opérateur est marqué actif dans la config projet.
+                // Si la ligne n'existe pas du tout → considéré comme inactif.
+                $configActif = \App\Models\TondoProjectConfig::where('project_id', $projectId)
+                    ->where('operateur', $operateur)
+                    ->where('pays', $pays)
+                    ->value('actif');
+
+                if ($configActif === false || $configActif === 0) {
+                    // Opérateur désactivé dans la config (ex : Moov sans API KYC disponible)
+                    throw ValidationException::withMessages([
+                        'numero' => "L'opérateur {$operateur} n'est pas encore disponible sur Tonji. "
+                            . 'Utilisez un numéro Airtel Money pour vous inscrire.',
+                    ]);
+                }
+
+                // Airtel actif : le KYC a déjà été mis en cache par kycCheck() appelé
+                // depuis l'app pendant la saisie. Si absent du cache (saisie directe sans
+                // appel kycCheck), on vérifie maintenant — null = indisponible, on laisse passer.
+                if ($operateur === 'airtel') {
+                    $msisdn = '0' . ltrim($data['numero'], '0');
+                    $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
+                    if ($kycOk === false) {
+                        throw ValidationException::withMessages([
+                            'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif.',
+                        ]);
+                    }
+                }
             }
-            $logSuffix = $twilioPhone !== $phone ? " → envoyé à {$twilioPhone} (override trial)" : '';
-            Log::info("[mobile] request-otp twilio OK pour {$phone} — exists=" . ($userExists ? '1' : '0') . $logSuffix);
+        }
 
-            return response()->json([
-                'ok' => true,
-                'message' => 'Code envoyé par SMS.',
-                'phone' => $phone,
-                'user_exists' => $userExists,
-                'dev_hint' => null,
-                'otp_sent' => true,
+        $otp    = app(OtpService::class);
+        $devHint = null;
+
+        try {
+            // sendOtp retourne le code uniquement en driver=dev (pour les tests Postman/Flutter).
+            $devHint = $otp->sendOtp($phone);
+        } catch (Throwable $e) {
+            Log::error("[mobile] request-otp [{$otp->driver()}] failed for {$phone}: {$e->getMessage()}");
+            throw ValidationException::withMessages([
+                'numero' => 'Impossible d\'envoyer le code SMS. Vérifiez le numéro et réessayez.',
             ]);
         }
 
-        // driver = dev : on n'envoie pas de SMS, on accepte 123456.
-        Log::info("[mobile] request-otp dev pour {$phone} — exists=" . ($userExists ? '1' : '0'));
+        Log::info("[mobile] request-otp [{$otp->driver()}] OK pour {$phone} — exists=" . ($userExists ? '1' : '0'));
 
         return response()->json([
-            'ok' => true,
-            'message' => 'OTP envoyé.',
-            'phone' => $phone,
+            'ok'          => true,
+            'message'     => 'Code envoyé par SMS.',
+            'phone'       => $phone,
             'user_exists' => $userExists,
-            // En dev on retourne explicitement l'OTP pour faciliter les
-            // tests Postman / Flutter. Toujours null en driver=twilio.
-            'dev_hint' => self::OTP_DEV,
-            'otp_sent' => true,
+            'dev_hint'    => $devHint,  // null en prod, code en driver=dev
+            'otp_sent'    => true,
         ]);
     }
 
@@ -173,26 +182,11 @@ class AuthController extends Controller
 
         $phone = $this->formatPhone($data['indicatif'], $data['numero']);
 
-        // Vérification OTP selon le driver. En `twilio`, Twilio gère
-        // l'expiration (10 min) et le rate-limit (5 essais max) côté
-        // serveur — on récupère juste un bool. Si l'override est actif,
-        // on check sur le numéro Twilio (= numéro de Daniel) au lieu
-        // du numéro saisi.
-        $driver = config('services.otp.driver', 'dev');
-        if ($driver === 'twilio') {
-            $twilioPhone = $this->twilioRecipient($phone);
-            $ok = app(TwilioVerifyService::class)->checkOtp($twilioPhone, $data['otp']);
-            if (! $ok) {
-                throw ValidationException::withMessages([
-                    'otp' => 'Code OTP invalide ou expiré.',
-                ]);
-            }
-        } else {
-            if ($data['otp'] !== self::OTP_DEV) {
-                throw ValidationException::withMessages([
-                    'otp' => 'Code OTP invalide.',
-                ]);
-            }
+        // Vérification déléguée à OtpService — gère dev/twilio/paynala.
+        if (! app(OtpService::class)->checkOtp($phone, $data['otp'])) {
+            throw ValidationException::withMessages([
+                'otp' => 'Code OTP invalide ou expiré.',
+            ]);
         }
 
         $projectId = Project::tondoId();
@@ -278,6 +272,137 @@ class AuthController extends Controller
             'token' => $token,
             'created' => $created,
             'user' => $this->serializeUser($user),
+        ]);
+    }
+
+    /**
+     * GET /api/mobile/auth/kyc-check?numero=0XXXXXXXX
+     *
+     * Point d'entrée unique appelé par l'app quand l'utilisateur appuie sur
+     * « Continuer » à l'étape 0 de l'inscription.
+     *
+     * Ordre de vérification :
+     *  1. Compte Tonji existant → user_exists: true, bloque: true (aller se connecter).
+     *  2. Opérateur inconnu       → bloque: true (seul Airtel accepté pour l'instant).
+     *  3. Opérateur inactif (Moov, etc.) → bloque: true.
+     *  4. Service KYC Airtel indisponible → bloque: true (on ne laisse pas passer sans vérif).
+     *  5. Numéro sans compte Airtel Money → bloque: true.
+     *  6. KYC réussi → kyc_ok: true, nom + prénom pour auto-complétion.
+     *
+     * L'app ne doit JAMAIS laisser l'utilisateur passer à l'étape 1 si bloque: true.
+     *
+     * Réponse :
+     *   { user_exists, operateur, kyc_ok, bloque, nom?, prenom?, type_client?, message }
+     */
+    public function kycCheck(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'numero' => ['required', 'string', 'regex:/^0\d{8}$/'],
+        ]);
+
+        $projectId = Project::tondoId();
+        $msisdn    = $data['numero'];           // 0XXXXXXXX
+        $phoneE164 = '+241' . substr($msisdn, 1);
+
+        // ── 1. Vérification d'existence du compte Tonji ─────────────────────
+        // Seuls les comptes "full" bloquent — les comptes light (ajoutés à une
+        // cagnotte par un tiers) peuvent se créer un compte complet.
+        $userExists = TondoUser::where('project_id', $projectId)
+            ->where('numero', $phoneE164)
+            ->where('compte_type', 'full')
+            ->exists();
+
+        if ($userExists) {
+            return response()->json([
+                'user_exists' => true,
+                'operateur'   => null,
+                'kyc_ok'      => null,
+                'bloque'      => true,
+                'message'     => 'Ce numéro est déjà inscrit sur Tonji. Retournez à l\'accueil pour vous connecter.',
+            ]);
+        }
+
+        // ── 2. Détection de l'opérateur ─────────────────────────────────────
+        $detected = app(OperateurDetectorService::class)->detect($projectId, $phoneE164);
+
+        if (! $detected) {
+            // Préfixe non configuré → seul Airtel est accepté pour l'instant
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => null,
+                'kyc_ok'      => null,
+                'bloque'      => true,
+                'message'     => 'Le numéro doit être Airtel Money.',
+            ]);
+        }
+
+        $operateur = $detected['operateur'];
+        $pays      = $detected['pays'];
+
+        // ── 3. Vérification que l'opérateur est activé dans la config projet ─
+        $configActif = \App\Models\TondoProjectConfig::where('project_id', $projectId)
+            ->where('operateur', $operateur)
+            ->where('pays', $pays)
+            ->value('actif');
+
+        if (! $configActif) {
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => $operateur,
+                'kyc_ok'      => null,
+                'bloque'      => true,
+                'message'     => 'Le numéro doit être Airtel Money.',
+            ]);
+        }
+
+        // ── 4. Seul Airtel a une API KYC — tout autre opérateur actif est bloqué ─
+        if ($operateur !== 'airtel') {
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => $operateur,
+                'kyc_ok'      => null,
+                'bloque'      => true,
+                'message'     => 'Le numéro doit être Airtel Money.',
+            ]);
+        }
+
+        // ── 5 & 6. Appel KYC Airtel ─────────────────────────────────────────
+        $kycData = app(PaynalaPaymentService::class)->checkKycData($msisdn);
+
+        // Service indisponible → on bloque (pas d'inscription sans vérification)
+        if ($kycData === null) {
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => 'airtel',
+                'kyc_ok'      => null,
+                'bloque'      => true,
+                'message'     => 'La vérification Airtel Money est temporairement indisponible. '
+                    . 'Réessayez dans quelques minutes.',
+            ]);
+        }
+
+        // Numéro sans compte Airtel Money actif → bloqué
+        if (! $kycData['ok']) {
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => 'airtel',
+                'kyc_ok'      => false,
+                'bloque'      => true,
+                'message'     => 'Ce numéro n\'a pas de compte Airtel Money actif. '
+                    . 'Vérifiez votre numéro ou contactez Airtel.',
+            ]);
+        }
+
+        // KYC réussi → nom et prénom pour auto-complétion du formulaire
+        return response()->json([
+            'user_exists' => false,
+            'operateur'   => 'airtel',
+            'kyc_ok'      => true,
+            'bloque'      => false,
+            'nom'         => $kycData['nom']        ?? '',
+            'prenom'      => $kycData['prenom']      ?? '',
+            'type_client' => $kycData['type_client'] ?? 'particulier',
+            'message'     => 'Compte Airtel Money vérifié.',
         ]);
     }
 

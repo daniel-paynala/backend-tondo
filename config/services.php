@@ -40,12 +40,15 @@ return [
     | OTP — driver de génération/vérification
     |--------------------------------------------------------------------------
     |
-    | `dev`    : OTP statique « 123456 » accepté tel quel. Gratuit, instantané,
-    |            renvoyé dans la réponse de request-otp via dev_hint. Mode
-    |            par défaut en local.
-    | `twilio` : Twilio Verify — vrai SMS envoyé via l'API Verify. Le code
-    |            est généré et stocké par Twilio (pas par Laravel), avec
-    |            rate-limit anti-brute-force et expiration auto à 10 min.
+    | `dev`     : OTP statique « 123456 » accepté tel quel. Gratuit, instantané,
+    |             renvoyé dans la réponse de request-otp via dev_hint. Mode
+    |             par défaut en local.
+    | `twilio`  : Twilio Verify — vrai SMS envoyé via l'API Verify. Le code
+    |             est généré et stocké par Twilio (pas par Laravel), avec
+    |             rate-limit anti-brute-force et expiration auto à 10 min.
+    | `paynala` : Système OTP interne Paynala — code généré et stocké en cache
+    |             Laravel (TTL 10 min, 5 tentatives max), livraison SMS via
+    |             Wirepick. Pas de dépendance externe pour la vérification.
     |
     */
     'otp' => [
@@ -80,6 +83,13 @@ return [
     'onesignal' => [
         'app_id'       => env('ONESIGNAL_APP_ID'),
         'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+    ],
+
+    'wirepick' => [
+        'client_id' => env('WIREPICK_CLIENT_ID'),
+        'password'  => env('WIREPICK_PASSWORD'),
+        // Nom d'expéditeur affiché sur le téléphone du destinataire (max 11 car.).
+        'from'      => env('WIREPICK_FROM', 'Tondo'),
     ],
 
     'twilio' => [
