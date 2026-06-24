@@ -65,9 +65,9 @@ class TontinesController extends Controller
      *
      * Retourne le détail complet d'une cagnotte avec ses relations :
      *  - `gerant`       : le créateur (TondoUser)
-     *  - `participants` : liste des participants inscrits
+     *  - `membres` : liste des membres inscrits
      *
-     * @return JsonResponse TondoCagnotte avec relations gerant et participants
+     * @return JsonResponse TondoCagnotte avec relations gerant et membres
      */
     public function show(Request $request, string $id): JsonResponse
     {

@@ -35,7 +35,7 @@ class WirepickSmsService
      * Variables requises :
      *   WIREPICK_CLIENT_ID — identifiant du compte Wirepick.
      *   WIREPICK_PASSWORD  — mot de passe du compte Wirepick.
-     *   WIREPICK_FROM      — nom d'expéditeur (défaut : "Tondo").
+     *   WIREPICK_FROM      — nom d'expéditeur (défaut : "Tonji").
      *
      * @throws RuntimeException  Si les credentials sont absents au boot.
      */
@@ -43,7 +43,7 @@ class WirepickSmsService
     {
         $this->clientId = (string) config('services.wirepick.client_id');
         $this->password = (string) config('services.wirepick.password');
-        $this->from     = (string) config('services.wirepick.from', 'Tondo');
+        $this->from     = (string) config('services.wirepick.from', 'Tonji');
 
         if ($this->clientId === '' || $this->password === '') {
             throw new RuntimeException(
@@ -70,36 +70,46 @@ class WirepickSmsService
         // Wirepick n'accepte pas le `+` — on le retire.
         $phone = ltrim($phoneE164, '+');
 
+        // Paramètres de base — from omis si vide (sender ID non enregistré).
+        $params = [
+            'client'   => $this->clientId,
+            'password' => $this->password,
+            'phone'    => $phone,
+            'text'     => $text,
+        ];
+        if ($this->from !== '') {
+            $params['from'] = $this->from;
+        }
+
+        // Wirepick exige POST form-urlencoded pour accepter les sender IDs alphanumériques.
+        // GET fonctionne mais rejette les `from` non numériques sur certains comptes.
         $response = Http::timeout(10)
             ->retry(1, 300, throw: false)
-            ->get(self::API_URL, [
-                'client'   => $this->clientId,
-                'password' => $this->password,
-                'phone'    => $phone,
-                'text'     => $text,
-                'from'     => $this->from,
-            ]);
+            ->asForm()
+            ->post(self::API_URL, $params);
 
         if (! $response->successful()) {
             Log::warning("[wirepick] HTTP {$response->status()} pour {$phoneE164}");
             throw new RuntimeException("Wirepick : erreur HTTP {$response->status()}.");
         }
 
-        // Wirepick répond en XML même en cas d'erreur métier (numéro invalide, crédit épuisé…)
-        $xml    = @simplexml_load_string($response->body());
-        $status = $xml ? (string) ($xml->sms->status ?? '') : '';
+        // Succès : <messages><sms><msgid>…</msgid><status>NCR</status>…</sms></messages>
+        // Erreur  : <sms><error>ERROR: …</error></sms>
+        // On détecte l'erreur via la balise <error>, pas via le statut (valeurs variables selon l'opérateur).
+        $xml = @simplexml_load_string($response->body());
 
-        if ($status !== self::STATUS_ACCEPTED) {
-            $msgid = $xml ? (string) ($xml->sms->msgid ?? '') : '';
+        // Erreur métier Wirepick (credentials, sender ID, numéro invalide…)
+        $errorMsg = $xml ? (string) ($xml->error ?? $xml->sms->error ?? '') : '';
+        if ($errorMsg !== '') {
             Log::warning("[wirepick] SMS rejeté pour {$phoneE164}", [
-                'status' => $status,
-                'msgid'  => $msgid,
-                'body'   => $response->body(),
+                'error' => $errorMsg,
+                'body'  => $response->body(),
             ]);
-            throw new RuntimeException("Wirepick : SMS refusé (statut : {$status}).");
+            throw new RuntimeException("Wirepick : {$errorMsg}");
         }
 
-        $msgid = (string) ($xml->sms->msgid ?? '');
+        // Succès — msgid dans messages->sms->msgid
+        $msgid = $xml ? (string) ($xml->sms->msgid ?? '') : '';
         Log::info("[wirepick] SMS envoyé à {$phoneE164}", ['msgid' => $msgid]);
     }
 }

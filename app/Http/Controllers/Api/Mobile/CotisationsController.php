@@ -88,7 +88,7 @@ class CotisationsController extends Controller
         }
 
         // Contrôle double cotisation (tontine uniquement) :
-        // un participant ne peut cotiser qu'une fois par cycle.
+        // un membre ne peut cotiser qu'une fois par cycle.
         // statut_paiement = 'paye' indique que le cycle courant est déjà réglé.
         if ($cagnotte->type === 'tontine_periodique') {
             $dejaPayeCycle = DB::table('tondo_participants')
@@ -223,7 +223,7 @@ class CotisationsController extends Controller
                             'updated_at' => now(),
                         ]);
 
-                    // 2) Met à jour le participant.
+                    // 2) Met à jour le membre.
                     $participant = DB::table('tondo_participants')
                         ->where('cagnotte_id', $payin->cagnotte_id)
                         ->where('user_id', $payin->user_id)
@@ -297,7 +297,7 @@ class CotisationsController extends Controller
     // ─────────────────────────────────────────────────────────────────
 
     /**
-     * Flux Airtel : appel Paynala → participant créé en `en_attente`, cagnotte
+     * Flux Airtel : appel Paynala → membre créé en `en_attente`, cagnotte
      * non encore créditée. La confirmation arrive via `status()`.
      */
     private function storeAirtel(
@@ -336,7 +336,7 @@ class CotisationsController extends Controller
                 $user, $cagnotte, $numeroPayeurE164,
                 $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite
             ) {
-                // 1) Participant (placeholder en_attente).
+                // 1) Membre (placeholder en_attente).
                 $participant = DB::table('tondo_participants')
                     ->where('cagnotte_id', $cagnotte->id)
                     ->where('user_id', $user->id)
@@ -360,17 +360,17 @@ class CotisationsController extends Controller
                         'created_at'           => now(),
                     ]);
 
-                    $incrParticipants = $cagnotte->type === 'cagnotte_ouverte'
-                        ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
+                    $incrMembres = $cagnotte->type === 'cagnotte_ouverte'
+                        ? ['nombre_participants' => DB::raw('nombre_membres + 1')]
                         : [];
                     DB::table('tondo_cagnottes')
                         ->where('id', $cagnotte->id)
                         ->update(array_merge(
-                            $incrParticipants,
+                            $incrMembres,
                             ['nombre_inscrits' => DB::raw('nombre_inscrits + 1')],
                         ));
                 }
-                // Participant déjà inscrit : on ne change pas son statut_paiement
+                // Membre déjà inscrit : on ne change pas son statut_paiement
                 // (il peut être 'paye' d'un cycle précédent). La mise à jour se fera
                 // dans status() à la confirmation Airtel.
 
@@ -392,7 +392,7 @@ class CotisationsController extends Controller
                         'montant_net'        => $montantNet,
                         'montant_penalite'   => $penalite,
                         'phone'              => $phoneAirtel,
-                        'is_new_participant' => $isNew,
+                        'is_new_membre' => $isNew,
                         'cagnotte_type'      => $cagnotte->type,
                     ]),
                     'response'      => json_encode($paymentData),
@@ -454,13 +454,13 @@ class CotisationsController extends Controller
                         'date_dernier_paiement' => now(),
                         'created_at'           => now(),
                     ]);
-                    $incrParticipants = $cagnotte->type === 'cagnotte_ouverte'
-                        ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
+                    $incrMembres = $cagnotte->type === 'cagnotte_ouverte'
+                        ? ['nombre_participants' => DB::raw('nombre_membres + 1')]
                         : [];
                     DB::table('tondo_cagnottes')
                         ->where('id', $cagnotte->id)
                         ->update(array_merge(
-                            $incrParticipants,
+                            $incrMembres,
                             ['nombre_inscrits' => DB::raw('nombre_inscrits + 1')],
                         ));
                 } else {
@@ -566,7 +566,7 @@ class CotisationsController extends Controller
 
         // 2) Alerte au gérant (seulement s'il n'est pas lui-même le payeur).
         if ($cagnotte->user_id !== $payeurId) {
-            $prenomNom = $payeur ? trim(($payeur->prenom ?? '') . ' ' . ($payeur->nom ?? '')) : 'Un participant';
+            $prenomNom = $payeur ? trim(($payeur->prenom ?? '') . ' ' . ($payeur->nom ?? '')) : 'Un membre';
             $svc->notifyOne(
                 userId:  $cagnotte->user_id,
                 titleFr: 'Nouvelle cotisation reçue',

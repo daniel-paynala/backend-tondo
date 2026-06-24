@@ -20,8 +20,8 @@ class RetraitImpossibleMail extends Mailable
      * @param  string $cagnotteReference Référence numérique courte de la tontine.
      * @param  string $cagnotteTitre     Nom de la tontine affiché dans l'email.
      * @param  int    $cycle             Numéro du cycle en cours.
-     * @param  int    $nombrePayes       Participants ayant cotisé ce cycle.
-     * @param  int    $nombreTotal       Nombre total de participants attendus.
+     * @param  int    $nombrePayes       Membres ayant cotisé ce cycle.
+     * @param  int    $nombreTotal       Nombre total de membres attendus.
      * @param  array  $nonPayes          Liste des retardataires : [['nom','prenom','numero_masque'],…].
      * @param  string $dateRetrait       Date prévue du retrait (format 'Y-m-d').
      */
@@ -51,7 +51,7 @@ class RetraitImpossibleMail extends Mailable
     /**
      * Définit le template de l'email.
      *
-     * Le template texte `mail.retrait-impossible` liste les participants
+     * Le template texte `mail.retrait-impossible` liste les membres
      * non payés avec leur numéro masqué pour respecter la confidentialité.
      */
     public function content(): Content

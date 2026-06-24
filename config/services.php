@@ -89,7 +89,7 @@ return [
         'client_id' => env('WIREPICK_CLIENT_ID'),
         'password'  => env('WIREPICK_PASSWORD'),
         // Nom d'expéditeur affiché sur le téléphone du destinataire (max 11 car.).
-        'from'      => env('WIREPICK_FROM', 'Tondo'),
+        'from'      => env('WIREPICK_FROM', 'Tonji'),
     ],
 
     'twilio' => [

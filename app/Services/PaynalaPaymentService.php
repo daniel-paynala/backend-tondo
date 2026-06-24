@@ -173,6 +173,84 @@ class PaynalaPaymentService
     }
 
     /**
+     * Vérifie le KYC Airtel et retourne les données complètes du compte,
+     * notamment le nom et le prénom pour l'auto-complétion du formulaire.
+     *
+     * Format de retour :
+     *   ['ok' => true, 'nom' => 'DOVI AKON', 'prenom' => 'Daniel',
+     *    'grade' => 'SUBS', 'type_client' => 'particulier']
+     *
+     * Retourne null si le service est indisponible (timeout, erreur réseau).
+     * Retourne ['ok' => false] si le numéro n'a pas de compte Airtel Money.
+     *
+     * Met en cache nom/prénom 24 h (même durée que checkKyc) pour éviter
+     * de rappeler l'API lors du verify-otp.
+     *
+     * @param  string $msisdn  Numéro local Gabon format 0XXXXXXXX ou E.164.
+     * @return array{ok:bool,nom?:string,prenom?:string,grade?:string,type_client?:string}|null
+     */
+    public function checkKycData(string $msisdn): ?array
+    {
+        $cacheKey     = 'paynala_kyc_'      . $msisdn;
+        $nomKey       = 'paynala_kyc_nom_'  . $msisdn;
+        $typeClientKey = 'paynala_kyc_type_' . $msisdn;
+
+        // Cache hit : toutes les données ont déjà été récupérées lors d'un appel précédent
+        if (Cache::has($cacheKey) && Cache::has($nomKey)) {
+            $cached = Cache::get($nomKey);   // tableau ['nom', 'prenom', 'grade']
+            return [
+                'ok'          => true,
+                'nom'         => $cached['nom']   ?? '',
+                'prenom'      => $cached['prenom'] ?? '',
+                'grade'       => $cached['grade']  ?? '',
+                'type_client' => Cache::get($typeClientKey, 'particulier'),
+            ];
+        }
+
+        try {
+            $token = $this->getToken();
+
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->post("{$this->baseUrl}/kyc", ['msisdn' => $msisdn]);
+
+            // Compte trouvé et actif
+            if ($response->json('success') === true && $response->json('status') === 'FOUND') {
+                $grade      = $response->json('data.grade') ?? 'SUBS';
+                $nom        = $response->json('data.last_name')  ?? '';
+                $prenom     = $response->json('data.first_name') ?? '';
+                $typeClient = in_array($grade, ['SUBS', 'TEMP'], true) ? 'particulier' : 'entreprise';
+
+                // Mise en cache 24 h — cohérente avec checkKyc()
+                Cache::put($cacheKey,      true,                                  now()->addHours(24));
+                Cache::put($nomKey,        ['nom' => $nom, 'prenom' => $prenom, 'grade' => $grade], now()->addHours(24));
+                Cache::put($typeClientKey, $typeClient,                            now()->addHours(24));
+
+                return compact('nom', 'prenom', 'grade', 'typeClient') + ['ok' => true, 'type_client' => $typeClient];
+            }
+
+            // Numéro sans compte Airtel Money
+            if ($response->json('success') === false && $response->json('status') === 'FAILED') {
+                return ['ok' => false];
+            }
+
+            // Réponse inattendue (merchant inactif, format inconnu…) → service indisponible
+            Log::warning('[paynala] checkKycData réponse inattendue', [
+                'msisdn' => $msisdn,
+                'status' => $response->status(),
+                'body'   => $response->json() ?? $response->body(),
+            ]);
+            return null;
+        } catch (\Throwable $e) {
+            Log::error('[paynala] checkKycData exception', [
+                'msisdn' => $msisdn,
+                'error'  => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
      * Retourne le type_client dérivé du grade KYC mis en cache lors du sign-up.
      * null si le KYC n'a pas encore été appelé pour ce numéro.
      */

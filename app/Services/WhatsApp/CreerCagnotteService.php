@@ -15,7 +15,7 @@ use Illuminate\Support\Str;
  * Appelé depuis BotService après validation du récapitulatif par l'utilisateur.
  * Encapsule toute la logique de construction du modèle TondoCagnotte :
  * calcul des frais (via AirtelFeesCalculator), génération de la référence unique,
- * inscription automatique du créateur comme premier participant (tontines uniquement).
+ * inscription automatique du créateur comme premier membre (tontines uniquement).
  */
 class CreerCagnotteService
 {
@@ -30,12 +30,12 @@ class CreerCagnotteService
      *   - cashBack          = montant récupéré par chaque bénéficiaire à son tour de passage
      *   - appliquerPlan()   = remplit montant_beneficiaire, total_a_envoyer, montant_avec_frais,
      *                         nombre_splits, nombre_envois depuis le plan AirtelFeesCalculator
-     *   - Le créateur est automatiquement inscrit comme premier participant.
+     *   - Le créateur est automatiquement inscrit comme premier membre.
      *
      * Pour 'cagnotte_ouverte' :
      *   - montant_cible     = objectif optionnel (0 ou absent = pas de limite)
      *   - appliquerPlan()   est appelé uniquement si un montant cible est défini
-     *   - Le créateur n'est PAS inscrit comme participant à la création.
+     *   - Le créateur n'est PAS inscrit comme membre à la création.
      *
      * @param  array     $data  Données collectées étape par étape (session BotService)
      * @param  TondoUser $user  Créateur de la cagnotte (déjà authentifié et certifié)
@@ -64,7 +64,7 @@ class CreerCagnotteService
         $cagnotte->numero_retrait_masque = $this->maskPhone($numeroRetrait);
 
         if ($type === 'tontine_periodique') {
-            // cashBack = montant net que chaque participant recevra à son tour de bénéficiaire
+            // cashBack = montant net que chaque membre recevra à son tour de bénéficiaire
             $cashBack = (int) $data['montant_par_cycle'];
             $plan     = $calc->plan($cashBack);
             // Remplir tous les champs financiers depuis le plan calculé
@@ -121,7 +121,7 @@ class CreerCagnotteService
         $cagnotte->date_creation = now();
         $cagnotte->save();
 
-        // Le créateur est automatiquement inscrit comme premier participant (tontine)
+        // Le créateur est automatiquement inscrit comme premier membre (tontine)
         if ($type === 'tontine_periodique') {
             DB::table('tondo_participants')->insert([
                 'id'              => (string) Str::uuid(),

@@ -23,7 +23,7 @@ use Illuminate\Validation\ValidationException;
  * Règles métier appliquées (claude-link/context.md RÈGLE 4-bis) :
  *  - reference numérique 4-5 chiffres unique
  *  - numero_retrait_masque immutable après création
- *  - tontine : montant_par_cycle (= cash back par cycle) + periodicite + N participants
+ *  - tontine : montant_par_cycle (= cash back par cycle) + periodicite + N membres
  *  - cagnotte ouverte : montant_cible (= cash back final) et date_fin optionnels
  *  - frais 2 % Paynala + frais Airtel retrait à la charge du cotisant (Modèle A)
  *  - plafond 500 000 FCFA par transaction → nombre_envois calculé par
@@ -44,9 +44,9 @@ class CagnottesController extends Controller
      *
      * Retourne :
      *   - les cagnottes dont l'user est gérant (role_utilisateur = 'gerant')
-     *   - les cagnottes dont l'user est participant cotiseur (role_utilisateur = 'cotiseur'),
+     *   - les cagnottes dont l'user est membre cotiseur (role_utilisateur = 'cotiseur'),
      *     c.-à-d. celles où il apparaît dans tondo_participants avec son user_id.
-     *     Pour les cagnottes ouvertes, l'entrée participant est créée automatiquement
+     *     Pour les cagnottes ouvertes, l'entrée membre est créée automatiquement
      *     au premier paiement (CotisationsController::store).
      */
     public function index(Request $request): JsonResponse
@@ -67,7 +67,7 @@ class CagnottesController extends Controller
             ->map(fn ($c) => array_merge($this->serialize($c), ['role_utilisateur' => 'gerant']));
 
         // ── Cagnottes cotiseur ────────────────────────────────────────────
-        // Récupère les IDs des cagnottes où l'user est participant (user_id connu).
+        // Récupère les IDs des cagnottes où l'user est membre (user_id connu).
         $cagnotteIdsCotiseur = DB::table('tondo_participants')
             ->where('user_id', $user->id)
             ->pluck('cagnotte_id');
@@ -113,7 +113,7 @@ class CagnottesController extends Controller
      * Tontine périodique :
      *   { type: 'tontine_periodique', titre, numero_retrait,
      *     montant_par_cycle, periodicite, intervalle?, jour_semaine?, jour_mois?,
-     *     nombre_participants }
+     *     nombre_membres }
      *
      * Cagnotte ouverte :
      *   { type: 'cagnotte_ouverte', titre, numero_retrait,
@@ -237,7 +237,7 @@ class CagnottesController extends Controller
 
         $cagnotte->save();
 
-        // Le créateur est automatiquement inscrit comme premier participant.
+        // Le créateur est automatiquement inscrit comme premier membre.
         if ($type === 'tontine_periodique') {
             DB::table('tondo_participants')->insert([
                 'id'              => (string) Str::uuid(),
@@ -251,7 +251,7 @@ class CagnottesController extends Controller
                 'montant_paye'    => 0,
                 'created_at'      => now(),
             ]);
-            // nombre_inscrits ne compte que les participants AJOUTÉS après création.
+            // nombre_inscrits ne compte que les membres AJOUTÉS après création.
             // Le créateur est toujours +1 implicite — l'UI ajoute ce +1 à l'affichage.
         }
 
@@ -263,7 +263,7 @@ class CagnottesController extends Controller
     /**
      * GET /api/mobile/cagnottes/{reference}
      *
-     * Détail + participants. Accessible à tout utilisateur authentifié
+     * Détail + membres. Accessible à tout utilisateur authentifié
      * qui connaît la référence (flux "Rejoindre"). Le rôle est renvoyé
      * dans la réponse pour que le client adapte son UI.
      */
@@ -283,8 +283,8 @@ class CagnottesController extends Controller
 
         $configSvc    = app(TondoConfigService::class);
         $userMasque   = $this->maskPhone($user->numero);
-        // Montants déjà reçus par participant via payout (pour transparence reversements).
-        $montantsRecusParParticipant = DB::table('tondo_payout')
+        // Montants déjà reçus par membre via payout (pour transparence reversements).
+        $montantsRecusParMembre = DB::table('tondo_payout')
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->whereNotNull('user_id')
@@ -296,7 +296,7 @@ class CagnottesController extends Controller
             ->where('cagnotte_id', $cagnotte->id)
             ->orderBy('created_at', 'asc')
             ->get()
-            ->map(function ($p) use ($user, $userMasque, $configSvc, $montantsRecusParParticipant) {
+            ->map(function ($p) use ($user, $userMasque, $configSvc, $montantsRecusParMembre) {
                 $opInfo = $configSvc->detectOperateur($p->numero_masque, $user->project_id);
                 $isMe = ($p->user_id !== null && $p->user_id === $user->id)
                     || $p->numero_masque === $userMasque;
@@ -315,7 +315,7 @@ class CagnottesController extends Controller
                     'operateur_logo'            => $opInfo['operateur_logo'],
                     'ordre_passage'             => (int) ($p->ordre_passage ?? 0),
                     'montant_recu_reversement'  => (int) ($p->user_id
-                        ? ($montantsRecusParParticipant[$p->user_id] ?? 0)
+                        ? ($montantsRecusParMembre[$p->user_id] ?? 0)
                         : 0),
                 ];
             });
@@ -337,7 +337,8 @@ class CagnottesController extends Controller
             ->limit(50)
             ->select(
                 'tondo_paiements.id',
-                'tondo_paiements.participant_id',
+                // Alias DB → propriété $h->participant_id (colonne réelle : participant_id).
+                DB::raw('tondo_paiements.participant_id as membre_id'),
                 'tondo_paiements.montant',
                 'tondo_paiements.date',
                 DB::raw("CONCAT(tondo_participants.prenom, ' ', tondo_participants.nom) as participant_nom")
@@ -349,11 +350,11 @@ class CagnottesController extends Controller
         }
 
         $historique = $historiqueQuery->get()->map(fn ($h) => [
-            'id'             => $h->id,
-            'participant_id' => $h->participant_id,
-            'participant_nom'=> $h->participant_nom,
-            'montant'        => $h->montant,
-            'date'           => $h->date,
+            'id'         => $h->id,
+            'participant_id'  => $h->participant_id,
+            'participant_nom' => $h->participant_nom,
+            'montant'    => $h->montant,
+            'date'       => $h->date,
         ]);
 
         // Sorties (reversements effectués) — visibles par tous (transparence).
@@ -434,13 +435,13 @@ class CagnottesController extends Controller
     /**
      * POST /api/mobile/cagnottes/{reference}/participants
      *
-     * Ajoute un participant à une cagnotte. Seul le gérant peut appeler cet endpoint.
+     * Ajoute un membre à une cagnotte. Seul le gérant peut appeler cet endpoint.
      *
      * Corps : { numero, nom?, prenom? }
      *   - Si le numéro est trouvé dans tondo_users, nom/prénom sont récupérés automatiquement.
      *   - Sinon, nom et prénom sont obligatoires dans le corps.
      *
-     * Retourne 201 + { participant } en cas de succès.
+     * Retourne 201 + { membre } en cas de succès.
      * Retourne 422 si numéro déjà présent ou si nom/prénom manquants.
      */
     public function storeParticipant(Request $request, string $reference): JsonResponse
@@ -462,11 +463,11 @@ class CagnottesController extends Controller
 
         // Contrôle capacité : pour une tontine périodique, le créateur occupe
         // une place (non comptée dans nombre_inscrits). Tontine pleine si
-        // nombre_inscrits + 1 (créateur) >= nombre_participants.
+        // nombre_inscrits + 1 (créateur) >= nombre_membres.
         if ($cagnotte->type === 'tontine_periodique' && (int) $cagnotte->nombre_participants > 0) {
             if ((int) $cagnotte->nombre_inscrits + 1 >= (int) $cagnotte->nombre_participants) {
                 return response()->json([
-                    'message' => 'Tontine complète — le nombre maximum de participants est atteint.',
+                    'message' => 'Tontine complète — le nombre maximum de membres est atteint.',
                 ], 422);
             }
         }
@@ -487,7 +488,7 @@ class CagnottesController extends Controller
             ->exists();
 
         if ($dejaPrecent) {
-            return response()->json(['message' => 'Ce participant est déjà dans la cagnotte.'], 422);
+            return response()->json(['message' => 'Ce membre est déjà dans la cagnotte.'], 422);
         }
 
         // Recherche du compte Tondo si le numéro est enregistré
@@ -495,7 +496,7 @@ class CagnottesController extends Controller
             ->where('numero', $numero)
             ->first();
 
-        // Si user_id déjà participant (numéro différent mais même compte)
+        // Si user_id déjà membre (numéro différent mais même compte)
         if ($utilisateur) {
             $dejaParUserId = DB::table('tondo_participants')
                 ->where('cagnotte_id', $cagnotte->id)
@@ -521,7 +522,7 @@ class CagnottesController extends Controller
 
         $opInfo = app(TondoConfigService::class)->detectOperateur($numero, $user->project_id);
 
-        // Crée un compte light si le participant n'a pas encore de compte Tondo.
+        // Crée un compte light si le membre n'a pas encore de compte Tondo.
         // Les comptes light ont accès au paiement via web/WhatsApp uniquement.
         // Ils peuvent s'inscrire normalement ensuite — leur compte sera upgradé.
         $wasExisting = $utilisateur !== null;
@@ -555,10 +556,10 @@ class CagnottesController extends Controller
             'created_at'      => now(),
         ]);
 
-        // Incrémente le compteur d'inscrits (nombre_participants reste la cible déclarée).
+        // Incrémente le compteur d'inscrits (nombre_membres reste la cible déclarée).
         $cagnotte->increment('nombre_inscrits');
 
-        // Notifie le participant ajouté (uniquement les comptes full avec device enregistré).
+        // Notifie le membre ajouté (uniquement les comptes full avec device enregistré).
         if ($utilisateur && ($utilisateur->compte_type ?? 'full') === 'full') {
             app(OneSignalService::class)->notifyOne(
                 userId:  $utilisateur->id,
@@ -608,14 +609,14 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'La tontine doit être active pour être démarrée.'], 422);
         }
         if ((int) $cagnotte->nombre_inscrits < 1) {
-            return response()->json(['message' => 'Ajoutez au moins un participant avant de démarrer.'], 422);
+            return response()->json(['message' => 'Ajoutez au moins un membre avant de démarrer.'], 422);
         }
 
         $cagnotte->statut        = 'en_cours';
         $cagnotte->date_demarrage = now();
         $cagnotte->save();
 
-        // Récupère tous les participants ayant un compte full pour les notifier.
+        // Récupère tous les membres ayant un compte full pour les notifier.
         $participants = DB::table('tondo_participants')
             ->join('users', 'users.id', '=', 'tondo_participants.user_id')
             ->where('tondo_participants.cagnotte_id', $cagnotte->id)
@@ -625,7 +626,7 @@ class CagnottesController extends Controller
 
         $notifSvc = app(OneSignalService::class);
 
-        // Notifie tous les participants du démarrage.
+        // Notifie tous les membres du démarrage.
         $tousLesIds = $participants->pluck('user_id')->filter()->values()->all();
         if (! empty($tousLesIds)) {
             $notifSvc->notify(
@@ -653,7 +654,7 @@ class CagnottesController extends Controller
     /**
      * POST /api/mobile/cagnottes/{reference}/participants/ordre
      *
-     * Enregistre l'ordre de passage des participants.
+     * Enregistre l'ordre de passage des membres.
      * Corps : { "ordre": ["uuid1", "uuid2", ...] } — liste ordonnée d'IDs.
      * Interdit si la tontine est déjà en_cours.
      */
@@ -678,7 +679,7 @@ class CagnottesController extends Controller
             'ordre.*' => ['required', 'string'],
         ]);
 
-        // Auto-heal : participants ajoutés avant la fonctionnalité "comptes light"
+        // Auto-heal : membres ajoutés avant la fonctionnalité "comptes light"
         // n'ont pas de user_id. On leur crée un compte light minimal avec un numéro
         // synthétique (non utilisable pour SMS/paiement) avant d'enregistrer l'ordre.
         $this->healParticipantsSansCompte($data['ordre'], $cagnotte->id, $user->project_id);
@@ -758,7 +759,7 @@ class CagnottesController extends Controller
     /**
      * POST /api/mobile/cagnottes/{reference}/rejoindre
      *
-     * Ajoute l'utilisateur courant comme participant à la cagnotte identifiée
+     * Ajoute l'utilisateur courant comme membre à la cagnotte identifiée
      * par sa référence. L'utilisateur doit avoir un compte full (JWT valide).
      * Pour une tontine : impossible si déjà démarrée ou pleine.
      */
@@ -794,12 +795,12 @@ class CagnottesController extends Controller
         if ($cagnotte->type === 'tontine_periodique' && (int) $cagnotte->nombre_participants > 0) {
             if ((int) $cagnotte->nombre_inscrits + 1 >= (int) $cagnotte->nombre_participants) {
                 return response()->json([
-                    'message' => 'Tontine complète — le nombre maximum de participants est atteint.',
+                    'message' => 'Tontine complète — le nombre maximum de membres est atteint.',
                 ], 422);
             }
         }
 
-        // Déjà participant (via user_id).
+        // Déjà membre (via user_id).
         $dejaInscrit = DB::table('tondo_participants')
             ->where('cagnotte_id', $cagnotte->id)
             ->where('user_id', $user->id)
@@ -832,9 +833,9 @@ class CagnottesController extends Controller
         // Notifie le gérant.
         app(OneSignalService::class)->notifyOne(
             userId:  $cagnotte->user_id,
-            titleFr: 'Nouveau participant',
+            titleFr: 'Nouveau membre',
             bodyFr:  "{$user->prenom} {$user->nom} a rejoint « {$cagnotte->titre} ».",
-            data:    ['type' => 'nouveau_participant', 'cagnotte_id' => $cagnotte->id],
+            data:    ['type' => 'nouveau_membre', 'cagnotte_id' => $cagnotte->id],
         );
 
         return response()->json([
@@ -853,7 +854,7 @@ class CagnottesController extends Controller
     /**
      * DELETE /api/mobile/cagnottes/{reference}/participants/moi
      *
-     * Retire l'utilisateur courant de la liste des participants.
+     * Retire l'utilisateur courant de la liste des membres.
      * Règles :
      *  – Tontine : uniquement si statut = active (pas encore démarrée).
      *  – Cotisation ouverte : à tout moment.
@@ -901,7 +902,7 @@ class CagnottesController extends Controller
     }
 
     /**
-     * Retire un participant de la tontine — réservé au gérant.
+     * Retire un membre de la tontine — réservé au gérant.
      * Autorisé même si la tontine est en cours (statut en_cours).
      */
     public function retirerParticipant(Request $request, string $reference, string $participantId): JsonResponse
@@ -927,7 +928,7 @@ class CagnottesController extends Controller
             ->first();
 
         if (! $participant) {
-            return response()->json(['message' => 'Participant introuvable.'], 404);
+            return response()->json(['message' => 'Membre introuvable.'], 404);
         }
 
         // Empêcher le gérant de se retirer lui-même via cette route.
@@ -942,19 +943,19 @@ class CagnottesController extends Controller
             $cagnotte->decrement('nombre_inscrits');
         }
 
-        return response()->json(['message' => 'Participant retiré avec succès.']);
+        return response()->json(['message' => 'Membre retiré avec succès.']);
     }
 
     // ─────────────────────────────────────────────────────────────────
 
     /**
-     * Crée des comptes light pour les participants qui n'en ont pas encore
+     * Crée des comptes light pour les membres qui n'en ont pas encore
      * (ajoutés avant la fonctionnalité comptes light, donc user_id = null).
      *
      * Le numéro synthétique `+00000XXXXXXXXXX` est déterministe (hash du
-     * participant ID) et clairement fictif (indicatif +00000 inexistant).
+     * membre ID) et clairement fictif (indicatif +00000 inexistant).
      * Il ne servira jamais à un SMS ou un paiement — rôle : ancrer l'identité
-     * du participant pour les futures fonctionnalités nécessitant user_id.
+     * du membre pour les futures fonctionnalités nécessitant user_id.
      */
     private function healParticipantsSansCompte(array $participantIds, string $cagnotteId, string $projectId): void
     {
@@ -1050,7 +1051,7 @@ class CagnottesController extends Controller
     /**
      * POST /api/mobile/cagnottes/{reference}/rappel
      *
-     * Le gérant envoie un rappel de paiement à tous les participants
+     * Le gérant envoie un rappel de paiement à tous les membres
      * dont le statut est encore `en_attente`.
      * Réservé au créateur de la cagnotte.
      */
@@ -1067,7 +1068,7 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Cagnotte introuvable ou accès refusé.'], 404);
         }
 
-        // Participants en retard ayant un compte full.
+        // Membres en retard ayant un compte full.
         $participantsEnAttente = DB::table('tondo_participants')
             ->join('users', 'users.id', '=', 'tondo_participants.user_id')
             ->where('tondo_participants.cagnotte_id', $cagnotte->id)
@@ -1079,7 +1080,7 @@ class CagnottesController extends Controller
             ->all();
 
         if (empty($participantsEnAttente)) {
-            return response()->json(['message' => 'Aucun participant en attente de paiement.']);
+            return response()->json(['message' => 'Aucun membre en attente de paiement.']);
         }
 
         app(OneSignalService::class)->notify(
@@ -1245,7 +1246,7 @@ class CagnottesController extends Controller
     }
 
     /**
-     * Retourne le prochain participant à recevoir la mise (cyclesCompletes + 1).
+     * Retourne le prochain membre à recevoir la mise (cyclesCompletes + 1).
      */
     private function calculerProchainBeneficiaire(array $participants, int $cyclesCompletes): ?array
     {

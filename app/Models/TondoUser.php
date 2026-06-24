@@ -49,7 +49,7 @@ class TondoUser extends Authenticatable
      * Retourne toutes les cagnottes/tontines créées par cet utilisateur.
      *
      * Un utilisateur peut être à la fois gérant de plusieurs cagnottes
-     * et participant dans d'autres (via TondoParticipant).
+     * et membre dans d'autres (via TondoMembre).
      */
     public function cagnottes(): HasMany
     {

@@ -107,7 +107,7 @@ class TontineService
      * Calcule le montant de pénalité actuellement dû pour une tontine en retard.
      *
      * La deadline d'un cycle est : prochaineDate à 20h00 (Africa/Libreville).
-     * Si le participant paie après cette heure, la pénalité s'accumule par
+     * Si le membre paie après cette heure, la pénalité s'accumule par
      * heure ou par jour selon `penalite_frequence`.
      *
      * La pénalité n'est pas soumise aux frais Paynala/Airtel — elle s'ajoute

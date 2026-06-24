@@ -167,7 +167,7 @@ class ProfilController extends Controller
      *
      * Vérifie si un numéro est enregistré dans Tondo.
      * Renvoie { found: true, nom, prenom } ou { found: false }.
-     * Utilisé par l'écran d'ajout de participants pour éviter la saisie manuelle.
+     * Utilisé par l'écran d'ajout de membres pour éviter la saisie manuelle.
      */
     public function lookup(Request $request): JsonResponse
     {

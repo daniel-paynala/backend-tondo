@@ -21,11 +21,11 @@ use Illuminate\Support\Str;
  * Cron AWS       : * * * * * php artisan schedule:run >> /dev/null 2>&1
  *
  * Règles métier appliquées :
- *  – Retrait effectué uniquement si TOUS les participants ont cotisé ce cycle.
+ *  – Retrait effectué uniquement si TOUS les membres ont cotisé ce cycle.
  *  – Si cotisations incomplètes → mail au gérant + admins, pas de retrait.
  *  – Si Paynala KO → mail admins, AUCUNE restauration automatique du solde.
- *  – Après succès → statut_paiement de tous les participants remis à en_attente.
- *  – Notification OneSignal au bénéficiaire + aux autres participants.
+ *  – Après succès → statut_paiement de tous les membres remis à en_attente.
+ *  – Notification OneSignal au bénéficiaire + aux autres membres.
  */
 class TraiterRetraitsTontines extends Command
 {
@@ -36,7 +36,7 @@ class TraiterRetraitsTontines extends Command
      * Point d'entrée de la commande.
      *
      * Parcourt toutes les tontines actives et déclenche le retrait si la date
-     * du cycle courant correspond à aujourd'hui et que tous les participants ont cotisé.
+     * du cycle courant correspond à aujourd'hui et que tous les membres ont cotisé.
      *
      * @param  PaynalaPaymentService $paynala       Service de décaissement Mobile Money.
      * @param  OneSignalService      $notif          Service de notifications push.
@@ -72,7 +72,7 @@ class TraiterRetraitsTontines extends Command
                 ->where('statut', 'succes')
                 ->count();
 
-            // Rotation déjà terminée — tous les participants ont reçu leur mise.
+            // Rotation déjà terminée — tous les membres ont reçu leur mise.
             if ($cyclesCompletes >= (int) $cagnotte->nombre_inscrits && (int) $cagnotte->nombre_inscrits > 0) {
                 $ignores++;
                 continue;
@@ -88,8 +88,8 @@ class TraiterRetraitsTontines extends Command
             $cycleActuel = $cyclesCompletes + 1;
             $this->line("  → [{$cagnotte->reference}] « {$cagnotte->titre} » — cycle {$cycleActuel}");
 
-            // ── Vérifier que TOUS les participants ont cotisé ─────────────────
-            $totalParticipants = (int) DB::table('tondo_participants')
+            // ── Vérifier que TOUS les membres ont cotisé ─────────────────
+            $totalMembres = (int) DB::table('tondo_participants')
                 ->where('cagnotte_id', $cagnotte->id)
                 ->count();
 
@@ -98,7 +98,7 @@ class TraiterRetraitsTontines extends Command
                 ->where('statut_paiement', 'paye')
                 ->count();
 
-            if ($participantsPaies < $totalParticipants) {
+            if ($participantsPaies < $totalMembres) {
                 $nonPayes = DB::table('tondo_participants')
                     ->where('cagnotte_id', $cagnotte->id)
                     ->whereIn('statut_paiement', ['en_attente', 'en_retard'])
@@ -110,18 +110,18 @@ class TraiterRetraitsTontines extends Command
                     ])
                     ->toArray();
 
-                $this->warn("    Retrait suspendu — {$participantsPaies}/{$totalParticipants} ont cotisé.");
+                $this->warn("    Retrait suspendu — {$participantsPaies}/{$totalMembres} ont cotisé.");
 
                 Log::warning('[tontines:retrait] Retrait suspendu — cotisations incomplètes', [
                     'cagnotte'  => $cagnotte->reference,
                     'cycle'     => $cycleActuel,
                     'payes'     => $participantsPaies,
-                    'total'     => $totalParticipants,
+                    'total'     => $totalMembres,
                     'non_payes' => array_column($nonPayes, 'numero_masque'),
                 ]);
 
                 if (! $isDryRun) {
-                    $this->envoyerAlerteIncomplete($cagnotte, $cycleActuel, $participantsPaies, $totalParticipants, $nonPayes, $today);
+                    $this->envoyerAlerteIncomplete($cagnotte, $cycleActuel, $participantsPaies, $totalMembres, $nonPayes, $today);
                 }
 
                 $ignores++;
@@ -134,7 +134,7 @@ class TraiterRetraitsTontines extends Command
                 ->where('tondo_participants.cagnotte_id', $cagnotte->id)
                 ->where('tondo_participants.ordre_passage', $cycleActuel)
                 ->select(
-                    'tondo_participants.id as participant_id',
+                    'tondo_participants.id as membre_id',
                     'tondo_participants.nom',
                     'tondo_participants.prenom',
                     'users.id as user_id',
@@ -277,7 +277,7 @@ class TraiterRetraitsTontines extends Command
                         'updated_at'   => now(),
                     ]);
 
-                // Remettre tous les participants à en_attente pour le cycle suivant.
+                // Remettre tous les membres à en_attente pour le cycle suivant.
                 DB::table('tondo_participants')
                     ->where('cagnotte_id', $cagnotte->id)
                     ->update([
@@ -349,7 +349,7 @@ class TraiterRetraitsTontines extends Command
                     $notif->notify(
                         userIds: $tousIds,
                         titleFr: 'Rotation terminée 🎉',
-                        bodyFr:  "Tous les participants de « {$cagnotte->titre} » ont reçu leur mise. Merci à tous !",
+                        bodyFr:  "Tous les membres de « {$cagnotte->titre} » ont reçu leur mise. Merci à tous !",
                         data:    ['type' => 'rotation_terminee', 'cagnotte_id' => $cagnotte->id],
                     );
                 }
@@ -372,9 +372,9 @@ class TraiterRetraitsTontines extends Command
      *
      * @param  TondoCagnotte $cagnotte       Tontine concernée.
      * @param  int           $cycle          Numéro du cycle en cours.
-     * @param  int           $nombrePayes    Nombre de participants ayant cotisé.
-     * @param  int           $nombreTotal    Nombre total de participants attendus.
-     * @param  array         $nonPayes       Liste des participants non payés (nom, prénom, numéro masqué).
+     * @param  int           $nombrePayes    Nombre de membres ayant cotisé.
+     * @param  int           $nombreTotal    Nombre total de membres attendus.
+     * @param  array         $nonPayes       Liste des membres non payés (nom, prénom, numéro masqué).
      * @param  string        $dateRetrait    Date prévue du retrait (format 'Y-m-d').
      */
     private function envoyerAlerteIncomplete(

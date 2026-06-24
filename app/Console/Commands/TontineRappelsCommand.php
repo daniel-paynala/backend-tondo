@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Envoie des rappels de cotisation aux participants qui n'ont pas encore
+ * Envoie des rappels de cotisation aux membres qui n'ont pas encore
  * payé, à J-5, J-2, J (jour du retrait) et J+1 (retard).
  *
  * Planification : quotidienne à 09h00 (Africa/Libreville).
@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\Log;
 class TontineRappelsCommand extends Command
 {
     protected $signature   = 'tontines:rappels {--dry-run : Affiche les rappels sans les envoyer}';
-    protected $description = 'Envoie les rappels de cotisation aux participants en retard ou proches de l\'échéance.';
+    protected $description = 'Envoie les rappels de cotisation aux membres en retard ou proches de l\'échéance.';
 
     /**
      * Jours à surveiller (en jours relatifs à la date de retrait).
@@ -84,7 +84,7 @@ class TontineRappelsCommand extends Command
                 continue;
             }
 
-            // Participants avec compte Tondo actif qui n'ont pas encore cotisé ce cycle.
+            // Membres avec compte Tondo actif qui n'ont pas encore cotisé ce cycle.
             $nonPayes = DB::table('tondo_participants')
                 ->join('users', 'tondo_participants.user_id', '=', 'users.id')
                 ->where('tondo_participants.cagnotte_id', $cagnotte->id)
@@ -96,7 +96,7 @@ class TontineRappelsCommand extends Command
                 ->all();
 
             if (empty($nonPayes)) {
-                $this->line("  [{$cagnotte->reference}] Tous les participants ont cotisé — pas de rappel.");
+                $this->line("  [{$cagnotte->reference}] Tous les membres ont cotisé — pas de rappel.");
                 continue;
             }
 

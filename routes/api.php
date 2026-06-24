@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversements
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
 use App\Http\Controllers\Api\WhatsApp\StatusController as WhatsAppStatusController;
+use App\Http\Controllers\Api\Ussd\UssdController;
 use Illuminate\Support\Facades\Route;
 
 // ============================================================================
@@ -37,6 +38,20 @@ Route::get('/health', fn () => response()->json([
 Route::prefix('whatsapp')->group(function () {
     Route::post('/webhook', [WhatsAppWebhookController::class, 'recevoir']);
     Route::post('/status',  [WhatsAppStatusController::class,  'recevoir']);
+});
+
+// ============================================================================
+//  Canal USSD — préfixe /api/ussd/
+//  Public (pas d'auth Sanctum) — sécurisé par l'entête X-Ussd-Secret
+//  dont la valeur doit correspondre à la variable d'environnement USSD_SECRET.
+//  Appelé par la passerelle USSD de l'opérateur (Airtel, Moov, etc.).
+// ============================================================================
+Route::prefix('ussd')->group(function () {
+    // Infos d'une cagnotte + confirmation du MSISDN cotisant
+    Route::get('/cagnotte/{reference}', [UssdController::class, 'infos']);
+
+    // Initiation du paiement (validation montant + lancement Mobile Money)
+    Route::post('/cotiser', [UssdController::class, 'cotiser']);
 });
 
 // ============================================================================
@@ -103,9 +118,11 @@ Route::prefix('admin')->group(function () {
 //  Auth phone OTP en prod (les controllers ne changent pas).
 // ============================================================================
 Route::prefix('mobile')->group(function () {
-    // Public — flow OTP
+    // Public — flow OTP + vérification KYC pendant saisie
     Route::post('/auth/request-otp', [MobileAuthController::class, 'requestOtp']);
     Route::post('/auth/verify-otp',  [MobileAuthController::class, 'verifyOtp']);
+    // Appelé dès que le champ téléphone atteint 9 chiffres — pas d'auth
+    Route::get('/auth/kyc-check',    [MobileAuthController::class, 'kycCheck']);
 
     // Protégé par token Sanctum (guard mobile)
     Route::middleware('auth:mobile')->group(function () {

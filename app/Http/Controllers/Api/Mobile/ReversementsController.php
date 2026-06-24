@@ -36,7 +36,7 @@ class ReversementsController extends Controller
      * Body : {
      *   cagnotte_reference   : string  (4-5 chiffres)
      *   numero_beneficiaire  : string|null  (9 chiffres local, ex : 074577473)
-     *   participant_id        : string|null  (UUID tondo_participants.id)
+     *   membre_id        : string|null  (UUID tondo_participants.id)
      *   montant              : int           (FCFA, min 100, max 500 000)
      * }
      */
@@ -51,7 +51,7 @@ class ReversementsController extends Controller
 
         if (empty($data['numero_beneficiaire']) && empty($data['participant_id'])) {
             throw ValidationException::withMessages([
-                'numero_beneficiaire' => 'Indiquez un numéro bénéficiaire ou sélectionnez un participant.',
+                'numero_beneficiaire' => 'Indiquez un numéro bénéficiaire ou sélectionnez un membre.',
             ]);
         }
 
@@ -98,7 +98,7 @@ class ReversementsController extends Controller
 
             if (! $participant || empty($participant->numero_user)) {
                 throw ValidationException::withMessages([
-                    'participant_id' => 'Participant introuvable dans cette cagnotte.',
+                    'participant_id' => 'Membre introuvable dans cette cagnotte.',
                 ]);
             }
 

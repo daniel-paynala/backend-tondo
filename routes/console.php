@@ -43,7 +43,7 @@ Schedule::command(TraiterReversementsAutoCagnottes::class)
 
 /*
  * Rappels de cotisation — 09h heure de Libreville.
- * Envoie des notifications aux participants qui n'ont pas cotisé à :
+ * Envoie des notifications aux membres qui n'ont pas cotisé à :
  *   J-5, J-2, J (jour du retrait), J+1 (retard).
  */
 Schedule::command(TontineRappelsCommand::class)

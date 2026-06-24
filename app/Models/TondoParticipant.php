@@ -8,12 +8,12 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Membre inscrit à une cagnotte ou une tontine périodique.
  *
- * Un participant peut être :
+ * Un membre peut être :
  *  – Un utilisateur Tondo enregistré (`user_id` renseigné, `est_compte_light` = false).
  *  – Un « compte light » ajouté manuellement par le gérant via saisie directe
  *    (nom/prénom + numéro uniquement, `est_compte_light` = true, `user_id` = null).
  *
- * Champ `ordre_passage` : position du participant dans la rotation de la tontine.
+ * Champ `ordre_passage` : position du membre dans la rotation de la tontine.
  * C'est lui qui détermine qui reçoit les fonds à chaque cycle.
  *
  * Champ `statut_paiement` : 'en_attente' | 'paye' | 'en_retard'.
@@ -26,12 +26,12 @@ use Illuminate\Database\Eloquent\Model;
  * @property string   $prenom
  * @property string   $numero            Numéro Mobile Money E.164.
  * @property ?string  $numero_masque     Version masquée affichée dans l'UI (ex : 07X XX XX 45).
- * @property int      $montant_paye      Total cumulé versé par ce participant (FCFA).
+ * @property int      $montant_paye      Total cumulé versé par ce membre (FCFA).
  * @property int      $ordre_passage     Ordre de réception dans la rotation tontine.
  * @property string   $statut_paiement   Statut du paiement pour le cycle en cours.
  * @property bool     $est_compte_light  True si ajouté manuellement sans compte Tondo.
  */
-class TondoParticipant extends Model
+class TondoMembre extends Model
 {
     use UuidPrimary;
 

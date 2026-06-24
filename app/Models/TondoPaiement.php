@@ -6,7 +6,7 @@ use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Enregistrement d'un paiement (payin) validé par un participant.
+ * Enregistrement d'un paiement (payin) validé par un membre.
  *
  * Chaque ligne correspond à une cotisation réussie : le montant a été débité
  * du compte Mobile Money de l'utilisateur et crédité sur la cagnotte.

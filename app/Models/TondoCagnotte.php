@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Représente une cagnotte ou une tontine périodique dans Tondo.
  *
  * Champ `type` :
- *  – 'tontine_periodique' : rotation entre participants avec payout cyclique.
+ *  – 'tontine_periodique' : rotation entre membres avec payout cyclique.
  *  – 'cagnotte_ouverte'   : collecte libre, reversement sur le numéro de retrait.
  *
  * Champ `statut` : 'brouillon' → 'en_cours' → 'cloturee'.
@@ -78,13 +78,13 @@ class TondoCagnotte extends Model
     }
 
     /**
-     * Retourne la liste des participants inscrits à cette cagnotte/tontine.
+     * Retourne la liste des membres inscrits à cette cagnotte/tontine.
      *
-     * Pour les tontines périodiques, les participants ont un `ordre_passage`
+     * Pour les tontines périodiques, les membres ont un `ordre_passage`
      * qui détermine l'ordre de réception des fonds.
      */
-    public function participants(): HasMany
+    public function membres(): HasMany
     {
-        return $this->hasMany(TondoParticipant::class, 'cagnotte_id');
+        return $this->hasMany(TondoMembre::class, 'cagnotte_id');
     }
 }

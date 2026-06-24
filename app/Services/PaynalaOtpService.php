@@ -21,8 +21,8 @@ use RuntimeException;
  */
 class PaynalaOtpService
 {
-    /** Durée de validité d'un code OTP en secondes (10 minutes). */
-    private const TTL_SECONDS = 600;
+    /** Durée de validité d'un code OTP en secondes (5 minutes). */
+    private const TTL_SECONDS = 300;
 
     /** Nombre maximum de tentatives de vérification avant invalidation. */
     private const MAX_TRIES = 5;
@@ -53,7 +53,7 @@ class PaynalaOtpService
             self::TTL_SECONDS
         );
 
-        $message = "Tondo - Votre code de vérification : {$code}. Valable 10 minutes. Ne le partagez jamais.";
+        $message = "Tonji - Votre code de vérification : {$code}. Valable 5 minutes. Ne le partagez jamais.";
 
         $this->wirepick->send($phoneE164, $message);
 

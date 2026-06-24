@@ -306,8 +306,8 @@ class CotisationService
      *   1. Génère un identifiant de transaction interne (TONDOPAYIN + random).
      *   2. Convertit le numéro E.164 en format local Airtel (0XXXXXXXX).
      *   3. Appelle PaynalaPaymentService::createPayment() — envoie la demande push à Airtel.
-     *   4. En DB (transaction atomique) : crée ou met à jour le participant,
-     *      incrémente nombre_inscrits/nombre_participants, insère la ligne tondo_payin
+     *   4. En DB (transaction atomique) : crée ou met à jour le membre,
+     *      incrémente nombre_inscrits/nombre_membres, insère la ligne tondo_payin
      *      avec statut 'initie'.
      *
      * Le statut reste 'initie' jusqu'à confirmation Airtel (webhook ou polling).
@@ -356,7 +356,7 @@ class CotisationService
                 $user, $cagnotte, $transId,
                 $montantNet, $montantBrut, $frais, $penalite, $paymentData, $phoneAirtel
             ) {
-                // Vérifier si l'utilisateur est déjà participant (paiement partiel antérieur)
+                // Vérifier si l'utilisateur est déjà membre (paiement partiel antérieur)
                 $participant = DB::table('tondo_participants')
                     ->where('cagnotte_id', $cagnotte->id)
                     ->where('user_id', $user->id)
@@ -365,7 +365,7 @@ class CotisationService
                 $isNew = ! $participant;
 
                 if ($isNew) {
-                    // Nouveau participant : insérer la ligne et incrémenter les compteurs
+                    // Nouveau membre : insérer la ligne et incrémenter les compteurs
                     DB::table('tondo_participants')->insert([
                         'id'               => (string) Str::uuid(),
                         'project_id'       => $cagnotte->project_id,
@@ -378,7 +378,7 @@ class CotisationService
                         'montant_paye'     => 0,
                         'created_at'       => now(),
                     ]);
-                    // Pour les cagnottes ouvertes : incrémenter le nombre de participants uniques
+                    // Pour les cagnottes ouvertes : incrémenter le nombre de membres uniques
                     if ($cagnotte->type === 'cagnotte_ouverte') {
                         DB::table('tondo_cagnottes')->where('id', $cagnotte->id)
                             ->increment('nombre_participants');
@@ -466,7 +466,7 @@ class CotisationService
                 $participantId = $participant?->id ?? (string) Str::uuid();
 
                 if (! $participant) {
-                    // Nouveau participant : insérer avec statut déjà 'paye' (mock = succès immédiat)
+                    // Nouveau membre : insérer avec statut déjà 'paye' (mock = succès immédiat)
                     DB::table('tondo_participants')->insert([
                         'id'              => $participantId,
                         'project_id'      => $cagnotte->project_id,
@@ -485,7 +485,7 @@ class CotisationService
                     }
                     DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->increment('nombre_inscrits');
                 } else {
-                    // Participant existant : cumuler le montant payé (paiements multiples possibles)
+                    // Membre existant : cumuler le montant payé (paiements multiples possibles)
                     DB::table('tondo_participants')->where('id', $participantId)->update([
                         'statut_paiement'       => 'paye',
                         'montant_paye'          => DB::raw('montant_paye + ' . $montantNet),
@@ -548,7 +548,7 @@ class CotisationService
      *
      * Exécuté dans une transaction DB atomique :
      *   1. Marque la ligne tondo_payin à 'succes'.
-     *   2. Met à jour le participant (statut_paiement = 'paye', cumul montant_paye).
+     *   2. Met à jour le membre (statut_paiement = 'paye', cumul montant_paye).
      *   3. Insère un enregistrement dans tondo_paiements (historique).
      *   4. Incrémente montant_collecte de la cagnotte (montant net).
      *
@@ -572,7 +572,7 @@ class CotisationService
                 'updated_at' => now(),
             ]);
 
-            // 2. Mettre à jour le participant correspondant
+            // 2. Mettre à jour le membre correspondant
             $participant = DB::table('tondo_participants')
                 ->where('cagnotte_id', $payin->cagnotte_id)
                 ->where('user_id', $payin->user_id)
