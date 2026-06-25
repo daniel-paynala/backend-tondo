@@ -956,7 +956,7 @@ class BotService
      *                   → creer.tontine.montant_cycle → creer.tontine.periodicite
      *                   → [creer.tontine.jour_mois si mensuelle] → creer.numero
      *                   → [creer.nom_prenom si inconnu] → [creer.certification]
-     *                   → creer.recap
+     *                   → [creer.otp si nouveau compte] → creer.recap
      *
      * @param  string $numero  Numéro E.164
      * @param  string $etape   Étape courante (ex : 'creer.tontine.nom')
@@ -978,6 +978,7 @@ class BotService
             'creer.numero'                     => $this->handleCreerNumero($numero, $texte),
             'creer.nom_prenom'                 => $this->handleCreerNomPrenom($numero, $texte),
             'creer.certification'              => $this->handleCreerCertification($numero, $texte),
+            'creer.otp'                        => $this->handleCreerOtp($numero, $texte),
             'creer.numero_retrait'             => $this->handleCreerNumeroRetrait($numero, $texte),
             'creer.recap'                      => $this->handleCreerRecap($numero, $texte),
             default                            => $this->afficherMenu($numero),
@@ -1406,10 +1407,59 @@ class BotService
             return "⚠️ Tapez *1* pour certifier votre majorité, #️⃣ pour revenir en arrière.";
         }
 
-        $data      = $this->session->data($numero);
-        $projectId = $data['project_id'] ?? $this->tondoProjectId();
+        $data = $this->session->data($numero);
 
-        // Créer compte full — date de naissance placeholder (pas collectée via WA)
+        // Sécurité (anti-usurpation) : avant de créer le compte d'un client non
+        // enregistré, on vérifie qu'il possède bien le numéro en envoyant un OTP
+        // — même exigence que le flux « gérer ». Le compte n'est créé qu'après
+        // saisie correcte du code, à l'étape creer.otp.
+        [$otp, $hint] = $this->envoyerOtp($data['numero_payeur']);
+        $this->session->set($numero, 'creer.otp', array_merge($data, [
+            'otp' => $otp,
+        ]));
+
+        $masque = $this->maskPhoneNum($data['numero_payeur']);
+
+        return <<<TXT
+        🔐 *Vérification de votre identité*
+
+        Un code à 6 chiffres a été envoyé au *{$masque}*.{$hint}
+        Entrez ce code pour finaliser la création de votre compte :
+
+        #️⃣ _pour revenir en arrière_
+        TXT;
+    }
+
+    /**
+     * Vérifie l'OTP puis crée le compte du nouveau gérant (flux « creer »).
+     *
+     * Étape insérée pour les clients non encore enregistrés (ou comptes light)
+     * qui créent une cagnotte/tontine : le compte n'est créé qu'après preuve de
+     * possession du numéro, comme dans le flux « gérer ».
+     * Sur succès : creerCompteFull (date de naissance placeholder, non collectée
+     * via WhatsApp) puis affichage du récapitulatif.
+     *
+     * @param  string $numero  Numéro E.164 WhatsApp (clé de session)
+     * @param  string $texte   Code OTP à 6 chiffres saisi par l'utilisateur
+     * @return string
+     */
+    private function handleCreerOtp(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+        $code = trim($texte);
+
+        // Format attendu : exactement 6 chiffres.
+        if (! preg_match('/^\d{6}$/', $code)) {
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        // Vérification réelle via OtpService (driver paynala → cache/Wirepick).
+        if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
+            return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
+        }
+
+        // OTP validé — création du compte full puis récapitulatif de la cagnotte.
+        $projectId = $data['project_id'] ?? $this->tondoProjectId();
         $user = $this->cotisationSvc->creerCompteFull(
             nom:           $data['nom'],
             prenom:        $data['prenom'],
@@ -3066,8 +3116,11 @@ class BotService
      * Envoie un OTP au numéro indiqué et retourne le code + un hint d'affichage.
      *
      * En production (TONDO_OTP_BYPASS absent) :
-     *   - Appelle TwilioVerifyService::sendOtp() → SMS réel.
-     *   - Retourne [null, ''] : le code n'est pas stocké localement.
+     *   - Délègue à OtpService::sendOtp() qui suit le driver OTP_DRIVER.
+     *     En prod le driver est `paynala` → livraison SMS réelle via Wirepick
+     *     (exactement le même chemin que l'app mobile). Twilio n'intervient PAS
+     *     dans l'OTP ; il ne sert qu'au transport du chat WhatsApp (sandbox).
+     *   - Retourne [null, ''] : le code n'est pas stocké localement (en cache Laravel).
      *
      * En développement/test (TONDO_OTP_BYPASS=123456 dans .env) :
      *   - Aucun envoi SMS.
@@ -3106,7 +3159,8 @@ class BotService
      *   - Accepte le code de bypass OU le code local stocké en session (même valeur).
      *
      * En production :
-     *   - Délègue à TwilioVerifyService::checkOtp() (vérifie côté Twilio).
+     *   - Délègue à OtpService::checkOtp() (driver `paynala` → vérification
+     *     du code stocké en cache Laravel par PaynalaOtpService). Pas de Twilio.
      *   - Retourne false en cas d'exception (ne propage pas l'erreur).
      *
      * @param  string      $numeroE164  Numéro E.164 sur lequel l'OTP a été envoyé

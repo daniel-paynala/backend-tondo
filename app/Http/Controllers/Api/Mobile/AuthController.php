@@ -132,16 +132,18 @@ class AuthController extends Controller
             }
         }
 
-        $otp    = app(OtpService::class);
         $devHint = null;
 
         try {
-            // sendOtp retourne le code uniquement en driver=dev (pour les tests Postman/Flutter).
+            // OtpService résolu ici pour que toute exception de configuration
+            // (ex : WirepickSmsService mal configuré) soit capturée et transformée
+            // en message utilisateur lisible, sans exposer les détails internes.
+            $otp     = app(OtpService::class);
             $devHint = $otp->sendOtp($phone);
         } catch (Throwable $e) {
-            Log::error("[mobile] request-otp [{$otp->driver()}] failed for {$phone}: {$e->getMessage()}");
+            Log::error("[mobile] request-otp failed for {$phone}: {$e->getMessage()}");
             throw ValidationException::withMessages([
-                'numero' => 'Impossible d\'envoyer le code SMS. Vérifiez le numéro et réessayez.',
+                'numero' => 'Le code n\'a pas pu être envoyé. Vérifiez votre numéro et réessayez.',
             ]);
         }
 
