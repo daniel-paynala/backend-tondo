@@ -337,8 +337,8 @@ class CagnottesController extends Controller
             ->limit(50)
             ->select(
                 'tondo_paiements.id',
-                // Alias DB → propriété $h->participant_id (colonne réelle : participant_id).
-                DB::raw('tondo_paiements.participant_id as membre_id'),
+                // Colonne réelle participant_id → propriété $h->participant_id.
+                'tondo_paiements.participant_id',
                 'tondo_paiements.montant',
                 'tondo_paiements.date',
                 DB::raw("CONCAT(tondo_participants.prenom, ' ', tondo_participants.nom) as participant_nom")
