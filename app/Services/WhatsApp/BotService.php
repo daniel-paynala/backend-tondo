@@ -37,10 +37,10 @@ use Illuminate\Support\Facades\Log;
  *                     └─ cotisation ──► cotiser.montant ──► cotiser.numero
  *                                                               │
  *                                                               ├─ connu ──► [push] ──► cotiser.attente
- *                                                               └─ inconnu ──► compte light + [push] ──► cotiser.attente
+ *                                                               └─ inconnu ──► KYC Airtel → compte light + [push] ──► cotiser.attente
  *
  *        ──► 2 ──► rejoindre.ref ──► rejoindre.numero
- *                     ├─ inconnu    ──► rejoindre.nom_prenom ──► inscription ──► menu
+ *                     ├─ inconnu    ──► KYC Airtel → compte light → inscription ──► menu
  *                     └─ connu      ──► inscription ──► menu
  *        ──► 3 ──► creer.type ──► creer.cotisation.* | creer.tontine.* ──► creer.recap
  *        ──► 4 ──► gerer.numero ──► gerer.otp ──► gerer.liste ──► gerer.cagnotte | gerer.tontine
@@ -112,11 +112,9 @@ class BotService
             $etape === 'cotiser.ref'            => $this->handleCotiserRef($numero, $texte),
             $etape === 'cotiser.montant'        => $this->handleCotiserMontant($numero, $texte),
             $etape === 'cotiser.numero'         => $this->handleCotiserNumero($numero, $texte),
-            $etape === 'cotiser.nom_prenom'     => $this->handleCotiserNomPrenom($numero, $texte),
             $etape === 'cotiser.attente'        => $this->handleCotiserAttente($numero, $texte),
             $etape === 'rejoindre.ref'          => $this->handleRejoindreRef($numero, $texte),
             $etape === 'rejoindre.numero'       => $this->handleRejoindreNumero($numero, $texte),
-            $etape === 'rejoindre.nom_prenom'   => $this->handleRejoindreNomPrenom($numero, $texte),
             str_starts_with($etape, 'creer.')  => $this->routerCreer($numero, $etape, $texte),
             str_starts_with($etape, 'gerer.')  => $this->routerGerer($numero, $etape, $texte),
             default                             => $this->afficherMenu($numero),  // étape inconnue → menu
@@ -409,64 +407,25 @@ class BotService
             return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
         }
 
-        // ── Cotisation : inconnu → compte light anonyme + paiement immédiat ──
-        // Pas de collecte de nom/prénom : cotisation ouverte sans compte préalable
+        // ── Cotisation : inconnu → KYC Airtel (récupère nom/prénom) puis compte LIGHT ──
+        // Le cotisant doit avoir un compte Airtel Money pour payer ; on récupère donc
+        // son identité automatiquement (comme le mobile) au lieu de la demander, et on
+        // l'enregistre en compte LIGHT (pas de promotion en full, pas d'OTP).
+        $kyc = $this->verifierKycAirtel($numeroSaisi);
+        if ($kyc['bloque']) {
+            return $kyc['message']
+                . "\n\nEntrez un *numéro Airtel Money* (format *0XXXXXXXX*) :"
+                . "\n\n#️⃣ _pour revenir en arrière_";
+        }
+
         $user = $this->cotisationSvc->creerCompteLight(
-            nom: '',
-            prenom: '',
+            nom: $kyc['nom'],
+            prenom: $kyc['prenom'],
             numeroE164: $numeroSaisi,
             projectId: $projectId,
         );
 
         return $this->lancerPaiement($numero, $user, $data, $numeroSaisi);
-    }
-
-    // ── 1 — Cotiser : nom + prénom (nouveau compte light) ────────────────────
-
-    /**
-     * Collecte le nom et prénom pour un nouveau cotisant (étape optionnelle).
-     * Cette étape est aujourd'hui contournée pour les cotisations : un compte
-     * light anonyme est créé directement dans handleCotiserNumero. Ce handler
-     * reste présent pour les cas futurs ou les flows alternatifs.
-     *
-     * Format attendu : deux lignes, nom puis prénom.
-     *
-     * @param  string $numero  Numéro E.164
-     * @param  string $texte   Nom et prénom saisis (séparés par un saut de ligne)
-     * @return string|array{0:string,1:string}
-     */
-    private function handleCotiserNomPrenom(string $numero, string $texte): string|array
-    {
-        $lignes = array_filter(array_map('trim', explode("\n", $texte)));
-
-        if (count($lignes) < 2) {
-            return <<<TXT
-            ⚠️ Format incorrect.
-            Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
-
-            _Exemple :_
-            MBOULA
-            Jean
-
-            #️⃣ _pour revenir en arrière_
-            TXT;
-        }
-
-        $lignes  = array_values($lignes);
-        $nom     = mb_strtoupper(trim($lignes[0]));
-        $prenom  = ucfirst(mb_strtolower(trim($lignes[1])));
-        $data    = $this->session->data($numero);
-        $projectId = $data['project_id'] ?? $this->tondoProjectId();
-
-        // Créer le compte light
-        $user = $this->cotisationSvc->creerCompteLight(
-            nom: $nom,
-            prenom: $prenom,
-            numeroE164: $data['numero_payeur'],
-            projectId: $projectId,
-        );
-
-        return $this->lancerPaiement($numero, $user, $data, $data['numero_payeur']);
     }
 
     // ── 1 — Cotiser : initier le paiement et attendre ────────────────────────
@@ -844,73 +803,25 @@ class BotService
             TXT . "\n" . $this->afficherMenu($numero);
         }
 
-        // Nouvel utilisateur → demander nom + prénom
-        $this->session->set($numero, 'rejoindre.nom_prenom', array_merge($data, [
-            'numero_payeur' => $numeroSaisi,
-        ]));
-
-        return <<<TXT
-        👤 *Nouveau sur Tonji*
-
-        Vous n'avez pas encore de compte. On va en créer un rapidement.
-
-        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
-
-        _Exemple :_
-        MBOULA
-        Jean
-
-        #️⃣ _pour revenir en arrière_
-        TXT;
-    }
-
-    /**
-     * Collecte nom + prénom pour un nouvel utilisateur qui rejoint une cagnotte/tontine.
-     * Crée un compte light puis inscrit le membre.
-     *
-     * @param  string $numero  Numéro E.164
-     * @param  string $texte   Nom et prénom (séparés par un saut de ligne)
-     * @return string
-     */
-    private function handleRejoindreNomPrenom(string $numero, string $texte): string
-    {
-        $lignes = array_filter(array_map('trim', explode("\n", $texte)));
-
-        if (count($lignes) < 2) {
-            return <<<TXT
-            ⚠️ Format incorrect.
-            Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
-
-            _Exemple :_
-            MBOULA
-            Jean
-
-            #️⃣ _pour revenir en arrière_
-            TXT;
-        }
-
-        $lignes    = array_values($lignes);
-        $nom       = mb_strtoupper(trim($lignes[0]));
-        $prenom    = ucfirst(mb_strtolower(trim($lignes[1])));
-        $data      = $this->session->data($numero);
-        $projectId = $data['project_id'] ?? $this->tondoProjectId();
-        $cagnotte  = TondoCagnotte::find($data['cagnotte_id'] ?? null);
-
-        if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        // Nouvel utilisateur → KYC Airtel (récupère nom/prénom) puis compte LIGHT
+        // + inscription directe. On ne demande plus le nom/prénom.
+        $kyc = $this->verifierKycAirtel($numeroSaisi);
+        if ($kyc['bloque']) {
+            return $kyc['message']
+                . "\n\nEntrez un *numéro Airtel Money* (format *0XXXXXXXX*) :"
+                . "\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $user = $this->cotisationSvc->creerCompteLight(
-            nom: $nom,
-            prenom: $prenom,
-            numeroE164: $data['numero_payeur'] ?? $numero,
+            nom: $kyc['nom'],
+            prenom: $kyc['prenom'],
+            numeroE164: $numeroSaisi,
             projectId: $projectId,
         );
-
         $this->inscrireMembre($user, $cagnotte);
 
-        $ref  = $data['cagnotte_ref'] ?? $cagnotte->reference;
-        $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $prenom = ucfirst(mb_strtolower($kyc['prenom']));
+        $type   = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
 
         return <<<TXT
         ✅ *Inscription confirmée !*
