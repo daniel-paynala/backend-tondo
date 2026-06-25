@@ -955,8 +955,7 @@ class BotService
      * Flow tontine    : creer.type → creer.tontine.nom → creer.tontine.nb_membres
      *                   → creer.tontine.montant_cycle → creer.tontine.periodicite
      *                   → [creer.tontine.jour_mois si mensuelle] → creer.numero
-     *                   → [creer.nom_prenom si inconnu] → [creer.certification]
-     *                   → [creer.otp si nouveau compte] → creer.recap
+     *                   → [KYC Airtel auto + creer.otp si inconnu/light] → creer.recap
      *
      * @param  string $numero  Numéro E.164
      * @param  string $etape   Étape courante (ex : 'creer.tontine.nom')
@@ -976,8 +975,6 @@ class BotService
             'creer.tontine.periodicite'     => $this->handleCreerTontinePeriodicite($numero, $texte),
             'creer.tontine.jour_mois'       => $this->handleCreerTontineJourMois($numero, $texte),
             'creer.numero'                     => $this->handleCreerNumero($numero, $texte),
-            'creer.nom_prenom'                 => $this->handleCreerNomPrenom($numero, $texte),
-            'creer.certification'              => $this->handleCreerCertification($numero, $texte),
             'creer.otp'                        => $this->handleCreerOtp($numero, $texte),
             'creer.numero_retrait'             => $this->handleCreerNumeroRetrait($numero, $texte),
             'creer.recap'                      => $this->handleCreerRecap($numero, $texte),
@@ -1312,28 +1309,9 @@ class BotService
         $projectId = $data['project_id'] ?? $this->tondoProjectId();
         $user      = $this->utilisateurParNumero($numeroSaisi, $projectId);
 
-        if ($user) {
-            // Compte light avec profil vide → compléter l'identité avant création
-            if (trim($user->nom) === '' || trim($user->prenom) === '') {
-                $this->session->set($numero, 'creer.nom_prenom', array_merge($data, [
-                    'user_id'       => $user->id,
-                    'numero_payeur' => $numeroSaisi,
-                ]));
-                return <<<TXT
-                👤 *Complétez votre profil*
-
-                Pour créer une cagnotte, nous avons besoin de votre identité.
-
-                Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
-
-                _Exemple :_
-                MBOULA
-                Jean
-
-                #️⃣ _pour revenir en arrière_
-                TXT;
-            }
-
+        // Compte déjà complet (nom + prénom renseignés) → on va direct au récap,
+        // pas besoin de KYC ni d'OTP : l'utilisateur est déjà connu.
+        if ($user && trim($user->nom) !== '' && trim($user->prenom) !== '') {
             $merged = array_merge($data, [
                 'user_id'        => $user->id,
                 'numero_payeur'  => $numeroSaisi,
@@ -1343,91 +1321,114 @@ class BotService
             return $this->construireRecap($merged, $numeroSaisi);
         }
 
-        $this->session->set($numero, 'creer.nom_prenom', array_merge($data, [
+        // Sinon (inconnu OU compte light sans identité) : on NE demande plus le
+        // nom/prénom. On les récupère via le KYC Airtel Money (même logique que
+        // l'app mobile), puis on enchaîne directement sur l'OTP.
+        return $this->demarrerKycPuisOtp($numero, $numeroSaisi, $data, $user?->id);
+    }
+
+    /**
+     * Vérifie le numéro via le KYC Airtel Money (comme l'app mobile) puis enchaîne
+     * sur l'OTP — sans jamais demander le nom/prénom.
+     *
+     * - KYC OK : message « Bienvenue {prénom} {nom} » + envoi de l'OTP + passage
+     *            à l'étape creer.otp (le compte est créé après validation du code).
+     * - KYC KO : message d'erreur, on redemande un numéro Airtel Money (on reste
+     *            à l'étape creer.numero).
+     *
+     * @param  string      $numero       Numéro E.164 WhatsApp (clé de session)
+     * @param  string      $numeroSaisi  Numéro Mobile Money saisi (E.164)
+     * @param  array       $data         Données de session courantes
+     * @param  string|null $userId       Id du compte light éventuel à promouvoir
+     * @return string
+     */
+    private function demarrerKycPuisOtp(string $numero, string $numeroSaisi, array $data, ?string $userId): string
+    {
+        $kyc = $this->verifierKycAirtel($numeroSaisi);
+
+        // Numéro non éligible (pas Airtel, sans compte, service indispo) → on redemande.
+        if ($kyc['bloque']) {
+            return $kyc['message']
+                . "\n\nEntrez un *numéro Airtel Money* (format *0XXXXXXXX*) :"
+                . "\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        // KYC OK → identité récupérée automatiquement. On envoie l'OTP tout de suite.
+        [$otp, $hint] = $this->envoyerOtp($numeroSaisi);
+
+        $merged = array_merge($data, [
             'numero_payeur' => $numeroSaisi,
-        ]));
+            'nom'           => $kyc['nom'],
+            'prenom'        => $kyc['prenom'],
+            'otp'           => $otp,
+        ]);
+        if ($userId !== null) {
+            $merged['user_id'] = $userId;   // compte light à promouvoir en full
+        }
+        $this->session->set($numero, 'creer.otp', $merged);
+
+        $masque = $this->maskPhoneNum($numeroSaisi);
+        $prenom = ucfirst(mb_strtolower(trim($kyc['prenom'])));
+        $nom    = mb_strtoupper(trim($kyc['nom']));
 
         return <<<TXT
-        👤 *Nouveau sur Tonji*
+        🎉 *Bienvenue {$prenom} {$nom} !*
 
-        Vous n'avez pas encore de compte. On va en créer un.
+        Votre compte Airtel Money est vérifié.{$hint}
 
-        Entrez votre *nom* puis votre *prénom*, chacun sur une ligne :
+        🔐 Un code à 6 chiffres vient de vous être envoyé par SMS au *{$masque}*.
+        Entrez ce code pour créer votre compte et finaliser la cagnotte.
 
-        _Exemple :_
-        MBOULA
-        Jean
+        _En validant, vous certifiez avoir 18 ans ou plus et acceptez les conditions Tonji._
 
         #️⃣ _pour revenir en arrière_
         TXT;
     }
 
     /**
-     * Collecte nom + prénom du créateur (inconnu ou profil incomplet).
-     * Passe ensuite à l'étape de certification de majorité.
+     * Reproduit la logique KYC du mobile (AuthController::kycCheck) pour le bot :
+     * détection opérateur + config active + appel KYC Airtel Money.
      *
-     * @param  string $numero  Numéro E.164
-     * @param  string $texte   Nom et prénom (deux lignes)
-     * @return string
+     * @param  string $numeroE164  Numéro Mobile Money au format E.164 (+241XXXXXXXX)
+     * @return array{bloque: bool, message?: string, nom?: string, prenom?: string, type_client?: string}
      */
-    private function handleCreerNomPrenom(string $numero, string $texte): string
+    private function verifierKycAirtel(string $numeroE164): array
     {
-        $lignes = array_values(array_filter(array_map('trim', explode("\n", $texte))));
+        $projectId = $this->tondoProjectId();
+        // msisdn local 0XXXXXXXX à partir de l'E.164 (+241 + 8 chiffres abonné).
+        $msisdn = '0' . substr(preg_replace('/\D/', '', $numeroE164), -8);
 
-        if (count($lignes) < 2) {
-            return <<<TXT
-            ⚠️ Format incorrect. Entrez *nom* puis *prénom*, chacun sur une ligne.
-
-            #️⃣ _pour revenir en arrière_
-            TXT;
+        // 1. Détection de l'opérateur — seul Airtel a une API KYC.
+        $detected = app(\App\Services\OperateurDetectorService::class)->detect($projectId, $numeroE164);
+        if (! $detected || ($detected['operateur'] ?? null) !== 'airtel') {
+            return ['bloque' => true, 'message' => "⚠️ Ce numéro n'est pas un compte *Airtel Money*."];
         }
 
-        $data = $this->session->data($numero);
-        $this->session->set($numero, 'creer.certification', array_merge($data, [
-            'nom'    => mb_strtoupper(trim($lignes[0])),
-            'prenom' => ucfirst(mb_strtolower(trim($lignes[1]))),
-        ]));
-
-        return $this->messageCertification();
-    }
-
-    /**
-     * Traite la certification de majorité du créateur (doit taper "1").
-     * Sur confirmation : crée un compte full avec certifie_majeur=true
-     * (date de naissance placeholder '2000-01-01' en l'absence de collecte réelle via WA).
-     * Affiche ensuite le récapitulatif final.
-     *
-     * @param  string $numero  Numéro E.164
-     * @param  string $texte   "1" pour certifier
-     * @return string
-     */
-    private function handleCreerCertification(string $numero, string $texte): string
-    {
-        if ($texte !== '1') {
-            return "⚠️ Tapez *1* pour certifier votre majorité, #️⃣ pour revenir en arrière.";
+        // 2. Opérateur activé dans la config projet ?
+        $configActif = \App\Models\TondoProjectConfig::where('project_id', $projectId)
+            ->where('operateur', 'airtel')
+            ->where('pays', $detected['pays'])
+            ->value('actif');
+        if (! $configActif) {
+            return ['bloque' => true, 'message' => "⚠️ Ce numéro n'est pas un compte *Airtel Money*."];
         }
 
-        $data = $this->session->data($numero);
+        // 3. Appel KYC Airtel.
+        $kyc = app(\App\Services\PaynalaPaymentService::class)->checkKycData($msisdn);
+        if ($kyc === null) {
+            return ['bloque' => true, 'message' => "⏳ La vérification Airtel Money est temporairement indisponible. Réessayez dans quelques minutes."];
+        }
+        if (! ($kyc['ok'] ?? false)) {
+            return ['bloque' => true, 'message' => "❌ Ce numéro n'a pas de compte *Airtel Money* actif. Vérifiez votre numéro."];
+        }
 
-        // Sécurité (anti-usurpation) : avant de créer le compte d'un client non
-        // enregistré, on vérifie qu'il possède bien le numéro en envoyant un OTP
-        // — même exigence que le flux « gérer ». Le compte n'est créé qu'après
-        // saisie correcte du code, à l'étape creer.otp.
-        [$otp, $hint] = $this->envoyerOtp($data['numero_payeur']);
-        $this->session->set($numero, 'creer.otp', array_merge($data, [
-            'otp' => $otp,
-        ]));
-
-        $masque = $this->maskPhoneNum($data['numero_payeur']);
-
-        return <<<TXT
-        🔐 *Vérification de votre identité*
-
-        Un code à 6 chiffres a été envoyé au *{$masque}*.{$hint}
-        Entrez ce code pour finaliser la création de votre compte :
-
-        #️⃣ _pour revenir en arrière_
-        TXT;
+        // 4. KYC réussi → identité récupérée pour auto-complétion.
+        return [
+            'bloque'      => false,
+            'nom'         => $kyc['nom']         ?? '',
+            'prenom'      => $kyc['prenom']      ?? '',
+            'type_client' => $kyc['type_client'] ?? 'particulier',
+        ];
     }
 
     /**
