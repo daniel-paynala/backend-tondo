@@ -3124,18 +3124,21 @@ class BotService
      *
      * En développement/test (TONDO_OTP_BYPASS=123456 dans .env) :
      *   - Aucun envoi SMS.
-     *   - Retourne [bypass_code, hint_affiché_dans_le_message].
-     *   - Permet les tests sans coût Twilio (code fixe universel).
+     *   - Retourne [bypass_code, ''] : le code de test n'est JAMAIS affiché dans
+     *     le message du bot (sécurité prod). Le code bypass reste accepté à la
+     *     vérification (verifierOtp), connu seulement de l'équipe via le .env.
      *
      * @param  string $numeroE164  Numéro E.164 destinataire de l'OTP
      * @return array{0: string|null, 1: string}  [code_local_ou_null, hint_affiché]
      */
     private function envoyerOtp(string $numeroE164): array
     {
-        // Bypass explicite via TONDO_OTP_BYPASS=123456 dans .env (tests multi-utilisateurs)
+        // Bypass explicite via TONDO_OTP_BYPASS=123456 dans .env (tests multi-utilisateurs).
+        // On NE révèle PLUS le code dans le message (mention « Test » retirée pour la prod) :
+        // le bypass reste accepté à la vérification, mais rien n'est affiché à l'utilisateur.
         $bypass = config('tondo.otp_bypass');
         if ($bypass) {
-            return [$bypass, "\n_(Test : code = *{$bypass}*)_"];
+            return [$bypass, ''];
         }
 
         try {
