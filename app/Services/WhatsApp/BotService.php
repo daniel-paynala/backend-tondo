@@ -744,7 +744,8 @@ class BotService
      *      Le +1 correspond au créateur qui est dans tondo_participants
      *      mais PAS comptabilisé dans nombre_inscrits.
      *
-     * Si l'utilisateur est inconnu → demander nom + prénom (étape rejoindre.nom_prenom).
+     * Si l'utilisateur est inconnu → KYC Airtel (récupère nom/prénom) → compte
+     *   light → inscription directe. Numéro non-Airtel → erreur + redemande.
      * Si l'utilisateur est connu → inscription directe + retour menu.
      *
      * @param  string $numero  Numéro WhatsApp expéditeur
