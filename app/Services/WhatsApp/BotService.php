@@ -3113,36 +3113,23 @@ class BotService
     // ── Utilitaires OTP ──────────────────────────────────────────────────────
 
     /**
-     * Envoie un OTP au numéro indiqué et retourne le code + un hint d'affichage.
+     * Envoie un OTP au numéro indiqué.
      *
-     * En production (TONDO_OTP_BYPASS absent) :
-     *   - Délègue à OtpService::sendOtp() qui suit le driver OTP_DRIVER.
-     *     En prod le driver est `paynala` → livraison SMS réelle via Wirepick
-     *     (exactement le même chemin que l'app mobile). Twilio n'intervient PAS
-     *     dans l'OTP ; il ne sert qu'au transport du chat WhatsApp (sandbox).
-     *   - Retourne [null, ''] : le code n'est pas stocké localement (en cache Laravel).
+     * Délègue TOUJOURS à OtpService::sendOtp() (driver OTP_DRIVER). En prod le
+     * driver est `paynala` → livraison SMS réelle via Wirepick (même chemin que
+     * l'app mobile). Twilio n'intervient PAS dans l'OTP ; il ne sert qu'au
+     * transport du chat WhatsApp (sandbox).
      *
-     * En développement/test (TONDO_OTP_BYPASS=123456 dans .env) :
-     *   - Aucun envoi SMS.
-     *   - Retourne [bypass_code, ''] : le code de test n'est JAMAIS affiché dans
-     *     le message du bot (sécurité prod). Le code bypass reste accepté à la
-     *     vérification (verifierOtp), connu seulement de l'équipe via le .env.
+     * AUCUN bypass de test : le bot n'accepte jamais de code statique, quel que
+     * soit l'environnement.
      *
      * @param  string $numeroE164  Numéro E.164 destinataire de l'OTP
-     * @return array{0: string|null, 1: string}  [code_local_ou_null, hint_affiché]
+     * @return array{0: string|null, 1: string}  Toujours [null, ''] (signature conservée)
      */
     private function envoyerOtp(string $numeroE164): array
     {
-        // Bypass explicite via TONDO_OTP_BYPASS=123456 dans .env (tests multi-utilisateurs).
-        // On NE révèle PLUS le code dans le message (mention « Test » retirée pour la prod) :
-        // le bypass reste accepté à la vérification, mais rien n'est affiché à l'utilisateur.
-        $bypass = config('tondo.otp_bypass');
-        if ($bypass) {
-            return [$bypass, ''];
-        }
-
         try {
-            // OtpService délègue au driver configuré (dev / twilio / paynala).
+            // OtpService délègue au driver configuré (paynala → Wirepick en prod).
             $this->otpService->sendOtp($numeroE164);
         } catch (\Throwable $e) {
             Log::warning('envoyerOtp: échec OtpService', [
@@ -3158,27 +3145,18 @@ class BotService
     /**
      * Vérifie un code OTP saisi par l'utilisateur.
      *
-     * En bypass (développement) :
-     *   - Accepte le code de bypass OU le code local stocké en session (même valeur).
-     *
-     * En production :
-     *   - Délègue à OtpService::checkOtp() (driver `paynala` → vérification
-     *     du code stocké en cache Laravel par PaynalaOtpService). Pas de Twilio.
-     *   - Retourne false en cas d'exception (ne propage pas l'erreur).
+     * Délègue TOUJOURS à OtpService::checkOtp() (driver `paynala` → vérification
+     * du code stocké en cache Laravel par PaynalaOtpService). AUCUN bypass de
+     * test, quel que soit l'environnement. Pas de Twilio.
+     * Retourne false en cas d'exception (ne propage pas l'erreur).
      *
      * @param  string      $numeroE164  Numéro E.164 sur lequel l'OTP a été envoyé
      * @param  string      $codeSaisi   Code entré par l'utilisateur
-     * @param  string|null $otpLocal    Code stocké en session (bypass uniquement)
+     * @param  string|null $otpLocal    Conservé pour compat. d'appel — non utilisé
      * @return bool
      */
-    private function verifierOtp(string $numeroE164, string $codeSaisi, ?string $otpLocal): bool
+    private function verifierOtp(string $numeroE164, string $codeSaisi, ?string $otpLocal = null): bool
     {
-        $bypass = config('tondo.otp_bypass');
-        if ($bypass) {
-            // Accepter le code bypass ou le code stocké localement (identiques en pratique)
-            return $codeSaisi === $bypass || $codeSaisi === ($otpLocal ?? $bypass);
-        }
-
         try {
             return $this->otpService->checkOtp($numeroE164, $codeSaisi);
         } catch (\Throwable $e) {
