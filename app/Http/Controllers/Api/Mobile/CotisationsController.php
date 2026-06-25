@@ -361,7 +361,7 @@ class CotisationsController extends Controller
                     ]);
 
                     $incrMembres = $cagnotte->type === 'cagnotte_ouverte'
-                        ? ['nombre_participants' => DB::raw('nombre_membres + 1')]
+                        ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
                         : [];
                     DB::table('tondo_cagnottes')
                         ->where('id', $cagnotte->id)
@@ -455,7 +455,7 @@ class CotisationsController extends Controller
                         'created_at'           => now(),
                     ]);
                     $incrMembres = $cagnotte->type === 'cagnotte_ouverte'
-                        ? ['nombre_participants' => DB::raw('nombre_membres + 1')]
+                        ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
                         : [];
                     DB::table('tondo_cagnottes')
                         ->where('id', $cagnotte->id)
