@@ -59,8 +59,8 @@ Route::prefix('ussd')->group(function () {
 //  Auth : Sanctum (guard 'admin'), tokens sur tondo_admins.
 // ============================================================================
 Route::prefix('admin')->group(function () {
-    // Public
-    Route::post('/login', [AuthController::class, 'login']);
+    // Public — throttlé (anti brute-force mot de passe admin).
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:admin-login');
 
     // Protégé par token Sanctum
     Route::middleware('auth:admin')->group(function () {
@@ -118,11 +118,12 @@ Route::prefix('admin')->group(function () {
 //  Auth phone OTP en prod (les controllers ne changent pas).
 // ============================================================================
 Route::prefix('mobile')->group(function () {
-    // Public — flow OTP + vérification KYC pendant saisie
-    Route::post('/auth/request-otp', [MobileAuthController::class, 'requestOtp']);
-    Route::post('/auth/verify-otp',  [MobileAuthController::class, 'verifyOtp']);
+    // Public — flow OTP + vérification KYC pendant saisie. Throttlés par numéro
+    // (cf. AppServiceProvider) : anti-spam SMS, anti brute-force, anti-énumération.
+    Route::post('/auth/request-otp', [MobileAuthController::class, 'requestOtp'])->middleware('throttle:otp-request');
+    Route::post('/auth/verify-otp',  [MobileAuthController::class, 'verifyOtp'])->middleware('throttle:otp-verify');
     // Appelé dès que le champ téléphone atteint 9 chiffres — pas d'auth
-    Route::get('/auth/kyc-check',    [MobileAuthController::class, 'kycCheck']);
+    Route::get('/auth/kyc-check',    [MobileAuthController::class, 'kycCheck'])->middleware('throttle:kyc-check');
 
     // Protégé par token Sanctum (guard mobile)
     Route::middleware('auth:mobile')->group(function () {
