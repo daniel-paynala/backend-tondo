@@ -24,11 +24,33 @@ class OtpService
 
     private string $driver;
 
+    /** Numéro de test (review Apple) au format E.164, ou null si désactivé. */
+    private ?string $testMsisdn;
+
+    /** Code OTP fixe accepté pour le numéro de test. */
+    private string $testOtp;
+
     public function __construct(
         private TwilioVerifyService $twilio,
         private PaynalaOtpService   $paynala,
     ) {
-        $this->driver = (string) config('services.otp.driver', 'dev');
+        $this->driver     = (string) config('services.otp.driver', 'dev');
+        $this->testMsisdn = config('services.otp.test_msisdn');
+        $this->testOtp    = (string) config('services.otp.test_otp', '000000');
+    }
+
+    /**
+     * Vrai si [phoneE164] est le numéro de test whitelisté (review Apple).
+     * Comparaison tolérante au format (on compare les chiffres / les 9 derniers).
+     */
+    private function estNumeroTest(string $phoneE164): bool
+    {
+        if ($this->testMsisdn === null || $this->testMsisdn === '') {
+            return false;
+        }
+        $a = preg_replace('/\D/', '', $phoneE164);
+        $b = preg_replace('/\D/', '', $this->testMsisdn);
+        return $a === $b || substr($a, -9) === substr($b, -9);
     }
 
     /**
@@ -43,6 +65,10 @@ class OtpService
      */
     public function sendOtp(string $phoneE164): ?string
     {
+        // Numéro de test (review Apple) : aucun SMS envoyé.
+        if ($this->estNumeroTest($phoneE164)) {
+            return null;
+        }
         return match ($this->driver) {
             'twilio'  => $this->sendViaTwilio($phoneE164),
             'paynala' => $this->sendViaPaynala($phoneE164),
@@ -59,6 +85,10 @@ class OtpService
      */
     public function checkOtp(string $phoneE164, string $code): bool
     {
+        // Numéro de test (review Apple) : seul le code fixe est accepté.
+        if ($this->estNumeroTest($phoneE164)) {
+            return $code === $this->testOtp;
+        }
         return match ($this->driver) {
             'twilio'  => $this->twilio->checkOtp($phoneE164, $code),
             'paynala' => $this->paynala->checkOtp($phoneE164, $code),

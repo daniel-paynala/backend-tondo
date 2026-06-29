@@ -53,6 +53,10 @@ return [
     */
     'otp' => [
         'driver' => env('OTP_DRIVER', 'dev'),
+        // Numéro de test pour la review Apple : aucun SMS envoyé, code fixe accepté.
+        // Laisser vide pour désactiver. Ne s'applique qu'à ce seul numéro.
+        'test_msisdn' => env('MOBILE_TEST_MSISDN'),
+        'test_otp'    => env('MOBILE_TEST_OTP', '000000'),
     ],
 
     /*
