@@ -15,6 +15,8 @@ use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
+use App\Http\Controllers\Api\Admin\CagnottesController as AdminCagnottesController;
+use App\Http\Controllers\Api\Public\CagnottesController as PublicCagnottesController;
 use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
 use App\Http\Controllers\Api\WhatsApp\StatusController as WhatsAppStatusController;
 use App\Http\Controllers\Api\Ussd\UssdController;
@@ -55,6 +57,16 @@ Route::prefix('ussd')->group(function () {
 });
 
 // ============================================================================
+//  Cagnottes PUBLIQUES — préfixe /api/public/
+//  Sans auth : liste + détail des cagnottes publiques APPROUVÉES (Explorer mobile
+//  et page publique web). N'expose aucune donnée sensible (pas de n° de retrait).
+// ============================================================================
+Route::prefix('public')->group(function () {
+    Route::get('/cagnottes',             [PublicCagnottesController::class, 'index']);
+    Route::get('/cagnottes/{reference}', [PublicCagnottesController::class, 'show']);
+});
+
+// ============================================================================
 //  API Dashboard — préfixe /api/admin/
 //  Auth : Sanctum (guard 'admin'), tokens sur tondo_admins.
 // ============================================================================
@@ -79,10 +91,16 @@ Route::prefix('admin')->group(function () {
         Route::patch('/admins/{id}', [AdminsController::class, 'update']);
         Route::delete('/admins/{id}', [AdminsController::class, 'destroy']);
 
-        // Tontines & cotisations (tondo_cagnottes)
+        // Tontines & cagnottes (tondo_cagnottes)
         Route::get('/tontines', [TontinesController::class, 'index']);
         Route::get('/tontines/{id}', [TontinesController::class, 'show']);
         Route::post('/tontines/{id}/cloturer', [TontinesController::class, 'cloturer']);
+
+        // Modération des cagnottes PUBLIQUES (validation crowdfunding)
+        Route::get('/cagnottes/moderation',              [AdminCagnottesController::class, 'moderation']);
+        Route::post('/cagnottes/{reference}/approuver',  [AdminCagnottesController::class, 'approuver']);
+        Route::post('/cagnottes/{reference}/rejeter',    [AdminCagnottesController::class, 'rejeter']);
+        Route::post('/cagnottes/{reference}/suspendre',  [AdminCagnottesController::class, 'suspendre']);
 
         // Transactions
         Route::get('/transactions', [TransactionsController::class, 'index']);

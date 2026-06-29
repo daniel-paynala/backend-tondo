@@ -132,6 +132,10 @@ class CagnottesController extends Controller
             'titre'          => ['required', 'string', 'max:120'],
             'numero_retrait' => ['nullable', 'string', 'regex:/^\+?\d{8,15}$/'],
             'reference'      => ['nullable', 'string', 'regex:/^\d{6}$/'],
+            // Visibilité : 'public' = crowdfunding modéré (cagnottes ouvertes uniquement).
+            'visibilite'     => ['nullable', Rule::in(['prive', 'public'])],
+            // Description / histoire, surtout utile pour les cagnottes publiques.
+            'description'    => ['nullable', 'string', 'max:2000'],
         ]);
 
         $user = $request->user();
@@ -224,6 +228,18 @@ class CagnottesController extends Controller
                 $cagnotte->nombre_splits = null;
             }
         }
+
+        // ── Visibilité + modération ─────────────────────────────────────────────
+        // Public réservé aux cagnottes ouvertes ; les tontines restent privées.
+        $visibilite = ($type === 'cagnotte_ouverte')
+            ? ($base['visibilite'] ?? 'prive')
+            : 'prive';
+        $cagnotte->visibilite = $visibilite;
+        // Publique → entre en file de modération (invisible tant que non approuvée).
+        // Privée → aucune validation requise (comportement historique).
+        $cagnotte->statut_validation = $visibilite === 'public' ? 'en_attente' : 'non_requis';
+        // Description (histoire de la cagnotte), affichée sur la page publique.
+        $cagnotte->description = $base['description'] ?? null;
 
         // Référence : utilise celle pré-générée par le client (ce que l'utilisateur
         // a vu) si elle est unique, sinon en génère une nouvelle (fallback).
@@ -1170,6 +1186,11 @@ class CagnottesController extends Controller
             'penalite_frequence'               => $c->penalite_frequence,
             'reversement_auto'                 => (bool) ($c->reversement_auto ?? false),
             'reversement_auto_frequence_mois'  => $c->reversement_auto_frequence_mois,
+            // Visibilité + modération (cagnottes publiques).
+            'visibilite'                       => $c->visibilite ?? 'prive',
+            'statut_validation'                => $c->statut_validation ?? 'non_requis',
+            'description'                      => $c->description,
+            'motif_rejet'                      => $c->motif_rejet,
         ];
     }
 
