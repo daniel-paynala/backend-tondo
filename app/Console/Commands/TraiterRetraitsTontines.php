@@ -67,7 +67,7 @@ class TraiterRetraitsTontines extends Command
 
         foreach ($tontines as $cagnotte) {
             // Nombre de cycles réglés = nombre de payouts 'succes' enregistrés.
-            $cyclesCompletes = (int) DB::table('tondo_payout')
+            $cyclesCompletes = (int) DB::table(project_table('payout'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->count();
@@ -89,17 +89,17 @@ class TraiterRetraitsTontines extends Command
             $this->line("  → [{$cagnotte->reference}] « {$cagnotte->titre} » — cycle {$cycleActuel}");
 
             // ── Vérifier que TOUS les membres ont cotisé ─────────────────
-            $totalMembres = (int) DB::table('tondo_participants')
+            $totalMembres = (int) DB::table(project_table('participants'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->count();
 
-            $participantsPaies = (int) DB::table('tondo_participants')
+            $participantsPaies = (int) DB::table(project_table('participants'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut_paiement', 'paye')
                 ->count();
 
             if ($participantsPaies < $totalMembres) {
-                $nonPayes = DB::table('tondo_participants')
+                $nonPayes = DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
                     ->whereIn('statut_paiement', ['en_attente', 'en_retard'])
                     ->get(['nom', 'prenom', 'numero_masque'])
@@ -129,14 +129,14 @@ class TraiterRetraitsTontines extends Command
             }
 
             // ── Trouver le bénéficiaire du cycle ─────────────────────────────
-            $beneficiaire = DB::table('tondo_participants')
-                ->join('users', 'tondo_participants.user_id', '=', 'users.id')
-                ->where('tondo_participants.cagnotte_id', $cagnotte->id)
-                ->where('tondo_participants.ordre_passage', $cycleActuel)
+            $beneficiaire = DB::table(project_table('participants'))
+                ->join('users', project_table('participants').'.user_id', '=', 'users.id')
+                ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
+                ->where(project_table('participants').'.ordre_passage', $cycleActuel)
                 ->select(
-                    'tondo_participants.id as membre_id',
-                    'tondo_participants.nom',
-                    'tondo_participants.prenom',
+                    project_table('participants').'.id as membre_id',
+                    project_table('participants').'.nom',
+                    project_table('participants').'.prenom',
                     'users.id as user_id',
                     'users.numero as numero_e164',
                 )
@@ -167,7 +167,7 @@ class TraiterRetraitsTontines extends Command
             }
 
             // ── Génération des identifiants Paynala ───────────────────────────
-            $nextNum        = DB::table('tondo_payout')->count() + 1;
+            $nextNum        = DB::table(project_table('payout'))->count() + 1;
             $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
             $idempotencyKey = 'TONDO-TONTINE-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
             $payoutId       = (string) Str::uuid();
@@ -179,7 +179,7 @@ class TraiterRetraitsTontines extends Command
                     $cagnotte, $beneficiaire, $montant, $cycleActuel,
                     $payoutId, $transId, $idempotencyKey, $reference, $numeroE164
                 ) {
-                    $solde = (int) DB::table('tondo_cagnottes')
+                    $solde = (int) DB::table(project_table('cagnottes'))
                         ->where('id', $cagnotte->id)
                         ->lockForUpdate()
                         ->value('montant_collecte');
@@ -188,7 +188,7 @@ class TraiterRetraitsTontines extends Command
                         throw new \RuntimeException("Solde insuffisant : {$solde} FCFA disponibles, {$montant} FCFA requis.");
                     }
 
-                    DB::table('tondo_payout')->insert([
+                    DB::table(project_table('payout'))->insert([
                         'id'            => $payoutId,
                         'project_id'    => $cagnotte->project_id,
                         'cagnotte_id'   => $cagnotte->id,
@@ -210,7 +210,7 @@ class TraiterRetraitsTontines extends Command
                         'updated_at'    => now(),
                     ]);
 
-                    DB::table('tondo_cagnottes')
+                    DB::table(project_table('cagnottes'))
                         ->where('id', $cagnotte->id)
                         ->update([
                             'montant_collecte' => DB::raw("montant_collecte - {$montant}"),
@@ -244,7 +244,7 @@ class TraiterRetraitsTontines extends Command
                 );
             } catch (\RuntimeException $e) {
                 // Paynala KO — NE PAS restaurer le solde, alerter les admins.
-                DB::table('tondo_payout')
+                DB::table(project_table('payout'))
                     ->where('id', $payoutId)
                     ->update([
                         'statut'     => 'echec',
@@ -268,7 +268,7 @@ class TraiterRetraitsTontines extends Command
 
             // ── Phase 3 : confirmer + réinitialiser cycle ─────────────────────
             DB::transaction(function () use ($payoutId, $disburseData, $cagnotte) {
-                DB::table('tondo_payout')
+                DB::table(project_table('payout'))
                     ->where('id', $payoutId)
                     ->update([
                         'statut'       => 'succes',
@@ -278,7 +278,7 @@ class TraiterRetraitsTontines extends Command
                     ]);
 
                 // Remettre tous les membres à en_attente pour le cycle suivant.
-                DB::table('tondo_participants')
+                DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
                     ->update([
                         'statut_paiement' => 'en_attente',
@@ -296,9 +296,9 @@ class TraiterRetraitsTontines extends Command
                 );
             }
 
-            $autresIds = DB::table('tondo_participants')
-                ->join('users', 'tondo_participants.user_id', '=', 'users.id')
-                ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+            $autresIds = DB::table(project_table('participants'))
+                ->join('users', project_table('participants').'.user_id', '=', 'users.id')
+                ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
                 ->where('users.compte_type', 'full')
                 ->where('users.id', '!=', $beneficiaire->user_id)
                 ->pluck('users.id')
@@ -317,12 +317,12 @@ class TraiterRetraitsTontines extends Command
 
             // Notifier le PROCHAIN bénéficiaire (cycle + 1) qu'il sera le suivant.
             $prochainOrdre = $cycleActuel + 1;
-            $prochainBenef = DB::table('tondo_participants')
-                ->join('users', 'tondo_participants.user_id', '=', 'users.id')
-                ->where('tondo_participants.cagnotte_id', $cagnotte->id)
-                ->where('tondo_participants.ordre_passage', $prochainOrdre)
+            $prochainBenef = DB::table(project_table('participants'))
+                ->join('users', project_table('participants').'.user_id', '=', 'users.id')
+                ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
+                ->where(project_table('participants').'.ordre_passage', $prochainOrdre)
                 ->where('users.compte_type', 'full')
-                ->select('users.id as user_id', 'tondo_participants.prenom', 'tondo_participants.nom')
+                ->select('users.id as user_id', project_table('participants').'.prenom', project_table('participants').'.nom')
                 ->first();
 
             if ($prochainBenef && $prochainBenef->user_id) {
@@ -339,9 +339,9 @@ class TraiterRetraitsTontines extends Command
                 );
             } elseif ($prochainOrdre > (int) $cagnotte->nombre_inscrits) {
                 // Dernier cycle terminé — notifier tout le groupe.
-                $tousIds = DB::table('tondo_participants')
-                    ->join('users', 'tondo_participants.user_id', '=', 'users.id')
-                    ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+                $tousIds = DB::table(project_table('participants'))
+                    ->join('users', project_table('participants').'.user_id', '=', 'users.id')
+                    ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
                     ->where('users.compte_type', 'full')
                     ->pluck('users.id')->filter()->values()->all();
 
@@ -461,7 +461,7 @@ class TraiterRetraitsTontines extends Command
      */
     private function destinatairesAdmins(): array
     {
-        return DB::table('tondo_admins')
+        return DB::table(project_table('admins'))
             ->where('actif', true)
             ->pluck('email')
             ->toArray();

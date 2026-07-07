@@ -30,3 +30,6 @@ Thumbs.db
 **/caddy
 frankenphp
 frankenphp-worker.php
+
+# Dumps bootstrap prod intermédiaires (générés, jetables)
+/tondo_prod_bootstrap_*.sql

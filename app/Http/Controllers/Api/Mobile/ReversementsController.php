@@ -89,10 +89,10 @@ class ReversementsController extends Controller
         $beneficiaireUserId = null;
 
         if (! empty($data['participant_id'])) {
-            $participant = DB::table('tondo_participants')
-                ->join('users', 'tondo_participants.user_id', '=', 'users.id')
-                ->where('tondo_participants.id', $data['participant_id'])
-                ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+            $participant = DB::table(project_table('participants'))
+                ->join('users', project_table('participants').'.user_id', '=', 'users.id')
+                ->where(project_table('participants').'.id', $data['participant_id'])
+                ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
                 ->select('users.id as user_id_benef', 'users.numero as numero_user')
                 ->first();
 
@@ -119,7 +119,7 @@ class ReversementsController extends Controller
             : $numeroBeneficiaireE164;
 
         // ── Génération des identifiants Paynala ──────────────────────────────
-        $nextNum        = DB::table('tondo_payout')->count() + 1;
+        $nextNum        = DB::table(project_table('payout'))->count() + 1;
         $typeLabel      = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
         $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
         $idempotencyKey = 'TONDO-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
@@ -137,7 +137,7 @@ class ReversementsController extends Controller
                 $reference, $numeroBeneficiaireE164, $beneficiaireUserId, $user
             ) {
                 // Verrouillage exclusif de la ligne cagnotte.
-                $soldeActuel = DB::table('tondo_cagnottes')
+                $soldeActuel = DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->lockForUpdate()
                     ->value('montant_collecte');
@@ -150,7 +150,7 @@ class ReversementsController extends Controller
                 }
 
                 // Enregistrement initie — fonds "réservés" côté Tondo.
-                DB::table('tondo_payout')->insert([
+                DB::table(project_table('payout'))->insert([
                     'id'            => $payoutId,
                     'project_id'    => $cagnotte->project_id,
                     'cagnotte_id'   => $cagnotte->id,
@@ -173,7 +173,7 @@ class ReversementsController extends Controller
                 ]);
 
                 // Décrémentation atomique du solde.
-                DB::table('tondo_cagnottes')
+                DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->update([
                         'montant_collecte' => DB::raw('montant_collecte - ' . (int) $data['montant']),
@@ -210,7 +210,7 @@ class ReversementsController extends Controller
             // On ne restaure PAS automatiquement le solde — l'état Paynala
             // est inconnu. On marque 'echec' et on alerte les admins pour
             // qu'ils vérifient manuellement avant toute correction.
-            DB::table('tondo_payout')
+            DB::table(project_table('payout'))
                 ->where('id', $payoutId)
                 ->update([
                     'statut'     => 'echec',
@@ -230,7 +230,7 @@ class ReversementsController extends Controller
 
             // Alerte email à tous les admins actifs.
             try {
-                $adminEmails = DB::table('tondo_admins')
+                $adminEmails = DB::table(project_table('admins'))
                     ->where('actif', true)
                     ->pluck('email')
                     ->toArray();
@@ -258,7 +258,7 @@ class ReversementsController extends Controller
         }
 
         // ── PHASE 3 : confirmer le payout ────────────────────────────────────
-        DB::table('tondo_payout')
+        DB::table(project_table('payout'))
             ->where('id', $payoutId)
             ->update([
                 'statut'       => 'succes',

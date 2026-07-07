@@ -68,7 +68,7 @@ class CagnottesController extends Controller
 
         // ── Cagnottes cotiseur ────────────────────────────────────────────
         // Récupère les IDs des cagnottes où l'user est membre (user_id connu).
-        $cagnotteIdsCotiseur = DB::table('tondo_participants')
+        $cagnotteIdsCotiseur = DB::table(project_table('participants'))
             ->where('user_id', $user->id)
             ->pluck('cagnotte_id');
 
@@ -255,7 +255,7 @@ class CagnottesController extends Controller
 
         // Le créateur est automatiquement inscrit comme premier membre.
         if ($type === 'tontine_periodique') {
-            DB::table('tondo_participants')->insert([
+            DB::table(project_table('participants'))->insert([
                 'id'              => (string) Str::uuid(),
                 'project_id'      => $user->project_id,
                 'cagnotte_id'     => $cagnotte->id,
@@ -300,7 +300,7 @@ class CagnottesController extends Controller
         $configSvc    = app(TondoConfigService::class);
         $userMasque   = $this->maskPhone($user->numero);
         // Montants déjà reçus par membre via payout (pour transparence reversements).
-        $montantsRecusParMembre = DB::table('tondo_payout')
+        $montantsRecusParMembre = DB::table(project_table('payout'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->whereNotNull('user_id')
@@ -308,7 +308,7 @@ class CagnottesController extends Controller
             ->groupBy('user_id')
             ->pluck('total_recu', 'user_id');
 
-        $participants = DB::table('tondo_participants')
+        $participants = DB::table(project_table('participants'))
             ->where('cagnotte_id', $cagnotte->id)
             ->orderBy('created_at', 'asc')
             ->get()
@@ -337,7 +337,7 @@ class CagnottesController extends Controller
             });
 
         // Cycles complétés = payouts confirmés sur cette cagnotte.
-        $cyclesCompletes = (int) DB::table('tondo_payout')
+        $cyclesCompletes = (int) DB::table(project_table('payout'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->count();
@@ -346,23 +346,23 @@ class CagnottesController extends Controller
         $nbInscrits = (int) $cagnotte->nombre_inscrits;
 
         // Historique des cotisations reçues (entrées).
-        $historiqueQuery = DB::table('tondo_paiements')
-            ->join('tondo_participants', 'tondo_paiements.participant_id', '=', 'tondo_participants.id')
-            ->where('tondo_paiements.cagnotte_id', $cagnotte->id)
-            ->orderBy('tondo_paiements.date', 'desc')
+        $historiqueQuery = DB::table(project_table('paiements'))
+            ->join(project_table('participants'), project_table('paiements').'.participant_id', '=', project_table('participants').'.id')
+            ->where(project_table('paiements').'.cagnotte_id', $cagnotte->id)
+            ->orderBy(project_table('paiements').'.date', 'desc')
             ->limit(50)
             ->select(
-                'tondo_paiements.id',
+                project_table('paiements').'.id',
                 // Colonne réelle participant_id → propriété $h->participant_id.
-                'tondo_paiements.participant_id',
-                'tondo_paiements.montant',
-                'tondo_paiements.date',
-                DB::raw("CONCAT(tondo_participants.prenom, ' ', tondo_participants.nom) as participant_nom")
+                project_table('paiements').'.participant_id',
+                project_table('paiements').'.montant',
+                project_table('paiements').'.date',
+                DB::raw('CONCAT('.project_table('participants').".prenom, ' ', ".project_table('participants').".nom) as participant_nom")
             );
 
         // Cotiseur : filtre sur ses propres paiements uniquement (privacy).
         if (! $estGerant) {
-            $historiqueQuery->where('tondo_paiements.user_id', $user->id);
+            $historiqueQuery->where(project_table('paiements').'.user_id', $user->id);
         }
 
         $historique = $historiqueQuery->get()->map(fn ($h) => [
@@ -374,7 +374,7 @@ class CagnottesController extends Controller
         ]);
 
         // Sorties (reversements effectués) — visibles par tous (transparence).
-        $sorties = DB::table('tondo_payout')
+        $sorties = DB::table(project_table('payout'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->orderBy('date_creation', 'desc')
@@ -498,7 +498,7 @@ class CagnottesController extends Controller
         $numeroMasque = $this->maskPhone($numero);
 
         // Doublon : même numéro masqué dans la même cagnotte
-        $dejaPrecent = DB::table('tondo_participants')
+        $dejaPrecent = DB::table(project_table('participants'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('numero_masque', $numeroMasque)
             ->exists();
@@ -514,7 +514,7 @@ class CagnottesController extends Controller
 
         // Si user_id déjà membre (numéro différent mais même compte)
         if ($utilisateur) {
-            $dejaParUserId = DB::table('tondo_participants')
+            $dejaParUserId = DB::table(project_table('participants'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('user_id', $utilisateur->id)
                 ->exists();
@@ -559,7 +559,7 @@ class CagnottesController extends Controller
         }
 
         $participantId = (string) \Illuminate\Support\Str::uuid();
-        DB::table('tondo_participants')->insert([
+        DB::table(project_table('participants'))->insert([
             'id'              => $participantId,
             'project_id'      => $user->project_id,
             'cagnotte_id'     => $cagnotte->id,
@@ -633,11 +633,11 @@ class CagnottesController extends Controller
         $cagnotte->save();
 
         // Récupère tous les membres ayant un compte full pour les notifier.
-        $participants = DB::table('tondo_participants')
-            ->join('users', 'users.id', '=', 'tondo_participants.user_id')
-            ->where('tondo_participants.cagnotte_id', $cagnotte->id)
+        $participants = DB::table(project_table('participants'))
+            ->join('users', 'users.id', '=', project_table('participants').'.user_id')
+            ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
             ->where('users.compte_type', 'full')
-            ->select('users.id as user_id', 'tondo_participants.ordre_passage')
+            ->select('users.id as user_id', project_table('participants').'.ordre_passage')
             ->get();
 
         $notifSvc = app(OneSignalService::class);
@@ -701,7 +701,7 @@ class CagnottesController extends Controller
         $this->healParticipantsSansCompte($data['ordre'], $cagnotte->id, $user->project_id);
 
         foreach ($data['ordre'] as $position => $participantId) {
-            DB::table('tondo_participants')
+            DB::table(project_table('participants'))
                 ->where('id', $participantId)
                 ->where('cagnotte_id', $cagnotte->id)
                 ->update(['ordre_passage' => $position + 1]);
@@ -817,7 +817,7 @@ class CagnottesController extends Controller
         }
 
         // Déjà membre (via user_id).
-        $dejaInscrit = DB::table('tondo_participants')
+        $dejaInscrit = DB::table(project_table('participants'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('user_id', $user->id)
             ->exists();
@@ -830,7 +830,7 @@ class CagnottesController extends Controller
         $opInfo = app(TondoConfigService::class)->detectOperateur($user->numero, $user->project_id);
 
         $participantId = (string) Str::uuid();
-        DB::table('tondo_participants')->insert([
+        DB::table(project_table('participants'))->insert([
             'id'               => $participantId,
             'project_id'       => $user->project_id,
             'cagnotte_id'      => $cagnotte->id,
@@ -900,7 +900,7 @@ class CagnottesController extends Controller
             ], 422);
         }
 
-        $deleted = DB::table('tondo_participants')
+        $deleted = DB::table(project_table('participants'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('user_id', $user->id)
             ->delete();
@@ -938,7 +938,7 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Impossible de modifier une cagnotte clôturée.'], 422);
         }
 
-        $participant = DB::table('tondo_participants')
+        $participant = DB::table(project_table('participants'))
             ->where('id', $participantId)
             ->where('cagnotte_id', $cagnotte->id)
             ->first();
@@ -952,7 +952,7 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Le gérant ne peut pas se retirer de sa propre tontine.'], 422);
         }
 
-        DB::table('tondo_participants')->where('id', $participantId)->delete();
+        DB::table(project_table('participants'))->where('id', $participantId)->delete();
 
         // Décrémente nombre_inscrits (le créateur n'est pas compté dedans).
         if ((int) $cagnotte->nombre_inscrits > 0) {
@@ -975,7 +975,7 @@ class CagnottesController extends Controller
      */
     private function healParticipantsSansCompte(array $participantIds, string $cagnotteId, string $projectId): void
     {
-        $orphelins = DB::table('tondo_participants')
+        $orphelins = DB::table(project_table('participants'))
             ->whereIn('id', $participantIds)
             ->where('cagnotte_id', $cagnotteId)
             ->whereNull('user_id')
@@ -1004,7 +1004,7 @@ class CagnottesController extends Controller
                 $existant = $newUser;
             }
 
-            DB::table('tondo_participants')
+            DB::table(project_table('participants'))
                 ->where('id', $p->id)
                 ->update(['user_id' => $existant->id]);
         }
@@ -1085,10 +1085,10 @@ class CagnottesController extends Controller
         }
 
         // Membres en retard ayant un compte full.
-        $participantsEnAttente = DB::table('tondo_participants')
-            ->join('users', 'users.id', '=', 'tondo_participants.user_id')
-            ->where('tondo_participants.cagnotte_id', $cagnotte->id)
-            ->where('tondo_participants.statut_paiement', 'en_attente')
+        $participantsEnAttente = DB::table(project_table('participants'))
+            ->join('users', 'users.id', '=', project_table('participants').'.user_id')
+            ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
+            ->where(project_table('participants').'.statut_paiement', 'en_attente')
             ->where('users.compte_type', 'full')
             ->pluck('users.id')
             ->filter()

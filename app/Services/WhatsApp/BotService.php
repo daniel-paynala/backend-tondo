@@ -385,7 +385,7 @@ class BotService
 
         // ── Tontine : vérifier que l'utilisateur est bien un membre inscrit ──
         if ($type === 'tontine_periodique') {
-            $estMembre = $user && DB::table('tondo_participants')
+            $estMembre = $user && DB::table(project_table('participants'))
                 ->where('cagnotte_id', $data['cagnotte_id'])
                 ->where('user_id', $user->id)
                 ->exists();
@@ -773,7 +773,7 @@ class BotService
 
         // Vérifier si déjà inscrit (idempotence)
         if ($user) {
-            $dejaMembre = DB::table('tondo_participants')
+            $dejaMembre = DB::table(project_table('participants'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('user_id', $user->id)
                 ->exists();
@@ -2222,7 +2222,7 @@ class BotService
      */
     private function executerDemarrerTontine(string $numero, TondoCagnotte $cagnotte): string
     {
-        DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+        DB::table(project_table('cagnottes'))->where('id', $cagnotte->id)->update([
             'date_debut' => now(),
             'updated_at' => now(),
         ]);
@@ -2248,7 +2248,7 @@ class BotService
      */
     private function executerSupprimerTontine(string $numero, TondoCagnotte $cagnotte): string
     {
-        DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+        DB::table(project_table('cagnottes'))->where('id', $cagnotte->id)->update([
             'statut'     => 'cloturee',
             'updated_at' => now(),
         ]);
@@ -2274,7 +2274,7 @@ class BotService
      */
     private function demarrerEditionOrdre(string $numero, TondoCagnotte $cagnotte, array $data): string
     {
-        $participants = DB::table('tondo_participants')
+        $participants = DB::table(project_table('participants'))
             ->where('cagnotte_id', $cagnotte->id)
             ->orderByRaw('COALESCE(ordre_passage, 9999)')
             ->orderBy('created_at')
@@ -2360,7 +2360,7 @@ class BotService
         foreach ($pairs as $ancien => $nouveau) {
             $id = $ids[$ancien - 1] ?? null;
             if ($id) {
-                DB::table('tondo_participants')
+                DB::table(project_table('participants'))
                     ->where('id', $id)
                     ->update(['ordre_passage' => $nouveau, 'updated_at' => now()]);
             }
@@ -2709,7 +2709,7 @@ class BotService
 
         if ($soldeZero) {
             if ($texte === '1') {
-                DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+                DB::table(project_table('cagnottes'))->where('id', $cagnotte->id)->update([
                     'statut'     => 'cloturee',
                     'updated_at' => now(),
                 ]);
@@ -2859,7 +2859,7 @@ class BotService
         }
 
         // Reversement réussi → clôturer la cagnotte
-        DB::table('tondo_cagnottes')->where('id', $cagnotte->id)->update([
+        DB::table(project_table('cagnottes'))->where('id', $cagnotte->id)->update([
             'statut'     => 'cloturee',
             'updated_at' => now(),
         ]);
@@ -3212,7 +3212,7 @@ class BotService
     private function inscrireMembre(TondoUser $user, TondoCagnotte $cagnotte): void
     {
         // Vérification d'idempotence : ne rien faire si déjà inscrit
-        $deja = DB::table('tondo_participants')
+        $deja = DB::table(project_table('participants'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('user_id', $user->id)
             ->exists();
@@ -3221,7 +3221,7 @@ class BotService
             return;
         }
 
-        DB::table('tondo_participants')->insert([
+        DB::table(project_table('participants'))->insert([
             'id'              => (string) \Illuminate\Support\Str::uuid(),
             'project_id'      => $cagnotte->project_id,
             'cagnotte_id'     => $cagnotte->id,
@@ -3234,7 +3234,7 @@ class BotService
             'created_at'      => now(),
         ]);
 
-        DB::table('tondo_cagnottes')
+        DB::table(project_table('cagnottes'))
             ->where('id', $cagnotte->id)
             ->increment('nombre_inscrits');
     }

@@ -46,9 +46,11 @@ class Project extends Model
         }
 
         // Lookup minimal : on ne charge que l'id pour limiter le payload.
-        $row = self::where('slug', 'tondo')->first(['id']);
+        // Slug piloté par l'env (dev = « tondo », prod = « tonji »).
+        $slug = config('project.slug');
+        $row = self::where('slug', $slug)->first(['id']);
         if (! $row) {
-            throw new \RuntimeException("Projet 'tondo' introuvable dans la registry.");
+            throw new \RuntimeException("Projet '{$slug}' introuvable dans la registry.");
         }
 
         // Mémoriser et retourner en une seule affectation.

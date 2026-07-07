@@ -88,7 +88,7 @@ class AdminsController extends Controller
         $this->authorizeSuper($request);
 
         $data = $request->validate([
-            'email' => ['required', 'email', 'unique:tondo_admins,email'],
+            'email' => ['required', 'email', 'unique:'.project_table('admins').',email'],
             'password' => ['required', 'string', 'min:8'],
             'nom' => ['required', 'string', 'max:64'],
             'prenom' => ['required', 'string', 'max:64'],

@@ -133,7 +133,7 @@ class TraiterReversementsAutoCagnottes extends Command
         // Priorité 3 : fréquence libre (tous les N mois depuis le dernier payout réussi).
         if ($cagnotte->reversement_auto_frequence_mois) {
             // Récupérer la date du dernier reversement réussi pour calculer le suivant.
-            $dernierPayout = DB::table('tondo_payout')
+            $dernierPayout = DB::table(project_table('payout'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->max('date_creation');
@@ -195,7 +195,7 @@ class TraiterReversementsAutoCagnottes extends Command
             : ltrim($numeroE164, '+');
 
         // Générer les identifiants de la transaction.
-        $nextNum        = DB::table('tondo_payout')->count() + 1;
+        $nextNum        = DB::table(project_table('payout'))->count() + 1;
         $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
         $idempotencyKey = 'TONDO-AUTO-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
         $payoutId       = (string) Str::uuid();
@@ -212,7 +212,7 @@ class TraiterReversementsAutoCagnottes extends Command
                 $cagnotte, $montant, $payoutId, $transId,
                 $idempotencyKey, $reference, $numeroE164, $beneficiaireUserId, $mode
             ) {
-                $solde = (int) DB::table('tondo_cagnottes')
+                $solde = (int) DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->lockForUpdate()
                     ->value('montant_collecte');
@@ -221,7 +221,7 @@ class TraiterReversementsAutoCagnottes extends Command
                     throw new \RuntimeException("Solde insuffisant ou nul : {$solde} FCFA.");
                 }
 
-                DB::table('tondo_payout')->insert([
+                DB::table(project_table('payout'))->insert([
                     'id'            => $payoutId,
                     'project_id'    => $cagnotte->project_id,
                     'cagnotte_id'   => $cagnotte->id,
@@ -244,7 +244,7 @@ class TraiterReversementsAutoCagnottes extends Command
                     'updated_at'    => now(),
                 ]);
 
-                DB::table('tondo_cagnottes')
+                DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->update([
                         'montant_collecte' => DB::raw('montant_collecte - ' . $montant),
@@ -277,7 +277,7 @@ class TraiterReversementsAutoCagnottes extends Command
                 type:           $disburseType,
             );
         } catch (\RuntimeException $e) {
-            DB::table('tondo_payout')
+            DB::table(project_table('payout'))
                 ->where('id', $payoutId)
                 ->update([
                     'statut'     => 'echec',
@@ -301,7 +301,7 @@ class TraiterReversementsAutoCagnottes extends Command
 
         // ── Phase 3 : confirmer + post-traitement ─────────────────────────────
         DB::transaction(function () use ($payoutId, $disburseData, $cagnotte, $mode) {
-            DB::table('tondo_payout')
+            DB::table(project_table('payout'))
                 ->where('id', $payoutId)
                 ->update([
                     'statut'       => 'succes',
@@ -313,7 +313,7 @@ class TraiterReversementsAutoCagnottes extends Command
             // Mode date ou montant cible → clôturer la cagnotte.
             // Mode libre / quotidien → la cagnotte reste active.
             if ($mode !== 'libre' && $mode !== 'quotidien') {
-                DB::table('tondo_cagnottes')
+                DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->update(['statut' => 'cloturee', 'updated_at' => now()]);
             }
@@ -367,7 +367,7 @@ class TraiterReversementsAutoCagnottes extends Command
         string $errorMessage,
     ): void {
         try {
-            $destinataires = DB::table('tondo_admins')
+            $destinataires = DB::table(project_table('admins'))
                 ->where('actif', true)
                 ->pluck('email')
                 ->toArray();

@@ -58,7 +58,7 @@ class GererCagnotteService
      */
     public function historiquePaiements(TondoCagnotte $cagnotte): Collection
     {
-        return DB::table('tondo_payin as p')
+        return DB::table(project_table('payin').' as p')
             ->leftJoin('users as u', 'p.user_id', '=', 'u.id')   // LEFT JOIN : l'user peut ne plus exister
             ->where('p.cagnotte_id', $cagnotte->id)
             ->where('p.statut', 'succes')   // uniquement les paiements confirmés
@@ -156,7 +156,7 @@ class GererCagnotteService
             : ltrim($numeroE164, '+');
 
         // Clé d'idempotence basée sur le numéro de séquence des payouts (TONDO-WA-0001…)
-        $nextNum        = DB::table('tondo_payout')->count() + 1;
+        $nextNum        = DB::table(project_table('payout'))->count() + 1;
         $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
         $idempotencyKey = 'TONDO-WA-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
         $payoutId       = (string) Str::uuid();
@@ -174,7 +174,7 @@ class GererCagnotteService
             $reference, $numeroE164, $benefUser
         ) {
             // Verrouiller la ligne pour empêcher deux reversements simultanés
-            $solde = DB::table('tondo_cagnottes')
+            $solde = DB::table(project_table('cagnottes'))
                 ->where('id', $cagnotte->id)
                 ->lockForUpdate()
                 ->value('montant_collecte');
@@ -187,7 +187,7 @@ class GererCagnotteService
             }
 
             // Insérer le payout avec statut 'initie' avant tout appel externe
-            DB::table('tondo_payout')->insert([
+            DB::table(project_table('payout'))->insert([
                 'id'            => $payoutId,
                 'project_id'    => $cagnotte->project_id,
                 'cagnotte_id'   => $cagnotte->id,
@@ -210,7 +210,7 @@ class GererCagnotteService
             ]);
 
             // Décrémenter le solde de la cagnotte (montant réservé)
-            DB::table('tondo_cagnottes')
+            DB::table(project_table('cagnottes'))
                 ->where('id', $cagnotte->id)
                 ->update([
                     'montant_collecte' => DB::raw('montant_collecte - ' . $montant),
@@ -236,7 +236,7 @@ class GererCagnotteService
         } catch (\RuntimeException $e) {
             // Échec Paynala : marquer 'echec' en DB
             // ATTENTION : le solde a déjà été décrémenté — intervention manuelle requise
-            DB::table('tondo_payout')->where('id', $payoutId)->update([
+            DB::table(project_table('payout'))->where('id', $payoutId)->update([
                 'statut'     => 'echec',
                 'response'   => json_encode(['error' => $e->getMessage()]),
                 'updated_at' => now(),
@@ -251,7 +251,7 @@ class GererCagnotteService
         }
 
         // ── Phase 3 — confirmer le succès ─────────────────────────────────────
-        DB::table('tondo_payout')->where('id', $payoutId)->update([
+        DB::table(project_table('payout'))->where('id', $payoutId)->update([
             'statut'       => 'succes',
             'operateur_id' => $disburseData['airtel_money_id'] ?? null,   // ID retourné par Airtel
             'response'     => json_encode($disburseData),

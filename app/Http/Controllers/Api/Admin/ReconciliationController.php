@@ -47,13 +47,13 @@ class ReconciliationController extends Controller
         }
 
         // Total collecté depuis les payins confirmés (cotisations reçues).
-        $totalPayin = (int) DB::table('tondo_payin')
+        $totalPayin = (int) DB::table(project_table('payin'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->sum('montant');
 
         // Total décaissé depuis les payouts confirmés (reversements effectués).
-        $totalPayout = (int) DB::table('tondo_payout')
+        $totalPayout = (int) DB::table(project_table('payout'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'succes')
             ->sum('montant');
@@ -61,7 +61,7 @@ class ReconciliationController extends Controller
         // Payouts bloqués en statut 'initie' depuis plus de 15 minutes
         // (fenêtre API Paynala) — suspects : Paynala a peut-être répondu mais
         // le backend a planté entre la phase 2 et la phase 3.
-        $payoutsInitieAnciens = DB::table('tondo_payout')
+        $payoutsInitieAnciens = DB::table(project_table('payout'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'initie')
             ->where('date_creation', '<', now()->subMinutes(15))
@@ -69,7 +69,7 @@ class ReconciliationController extends Controller
 
         // Payins initiés depuis plus de 10 minutes — le mobile a probablement
         // arrêté de poller. À investiguer manuellement si le montant est élevé.
-        $payinsInitieAnciens = DB::table('tondo_payin')
+        $payinsInitieAnciens = DB::table(project_table('payin'))
             ->where('cagnotte_id', $cagnotte->id)
             ->where('statut', 'initie')
             ->where('date_creation', '<', now()->subMinutes(10))
@@ -115,12 +115,12 @@ class ReconciliationController extends Controller
         $anomalies = [];
 
         foreach ($cagnottes as $cagnotte) {
-            $totalPayin = (int) DB::table('tondo_payin')
+            $totalPayin = (int) DB::table(project_table('payin'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->sum('montant');
 
-            $totalPayout = (int) DB::table('tondo_payout')
+            $totalPayout = (int) DB::table(project_table('payout'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->sum('montant');

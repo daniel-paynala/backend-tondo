@@ -74,7 +74,7 @@ class StatusController extends Controller
         // Persistance dans tondo_whatsapp_logs (upsert sur message_sid).
         // Le try/catch tolère une table absente (migration non encore jouée).
         try {
-            DB::table('tondo_whatsapp_logs')->updateOrInsert(
+            DB::table(project_table('whatsapp_logs'))->updateOrInsert(
                 // Clé de déduplication : un seul enregistrement par message.
                 ['message_sid' => $messageSid],
                 [
@@ -89,7 +89,7 @@ class StatusController extends Controller
             );
         } catch (\Throwable $e) {
             // Table pas encore créée en base — on log en debug, pas d'erreur critique.
-            Log::debug('tondo_whatsapp_logs non disponible : ' . $e->getMessage());
+            Log::debug(project_table('whatsapp_logs').' non disponible : ' . $e->getMessage());
         }
 
         // 204 : Twilio considère la livraison réussie, pas de retry.

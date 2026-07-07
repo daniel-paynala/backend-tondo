@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 
@@ -28,8 +29,9 @@ use Illuminate\Database\Eloquent\Model;
 class TondoLog extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
-    protected $table = 'tondo_logs';
+    protected string $tableSuffix = 'logs';
 
     /**
      * Pas de colonnes timestamps automatiques — la date métier est le champ `date`,

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -23,9 +24,9 @@ use Laravel\Sanctum\HasApiTokens;
  */
 class TondoAdmin extends Authenticatable
 {
-    use HasApiTokens, HasUuids, Notifiable;
+    use HasApiTokens, HasUuids, Notifiable, HasProjectTable;
 
-    protected $table = 'tondo_admins';
+    protected string $tableSuffix = 'admins';
 
     /**
      * Laravel ne gère pas auto la migration du champ `password` → `password_hash`,

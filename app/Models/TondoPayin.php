@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 
@@ -30,9 +31,10 @@ use Illuminate\Database\Eloquent\Model;
 class TondoPayin extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
     /** Table d'audit des encaissements entrants. */
-    protected $table = 'tondo_payin';
+    protected string $tableSuffix = 'payin';
 
     /** Toutes les colonnes sont mass-assignables sauf la PK. */
     protected $guarded = ['id'];

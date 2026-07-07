@@ -60,7 +60,7 @@ class TontineRappelsCommand extends Command
 
         foreach ($tontines as $cagnotte) {
             // Nombre de cycles déjà réglés = nombre de payouts 'succes' pour cette tontine.
-            $cyclesCompletes = (int) DB::table('tondo_payout')
+            $cyclesCompletes = (int) DB::table(project_table('payout'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->count();
@@ -85,11 +85,11 @@ class TontineRappelsCommand extends Command
             }
 
             // Membres avec compte Tondo actif qui n'ont pas encore cotisé ce cycle.
-            $nonPayes = DB::table('tondo_participants')
-                ->join('users', 'tondo_participants.user_id', '=', 'users.id')
-                ->where('tondo_participants.cagnotte_id', $cagnotte->id)
-                ->whereIn('tondo_participants.statut_paiement', ['en_attente', 'en_retard'])
-                ->whereNotNull('tondo_participants.user_id') // Exclure les comptes light (pas de push).
+            $nonPayes = DB::table(project_table('participants'))
+                ->join('users', project_table('participants').'.user_id', '=', 'users.id')
+                ->where(project_table('participants').'.cagnotte_id', $cagnotte->id)
+                ->whereIn(project_table('participants').'.statut_paiement', ['en_attente', 'en_retard'])
+                ->whereNotNull(project_table('participants').'.user_id') // Exclure les comptes light (pas de push).
                 ->pluck('users.id')
                 ->filter()
                 ->values()

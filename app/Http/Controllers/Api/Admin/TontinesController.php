@@ -40,13 +40,16 @@ class TontinesController extends Controller
         $projectId = $request->user()->project_id;
         $perPage = min((int) $request->input('per_page', 25), 100);
 
+        // Nom de table préfixé selon l'env (tondo_ / tonji_).
+        $tCagnottes = project_table('cagnottes');
+
         $query = TondoCagnotte::query()
             ->where('project_id', $projectId)
             // Sous-requête corrélée pour obtenir le nom du gérant sans JOIN.
-            ->selectRaw('
-                tondo_cagnottes.*,
-                (select prenom || \' \' || nom from users where users.id = tondo_cagnottes.user_id) as gerant_libelle
-            ')
+            ->selectRaw("
+                {$tCagnottes}.*,
+                (select prenom || ' ' || nom from users where users.id = {$tCagnottes}.user_id) as gerant_libelle
+            ")
             ->when($request->input('q'), function ($q, $search) {
                 $q->where(function ($sub) use ($search) {
                     $sub->where('titre', 'ilike', "%{$search}%")

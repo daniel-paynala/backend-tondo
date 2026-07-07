@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 
@@ -27,9 +28,10 @@ use Illuminate\Database\Eloquent\Model;
 class TondoPayoutPaynala extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
     /** Table d'audit des commissions Paynala sur les décaissements. */
-    protected $table = 'tondo_payout_paynala';
+    protected string $tableSuffix = 'payout_paynala';
 
     /** Toutes les colonnes sont mass-assignables sauf la PK. */
     protected $guarded = ['id'];

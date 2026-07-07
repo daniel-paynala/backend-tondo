@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
@@ -36,9 +37,10 @@ use Illuminate\Support\Str;
 class TondoProjectConfig extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
     /** Table de configuration par opérateur/pays (une ligne = un opérateur actif). */
-    protected $table = 'tondo_project_config';
+    protected string $tableSuffix = 'project_config';
 
     /** Toutes les colonnes sont mass-assignables sauf la PK. */
     protected $guarded = ['id'];

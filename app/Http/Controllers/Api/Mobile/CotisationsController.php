@@ -91,7 +91,7 @@ class CotisationsController extends Controller
         // un membre ne peut cotiser qu'une fois par cycle.
         // statut_paiement = 'paye' indique que le cycle courant est déjà réglé.
         if ($cagnotte->type === 'tontine_periodique') {
-            $dejaPayeCycle = DB::table('tondo_participants')
+            $dejaPayeCycle = DB::table(project_table('participants'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('user_id', $user->id)
                 ->where('statut_paiement', 'paye')
@@ -118,7 +118,7 @@ class CotisationsController extends Controller
         // La pénalité s'ajoute telle quelle au montant total final (sans frais).
         $penalite = 0;
         if ($cagnotte->type === 'tontine_periodique') {
-            $cyclesCompletes = (int) DB::table('tondo_payout')
+            $cyclesCompletes = (int) DB::table(project_table('payout'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->count();
@@ -181,7 +181,7 @@ class CotisationsController extends Controller
     {
         $user = $request->user();
 
-        $payin = DB::table('tondo_payin')
+        $payin = DB::table(project_table('payin'))
             ->where('trans_id', $transId)
             ->where('project_id', $user->project_id)
             ->first();
@@ -215,7 +215,7 @@ class CotisationsController extends Controller
             try {
                 DB::transaction(function () use ($payin, $statusData, $netAmount) {
                     // 1) Marque le payin comme réussi.
-                    DB::table('tondo_payin')
+                    DB::table(project_table('payin'))
                         ->where('trans_id', $payin->trans_id)
                         ->update([
                             'statut'     => 'succes',
@@ -224,13 +224,13 @@ class CotisationsController extends Controller
                         ]);
 
                     // 2) Met à jour le membre.
-                    $participant = DB::table('tondo_participants')
+                    $participant = DB::table(project_table('participants'))
                         ->where('cagnotte_id', $payin->cagnotte_id)
                         ->where('user_id', $payin->user_id)
                         ->first();
 
                     if ($participant) {
-                        DB::table('tondo_participants')
+                        DB::table(project_table('participants'))
                             ->where('id', $participant->id)
                             ->update([
                                 'statut_paiement'      => 'paye',
@@ -240,7 +240,7 @@ class CotisationsController extends Controller
                     }
 
                     // 3) Enregistre le paiement (audit fonctionnel).
-                    DB::table('tondo_paiements')->insert([
+                    DB::table(project_table('paiements'))->insert([
                         'id'             => (string) Str::uuid(),
                         'project_id'     => $payin->project_id,
                         'cagnotte_id'    => $payin->cagnotte_id,
@@ -252,7 +252,7 @@ class CotisationsController extends Controller
                     ]);
 
                     // 4) Crédite la cagnotte.
-                    DB::table('tondo_cagnottes')
+                    DB::table(project_table('cagnottes'))
                         ->where('id', $payin->cagnotte_id)
                         ->update([
                             'montant_collecte' => DB::raw('montant_collecte + ' . $netAmount),
@@ -273,7 +273,7 @@ class CotisationsController extends Controller
         }
 
         if ($apiStatus === 'FAILED') {
-            DB::table('tondo_payin')
+            DB::table(project_table('payin'))
                 ->where('trans_id', $transId)
                 ->update([
                     'statut'     => 'echec',
@@ -337,7 +337,7 @@ class CotisationsController extends Controller
                 $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite
             ) {
                 // 1) Membre (placeholder en_attente).
-                $participant = DB::table('tondo_participants')
+                $participant = DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
                     ->where('user_id', $user->id)
                     ->first();
@@ -346,7 +346,7 @@ class CotisationsController extends Controller
 
                 if ($isNew) {
                     $participantId = (string) Str::uuid();
-                    DB::table('tondo_participants')->insert([
+                    DB::table(project_table('participants'))->insert([
                         'id'                   => $participantId,
                         'project_id'           => $cagnotte->project_id,
                         'cagnotte_id'          => $cagnotte->id,
@@ -363,7 +363,7 @@ class CotisationsController extends Controller
                     $incrMembres = $cagnotte->type === 'cagnotte_ouverte'
                         ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
                         : [];
-                    DB::table('tondo_cagnottes')
+                    DB::table(project_table('cagnottes'))
                         ->where('id', $cagnotte->id)
                         ->update(array_merge(
                             $incrMembres,
@@ -375,7 +375,7 @@ class CotisationsController extends Controller
                 // dans status() à la confirmation Airtel.
 
                 // 2) Trace payin (statut initie — cagnotte pas encore créditée).
-                DB::table('tondo_payin')->insert([
+                DB::table(project_table('payin'))->insert([
                     'id'            => (string) Str::uuid(),
                     'project_id'    => $cagnotte->project_id,
                     'cagnotte_id'   => $cagnotte->id,
@@ -434,14 +434,14 @@ class CotisationsController extends Controller
             DB::transaction(function () use (
                 $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut, $penalite
             ) {
-                $participant = DB::table('tondo_participants')
+                $participant = DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
                     ->where('user_id', $user->id)
                     ->first();
 
                 if (! $participant) {
                     $participantId = (string) Str::uuid();
-                    DB::table('tondo_participants')->insert([
+                    DB::table(project_table('participants'))->insert([
                         'id'                   => $participantId,
                         'project_id'           => $cagnotte->project_id,
                         'cagnotte_id'          => $cagnotte->id,
@@ -457,7 +457,7 @@ class CotisationsController extends Controller
                     $incrMembres = $cagnotte->type === 'cagnotte_ouverte'
                         ? ['nombre_participants' => DB::raw('nombre_participants + 1')]
                         : [];
-                    DB::table('tondo_cagnottes')
+                    DB::table(project_table('cagnottes'))
                         ->where('id', $cagnotte->id)
                         ->update(array_merge(
                             $incrMembres,
@@ -465,7 +465,7 @@ class CotisationsController extends Controller
                         ));
                 } else {
                     $participantId = $participant->id;
-                    DB::table('tondo_participants')
+                    DB::table(project_table('participants'))
                         ->where('id', $participantId)
                         ->update([
                             'statut_paiement'      => 'paye',
@@ -474,7 +474,7 @@ class CotisationsController extends Controller
                         ]);
                 }
 
-                DB::table('tondo_paiements')->insert([
+                DB::table(project_table('paiements'))->insert([
                     'id'             => (string) Str::uuid(),
                     'project_id'     => $cagnotte->project_id,
                     'cagnotte_id'    => $cagnotte->id,
@@ -485,7 +485,7 @@ class CotisationsController extends Controller
                     'created_at'     => now(),
                 ]);
 
-                DB::table('tondo_payin')->insert([
+                DB::table(project_table('payin'))->insert([
                     'id'            => (string) Str::uuid(),
                     'project_id'    => $cagnotte->project_id,
                     'cagnotte_id'   => $cagnotte->id,
@@ -503,7 +503,7 @@ class CotisationsController extends Controller
                     'updated_at'    => now(),
                 ]);
 
-                DB::table('tondo_cagnottes')
+                DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->update([
                         'montant_collecte' => DB::raw('montant_collecte + ' . $montantNet),
@@ -548,7 +548,7 @@ class CotisationsController extends Controller
      */
     private function envoyerNotifsSucces(string $payeurId, string $cagnotteId, int $montantNet): void
     {
-        $cagnotte = DB::table('tondo_cagnottes')->where('id', $cagnotteId)->first();
+        $cagnotte = DB::table(project_table('cagnottes'))->where('id', $cagnotteId)->first();
         if (! $cagnotte) {
             return;
         }

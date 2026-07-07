@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 
@@ -34,8 +35,9 @@ use Illuminate\Database\Eloquent\Model;
 class TondoMembre extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
-    protected $table = 'tondo_participants';
+    protected string $tableSuffix = 'participants';
 
     /**
      * Pas de colonnes `updated_at` sur cette table — seul `created_at` est géré

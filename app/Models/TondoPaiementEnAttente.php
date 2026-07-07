@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -27,7 +28,9 @@ use Illuminate\Database\Eloquent\Model;
  */
 class TondoPaiementEnAttente extends Model
 {
-    protected $table      = 'tondo_paiements_en_attente';
+    use HasProjectTable;
+
+    protected string $tableSuffix = 'paiements_en_attente';
 
     /** La PK est le trans_id Airtel — pas d'UUID ni d'auto-incrément. */
     protected $primaryKey = 'trans_id';

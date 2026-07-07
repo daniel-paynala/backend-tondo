@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 
@@ -31,8 +32,9 @@ use Illuminate\Database\Eloquent\Model;
 class TondoPaiement extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
-    protected $table = 'tondo_paiements';
+    protected string $tableSuffix = 'paiements';
 
     /** Pas de gestion automatique updated_at — la date métier est le champ `date`. */
     public $timestamps = false;

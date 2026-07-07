@@ -148,8 +148,8 @@ class ReceiptService
     {
         // Jointure directe sur tondo_payin pour éviter de charger les modèles Eloquent
         // (cette méthode est appelée depuis la page publique — performance critique).
-        $payin = \Illuminate\Support\Facades\DB::table('tondo_payin as p')
-            ->join('tondo_cagnottes as c', 'p.cagnotte_id', '=', 'c.id')
+        $payin = \Illuminate\Support\Facades\DB::table(project_table('payin').' as p')
+            ->join(project_table('cagnottes').' as c', 'p.cagnotte_id', '=', 'c.id')
             ->leftJoin('users as u', 'p.user_id', '=', 'u.id') // leftJoin : paiement anonyme possible.
             ->where('p.trans_id', $transId)
             ->where('p.statut', 'succes') // On n'affiche que les paiements confirmés.

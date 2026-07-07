@@ -43,7 +43,7 @@ class TransactionsController extends Controller
         $perPage = min((int) $request->input('per_page', 25), 100);
 
         // Requête sur la vue SQL unifiée — pas de modèle Eloquent ici.
-        $query = DB::table('tondo_transactions_unified')
+        $query = DB::table(project_table('transactions_unified'))
             ->where('project_id', $projectId)
             ->when($request->input('type'), fn ($q, $t) => $q->where('type', $t))
             ->when($request->input('statut'), fn ($q, $s) => $q->where('statut', $s))

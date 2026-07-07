@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,8 +32,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class TondoSignalement extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
-    protected $table = 'tondo_signalements';
+    protected string $tableSuffix = 'signalements';
 
     /** Toutes les colonnes sont mass-assignables sauf la PK. */
     protected $guarded = ['id'];

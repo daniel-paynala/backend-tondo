@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -39,9 +40,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class TondoCagnotte extends Model
 {
     use UuidPrimary;
+    use HasProjectTable;
 
     /** Table principale des cagnottes/tontines. */
-    protected $table = 'tondo_cagnottes';
+    protected string $tableSuffix = 'cagnottes';
 
     /** Toutes les colonnes sont mass-assignables sauf la PK. */
     protected $guarded = ['id'];

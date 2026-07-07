@@ -123,7 +123,7 @@ class CreerCagnotteService
 
         // Le créateur est automatiquement inscrit comme premier membre (tontine)
         if ($type === 'tontine_periodique') {
-            DB::table('tondo_participants')->insert([
+            DB::table(project_table('participants'))->insert([
                 'id'              => (string) Str::uuid(),
                 'project_id'      => $user->project_id,
                 'cagnotte_id'     => $cagnotte->id,

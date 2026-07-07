@@ -38,14 +38,18 @@ class UsersController extends Controller
         $projectId = $request->user()->project_id;
         $perPage = min((int) $request->input('per_page', 25), 100);
 
+        // Noms de tables préfixés selon l'env (tondo_ / tonji_).
+        $tCagnottes = project_table('cagnottes');
+        $tPaiements = project_table('paiements');
+
         $query = TondoUser::query()
             ->where('project_id', $projectId)
             // Sous-requêtes corrélées pour éviter les JOINs coûteux sur la liste.
-            ->selectRaw('
+            ->selectRaw("
                 users.*,
-                (select count(*) from tondo_cagnottes where tondo_cagnottes.user_id = users.id) as cagnottes_count,
-                (select coalesce(sum(montant), 0) from tondo_paiements where tondo_paiements.user_id = users.id) as total_cotise
-            ')
+                (select count(*) from {$tCagnottes} where {$tCagnottes}.user_id = users.id) as cagnottes_count,
+                (select coalesce(sum(montant), 0) from {$tPaiements} where {$tPaiements}.user_id = users.id) as total_cotise
+            ")
             ->when($request->input('q'), function ($q, $search) {
                 // Recherche insensible à la casse sur les identifiants humains.
                 $q->where(function ($sub) use ($search) {
