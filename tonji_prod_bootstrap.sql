@@ -1,9 +1,13 @@
--- ================================================================
--- Bootstrap prod Tondo
--- Structure complète du schéma public (tables VIDES) + données de
--- référence (migrations, projects, tonji_project_config, tonji_admins).
--- Généré depuis la base source. Aucune donnée de test copiée.
--- ================================================================
+-- ============================================================
+-- Bootstrap prod Tonji — RESET + structure vide + config de référence.
+-- Ré-exécutable : repart d'un schéma public propre à chaque exécution.
+-- ============================================================
+
+-- Reset complet du schéma public (efface tout état partiel des essais précédents).
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
+GRANT ALL   ON SCHEMA public TO postgres, service_role;
 
 --
 -- PostgreSQL database dump
@@ -28,14 +32,12 @@ SET row_security = off;
 -- Name: public; Type: SCHEMA; Schema: -; Owner: -
 --
 
--- CREATE SCHEMA public;  (déjà présent sur Supabase)
 
 
 --
 -- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
 --
 
--- COMMENT ON SCHEMA public IS 'standard public schema';
 
 
 --
@@ -2205,7 +2207,7 @@ CREATE POLICY users_update_self ON public.users FOR UPDATE USING ((id = auth.uid
 
 
 
--- ===== Données de référence (config + tracking migrations) =====
+-- ===== Données de référence =====
 --
 -- PostgreSQL database dump
 --
