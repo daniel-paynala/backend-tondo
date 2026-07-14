@@ -78,7 +78,13 @@ class AuthController extends Controller
 
         // Early return : intent=signup + user déjà inscrit → l'app affiche
         // le toast "déjà inscrit" sans gaspiller un SMS ni appeler le KYC.
-        if ($intent === 'signup' && $userExists) {
+        //
+        // EXCEPTION — numéro de test (revue Apple / Google) : on ne coupe PAS.
+        // Le compte de test est pré-créé en base, donc sans cette exception le
+        // relecteur ne pourrait jamais dérouler le parcours d'inscription. On
+        // laisse l'OTP partir (aucun SMS réel pour ce numéro) ; verifyOtp
+        // reconnaîtra ensuite le compte existant et délivrera un token.
+        if ($intent === 'signup' && $userExists && ! app(OtpService::class)->estNumeroTest($phone)) {
             Log::info("[mobile] request-otp skip SMS pour {$phone} — signup sur numéro déjà inscrit");
             return response()->json([
                 'ok' => true,
@@ -311,6 +317,34 @@ class AuthController extends Controller
         $msisdn    = $data['numero'];           // 0XXXXXXXX
         $phoneE164 = '+241' . substr($msisdn, 1);
 
+        // ── 0. Numéro de test (revue Apple / Google) ─────────────────────────
+        // Placé AVANT toute autre vérification, à dessein.
+        //
+        // Il court-circuite deux choses :
+        //  1. le KYC opérateur — le numéro est fictif, aucun compte Airtel Money
+        //     réel n'existe derrière, le KYC le rejetterait ;
+        //  2. le contrôle « déjà inscrit » — sans ça, une fois le compte de test
+        //     créé, le relecteur ne POURRAIT PLUS tester le parcours d'inscription
+        //     (l'app le renverrait vers la connexion). En l'exemptant, les DEUX
+        //     parcours restent praticables sur le même numéro : l'inscription
+        //     rejoue jusqu'au bout et `verifyOtp` reconnaît le compte existant,
+        //     puis délivre un token comme pour une connexion.
+        //
+        // On annonce donc toujours `user_exists: false` : c'est ce qui laisse
+        // l'app dérouler le formulaire de création. Ne concerne que ce numéro.
+        if (app(OtpService::class)->estNumeroTest($phoneE164)) {
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => 'airtel',
+                'kyc_ok'      => true,
+                'bloque'      => false,
+                'nom'         => config('services.otp.test_nom', 'REVIEW'),
+                'prenom'      => config('services.otp.test_prenom', 'Test'),
+                'type_client' => 'particulier',
+                'message'     => 'Compte Airtel Money vérifié.',
+            ]);
+        }
+
         // ── 1. Vérification d'existence du compte Tonji ─────────────────────
         // Seuls les comptes "full" bloquent — les comptes light (ajoutés à une
         // cagnotte par un tiers) peuvent se créer un compte complet.
@@ -326,27 +360,6 @@ class AuthController extends Controller
                 'kyc_ok'      => null,
                 'bloque'      => true,
                 'message'     => 'Ce numéro est déjà inscrit sur Tonji. Retournez à l\'accueil pour vous connecter.',
-            ]);
-        }
-
-        // ── 1-bis. Numéro de test (revue Apple / Google) ─────────────────────
-        // Court-circuite toute la vérification opérateur + KYC qui suit : le
-        // numéro est fictif, aucun compte Airtel Money réel n'existe derrière,
-        // donc le KYC le rejetterait et le relecteur resterait bloqué à la
-        // saisie du numéro. On renvoie une identité de test pour pré-remplir
-        // le formulaire d'inscription.
-        // Placé APRÈS le contrôle d'existence : une fois le compte de test créé,
-        // le relecteur doit bien recevoir « déjà inscrit » et passer par le login.
-        if (app(OtpService::class)->estNumeroTest($phoneE164)) {
-            return response()->json([
-                'user_exists' => false,
-                'operateur'   => 'airtel',
-                'kyc_ok'      => true,
-                'bloque'      => false,
-                'nom'         => config('services.otp.test_nom', 'REVIEW'),
-                'prenom'      => config('services.otp.test_prenom', 'Test'),
-                'type_client' => 'particulier',
-                'message'     => 'Compte Airtel Money vérifié.',
             ]);
         }
 
