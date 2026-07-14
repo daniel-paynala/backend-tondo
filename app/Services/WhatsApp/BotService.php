@@ -23,6 +23,17 @@ use Illuminate\Support\Facades\Log;
  *   3. Aucune session / premier message → premiereArrivee()
  *   4. match() sur l'étape courante → handler spécifique
  *
+ * POSITIONNEMENT « CAGNOTTE D'ABORD » (flag config/tondo.php → tontines_actives,
+ * défaut false ; pendant de kTontinesActives côté Flutter et TONTINES_ACTIVES
+ * côté web — les trois canaux doivent rester alignés) :
+ *   • Flag OFF : le menu et tout le lexique sont 100 % cagnotte, et l'étape
+ *     'creer.type' est SAUTÉE (demarrerCreer part directement sur une cagnotte).
+ *     C'est le seul endroit où une tontine peut naître → aucune tontine nouvelle.
+ *   • Les handlers tontine ci-dessous ne sont PAS supprimés : ils restent en
+ *     place, gèrent les tontines déjà en base, et redeviennent atteignables en
+ *     passant TONJI_TONTINES_ACTIVES=true.
+ *   Le diagramme ci-dessous décrit le parcours COMPLET (flag ON).
+ *
  * Diagramme des états :
  *
  *  [aucune session] ──► MENU
@@ -163,9 +174,39 @@ class BotService
     {
         $this->session->set($numero, 'menu');
 
-        return <<<TXT
-        🎉 *Bienvenue sur Tonji !*
+        return "🎉 *Bienvenue sur Tonji !*\n\n" . $this->corpsMenu();
+    }
 
+    /**
+     * Corps du menu principal (question + 5 options), SANS toucher à la session.
+     *
+     * Source unique de vérité du libellé du menu : afficherMenu() l'utilise après
+     * avoir positionné la session, et recu() le réutilise pour proposer la suite
+     * après un paiement — recu() étant aussi appelée par le scheduler, elle n'a
+     * pas toujours de session sous la main, d'où la séparation.
+     *
+     * @return string  Les 5 options, formatées WhatsApp
+     */
+    private function corpsMenu(): string
+    {
+        // Positionnement « Cagnotte d'abord » : tant que les tontines sont
+        // désactivées, le menu ne parle que de cagnottes. L'ancien libellé
+        // (mixte tontine/cagnotte) reste sous le flag, prêt à revenir.
+        if (! $this->tontinesActives()) {
+            return <<<TXT
+            Que souhaitez-vous faire ?
+
+            1️⃣  *Cotiser* à une cagnotte
+            2️⃣  *Rejoindre* une cagnotte
+            3️⃣  *Créer* une cagnotte
+            4️⃣  *Gérer* mes cagnottes
+            5️⃣  *Aide* & support
+
+            _Tapez le numéro de votre choix._
+            TXT;
+        }
+
+        return <<<TXT
         Que souhaitez-vous faire ?
 
         1️⃣  *Cotiser*
@@ -176,6 +217,19 @@ class BotService
 
         _Tapez le numéro de votre choix._
         TXT;
+    }
+
+    /**
+     * Les parcours TONTINE sont-ils actifs ?
+     *
+     * Pendant du `kTontinesActives` Flutter et du `TONTINES_ACTIVES` web.
+     * Piloté par TONJI_TONTINES_ACTIVES (.env) — voir config/tondo.php.
+     *
+     * @return bool  true si la tontine est proposée à l'utilisateur
+     */
+    private function tontinesActives(): bool
+    {
+        return (bool) config('tondo.tontines_actives', false);
     }
 
     /**
@@ -212,7 +266,7 @@ class BotService
         return <<<TXT
         💰 *Cotiser*
 
-        Entrez le *Numéro de tontine ou de cagnotte*
+        Entrez le *code de la cagnotte*
         (6 chiffres, fourni par l'organisateur).
 
         #️⃣ _pour revenir en arrière_
@@ -241,11 +295,11 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cagnotte *N°{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Code de cagnotte *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
         if ($cagnotte->statut === 'cloturee') {
-            return "❌ La tontine ou cagnotte *{$cagnotte->titre}* est clôturée.\n\n#️⃣ _pour revenir en arrière_";
+            return "❌ La cagnotte *{$cagnotte->titre}* est clôturée.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         // Stocker les infos cagnotte dans la session pour les étapes suivantes
@@ -659,23 +713,16 @@ class BotService
         $merci   = ($prenom && strtolower($prenom) !== 'anonyme') ? "Merci {$prenom} 🙏" : 'Merci 🙏';
         $ligneRecu = $pdfUrl ? "\n📄 *Votre reçu :* {$pdfUrl}" : '';
 
+        // Le menu de fin réutilise corpsMenu() : sans ça, cette copie en dur
+        // restait sur l'ancien libellé tontine après un paiement réussi.
         return <<<TXT
         ✅ *Paiement confirmé !*
 
         {$merci}
-        Votre paiement de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistrée.{$ligneRecu}
+        Votre paiement de *{$montant} FCFA* pour *{$titre} {$ref}* a été enregistré.{$ligneRecu}
 
         ————————————————
-        🎉 *Que souhaitez-vous faire ?*
-
-        1️⃣  *Cotiser*
-        2️⃣  *Rejoindre* une tontine
-        3️⃣  *Créer* (Tontine ou Cagnotte)
-        4️⃣  *Gérer* (Tontine ou Cagnotte)
-        5️⃣  *Aide* & support
-
-        _Tapez le numéro de votre choix._
-        TXT;
+        TXT . "\n" . $this->corpsMenu();
     }
 
     // ── 2 — Rejoindre ─────────────────────────────────────────────────────────
@@ -690,9 +737,9 @@ class BotService
     {
         $this->session->set($numero, 'rejoindre.ref');
         return <<<TXT
-        🤝 *Rejoindre une tontine ou une cagnotte*
+        🤝 *Rejoindre une cagnotte*
 
-        Entrez le *Numéro de tontine ou de cagnotte*
+        Entrez le *code de la cagnotte*
         (6 chiffres, fourni par l'organisateur).
 
         #️⃣ _pour revenir en arrière_
@@ -712,9 +759,11 @@ class BotService
         $cagnotte = $ref ? TondoCagnotte::where('reference', $ref)->first() : null;
 
         if (! $cagnotte) {
-            return $this->erreurEtMenu($numero, "❌ Numéro de tontine/cagnotte *N°{$ref}* introuvable.\nVérifiez et réessayez.");
+            return $this->erreurEtMenu($numero, "❌ Code de cagnotte *N°{$ref}* introuvable.\nVérifiez et réessayez.");
         }
 
+        // Le type reste calculé : une tontine héritée (créée avant le passage en
+        // « Cagnotte d'abord ») doit continuer à s'afficher correctement.
         $type = $cagnotte->type === 'tontine_periodique' ? 'Tontine' : 'Cagnotte';
 
         $this->session->set($numero, 'rejoindre.numero', [
@@ -843,6 +892,27 @@ class BotService
      */
     private function demarrerCreer(string $numero): string
     {
+        // « Cagnotte d'abord » : la tontine étant désactivée, il n'y a plus de
+        // choix de type à poser. On saute l'étape 'creer.type' et on entre
+        // directement dans le sous-flow cagnotte (même cible que le choix "1").
+        // C'est le SEUL endroit où une tontine peut naître : la verrouiller ici
+        // suffit à garantir qu'aucune tontine nouvelle n'est créée.
+        if (! $this->tontinesActives()) {
+            $this->session->set($numero, 'creer.cotisation.nom', [
+                'project_id' => $this->tondoProjectId(),
+                'type'       => 'cagnotte_ouverte',
+            ]);
+
+            return <<<TXT
+            ✨ *Créer une cagnotte*
+
+            Quel est le *nom* de votre cagnotte ?
+            _(max 120 caractères)_
+
+            #️⃣ _pour revenir en arrière_
+            TXT;
+        }
+
         $this->session->set($numero, 'creer.type', [
             'project_id' => $this->tondoProjectId(),
         ]);
@@ -904,6 +974,14 @@ class BotService
     private function handleCreerType(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
+
+        // Filet de sécurité : une session ouverte AVANT la désactivation des
+        // tontines peut encore stationner à 'creer.type' (cache 30 min) et
+        // taper "2". Si le flag est off, on ignore le choix et on bascule sur
+        // le flux cagnotte, seul parcours autorisé.
+        if (! $this->tontinesActives()) {
+            return $this->demarrerCreer($numero);
+        }
 
         if ($texte === '1') {
             $this->session->set($numero, 'creer.cotisation.nom', array_merge($data, [
@@ -1556,8 +1634,12 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez support@tonji.ga.");
         }
 
-        $type      = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
-        $typeLabel = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        // Lexique aligné sur le mobile et le web : on parle de « code de la
+        // cagnotte » (et non de « numéro »), la tontine gardant son libellé.
+        $refLabel = $cagnotte->type === 'tontine_periodique'
+            ? 'Numéro de tontine'
+            : 'Code de la cagnotte';
         $prenom = ucfirst(mb_strtolower($user->prenom));
         $ref    = $cagnotte->reference;
         // Construire le deep link WhatsApp pour que les membres rejoignent directement
@@ -1572,7 +1654,7 @@ class BotService
         Félicitations *{$prenom}* !
         Votre {$type} est active.
 
-        *Numéro de {$typeLabel} : N°{$ref}*
+        *{$refLabel} : N°{$ref}*
         Partagez ce lien à vos membres :{$lienWa}
 
         TXT . "\n" . $this->afficherMenu($numero);
@@ -1628,7 +1710,7 @@ class BotService
         ]);
 
         return <<<TXT
-        📋 *Gérer mes tontines & cagnottes*
+        📋 *Gérer mes cagnottes*
 
         Votre *numéro Mobile Money* ?
         _(format : *0XXXXXXXX*)_
@@ -1848,11 +1930,13 @@ class BotService
 
         if ($cagnottes->isEmpty()) {
             return $this->erreurEtMenu($numero,
-                "📭 Vous n'avez aucune tontine ou cagnotte active.\nTapez *3* pour en créer une."
+                "📭 Vous n'avez aucune cagnotte active.\nTapez *3* pour en créer une."
             );
         }
 
         $liste    = $cagnottes->values();
+        // Le suffixe de type n'est affiché que pour les tontines héritées : en
+        // « Cagnotte d'abord », une ligne sans suffixe est une cagnotte.
         $index    = $liste->map(fn ($c, $i) => ($i + 1) . ". *{$c->titre}* · N°{$c->reference} · "
             . ($c->type === 'tontine_periodique' ? 'Tontine' : 'Cagnotte')
         )->implode("\n");
@@ -1862,12 +1946,12 @@ class BotService
         $this->session->set($numero, 'gerer.liste', array_merge($data, ['refs' => $refs]));
 
         return <<<TXT
-        📋 *Vos tontines & cagnottes actives*
+        📋 *Vos cagnottes actives*
 
         {$index}
 
-        Quelle tontine ou cagnotte souhaitez-vous gérer ?
-        _(tapez le numéro de la liste, ou entrez directement le numéro de la tontine ou cagnotte)_
+        Quelle cagnotte souhaitez-vous gérer ?
+        _(tapez le numéro de la liste, ou entrez directement le code de la cagnotte)_
 
         #️⃣ _pour revenir en arrière_
         TXT;
@@ -1900,7 +1984,7 @@ class BotService
         } elseif ($choix >= 1 && $choix <= $n) {
             $ref = $refs[$choix - 1];
         } else {
-            return "⚠️ Tapez un chiffre entre *1* et *{$n}*, ou entrez directement le *numéro de la tontine ou cagnotte*.\n\n#️⃣ _pour revenir en arrière_";
+            return "⚠️ Tapez un chiffre entre *1* et *{$n}*, ou entrez directement le *code de la cagnotte*.\n\n#️⃣ _pour revenir en arrière_";
         }
 
         $cagnotte = TondoCagnotte::where('reference', $ref)->first();
@@ -2935,7 +3019,7 @@ class BotService
 
         if (! $cagnotte || $cagnotte->statut === 'cloturee') {
             $this->session->set($numero, 'menu');
-            return "❌ Cette tontine ou cagnotte n'est pas disponible.\n\n" . $this->afficherMenu($numero);
+            return "❌ Cette cagnotte n'est pas disponible.\n\n" . $this->afficherMenu($numero);
         }
 
         // Cas 1 : tontine non démarrée → flux d'inscription

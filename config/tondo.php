@@ -16,4 +16,22 @@ return [
      * Si vide, les routes USSD retournent 401 pour toutes les requêtes.
      */
     'ussd_secret' => env('USSD_SECRET', ''),
+
+    /*
+     * Feature flag « Cagnotte d'abord » — active ou non les parcours TONTINE.
+     *
+     * Au lancement, Tonji se positionne sur la cagnotte uniquement : la tontine
+     * est repoussée à une phase ultérieure. Ce flag est le pendant backend de
+     * `kTontinesActives` (Flutter) et `TONTINES_ACTIVES` (web) : les trois
+     * canaux doivent TOUJOURS être alignés.
+     *
+     * À false (défaut) :
+     *   - le bot WhatsApp ne propose plus de CRÉER une tontine (seul point où
+     *     une tontine peut naître) ;
+     *   - le lexique affiché est 100 % cagnotte.
+     * Le code des parcours tontine n'est PAS supprimé : il reste en place et
+     * redevient atteignable en passant TONJI_TONTINES_ACTIVES=true dans .env.
+     * Les tontines déjà en base restent gérables dans tous les cas.
+     */
+    'tontines_actives' => env('TONJI_TONTINES_ACTIVES', false),
 ];
