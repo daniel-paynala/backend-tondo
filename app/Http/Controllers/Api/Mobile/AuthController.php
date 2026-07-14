@@ -160,11 +160,28 @@ class AuthController extends Controller
 
         Log::info("[mobile] request-otp [{$otp->driver()}] OK pour {$phone} — exists=" . ($userExists ? '1' : '0'));
 
+        // Numéro de test + inscription : on annonce user_exists=false, même si le
+        // compte existe bel et bien en base.
+        //
+        // L'app arrête net le parcours de création dès que cette clé vaut true
+        // (SignUpScreen : `if (result.userExists) { toast « déjà inscrit »; return; }`).
+        // Comme le compte de test est pré-créé, le relecteur resterait bloqué sur
+        // l'écran d'identité. On aligne donc cette réponse sur celle de kycCheck,
+        // qui renvoie déjà false pour ce numéro.
+        //
+        // On ne touche PAS à $userExists lui-même : la logique interne en dépend
+        // (notamment l'early return du login, qui doit continuer à voir le compte
+        // comme existant pour envoyer l'OTP).
+        $userExistsExpose = $userExists;
+        if ($intent === 'signup' && app(OtpService::class)->estNumeroTest($phone)) {
+            $userExistsExpose = false;
+        }
+
         return response()->json([
             'ok'          => true,
             'message'     => 'Code envoyé par SMS.',
             'phone'       => $phone,
-            'user_exists' => $userExists,
+            'user_exists' => $userExistsExpose,
             'dev_hint'    => $devHint,  // null en prod, code en driver=dev
             'otp_sent'    => true,
         ]);
