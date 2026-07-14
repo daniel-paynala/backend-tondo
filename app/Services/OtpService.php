@@ -40,10 +40,15 @@ class OtpService
     }
 
     /**
-     * Vrai si [phoneE164] est le numéro de test whitelisté (review Apple).
+     * Vrai si [phoneE164] est le numéro de test whitelisté (review Apple / Google).
      * Comparaison tolérante au format (on compare les chiffres / les 9 derniers).
+     *
+     * PUBLIC à dessein : c'est la définition unique du « numéro de test ».
+     * AuthController s'en sert pour court-circuiter la vérification KYC opérateur,
+     * qui rejetterait ce numéro fictif (aucun compte Airtel Money réel derrière).
+     * Ne jamais dupliquer cette logique ailleurs.
      */
-    private function estNumeroTest(string $phoneE164): bool
+    public function estNumeroTest(string $phoneE164): bool
     {
         if ($this->testMsisdn === null || $this->testMsisdn === '') {
             return false;

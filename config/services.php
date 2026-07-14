@@ -53,10 +53,19 @@ return [
     */
     'otp' => [
         'driver' => env('OTP_DRIVER', 'dev'),
-        // Numéro de test pour la review Apple : aucun SMS envoyé, code fixe accepté.
-        // Laisser vide pour désactiver. Ne s'applique qu'à ce seul numéro.
+        // Numéro de test pour la revue Apple ET Google Play : aucun SMS envoyé,
+        // code fixe accepté, et vérification KYC opérateur court-circuitée (le
+        // numéro est fictif, aucun compte Airtel Money réel ne peut exister
+        // derrière — sans ce contournement, le relecteur ne pourrait ni
+        // s'inscrire ni se connecter).
+        // Laisser `test_msisdn` vide pour désactiver TOUT le mécanisme.
+        // Ne s'applique qu'à ce seul numéro.
         'test_msisdn' => env('MOBILE_TEST_MSISDN'),
         'test_otp'    => env('MOBILE_TEST_OTP', '000000'),
+        // Identité renvoyée par le faux KYC — pré-remplit le formulaire
+        // d'inscription du relecteur.
+        'test_nom'    => env('MOBILE_TEST_NOM', 'REVIEW'),
+        'test_prenom' => env('MOBILE_TEST_PRENOM', 'Test'),
     ],
 
     /*
