@@ -4,6 +4,12 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
+use App\Models\TondoLog;
+use App\Models\TondoPaiement;
+use App\Models\TondoParticipant;
+use App\Models\TondoPayin;
+use App\Models\TondoPayout;
+use App\Models\TondoSignalement;
 use App\Services\AirtelFeesCalculator;
 use App\Services\OneSignalService;
 use App\Services\TondoConfigService;
@@ -443,7 +449,23 @@ class CagnottesController extends Controller
             ], 422);
         }
 
-        $cagnotte->delete();
+        // Suppression transactionnelle : on efface d'abord TOUTES les lignes
+        // dépendantes qui référencent la cagnotte (intentions de paiement
+        // `tonji_payin`, participants, logs…). Sans ça, le DELETE viole les
+        // contraintes FK (ex : tonji_payin_cagnotte_id_fkey) — cas typique d'une
+        // cagnotte « vierge » où une cotisation a été initiée puis abandonnée
+        // (un payin existe mais montant_collecte reste 0). Sûr ici car la
+        // cagnotte n'a reçu aucun versement (garde ci-dessus).
+        DB::transaction(function () use ($cagnotte) {
+            $id = $cagnotte->id;
+            TondoPayin::where('cagnotte_id', $id)->delete();
+            TondoPayout::where('cagnotte_id', $id)->delete();
+            TondoPaiement::where('cagnotte_id', $id)->delete();
+            TondoParticipant::where('cagnotte_id', $id)->delete();
+            TondoSignalement::where('cagnotte_id', $id)->delete();
+            TondoLog::where('cagnotte_id', $id)->delete();
+            $cagnotte->delete();
+        });
 
         return response()->json(['message' => 'Cagnotte supprimée.'], 200);
     }
