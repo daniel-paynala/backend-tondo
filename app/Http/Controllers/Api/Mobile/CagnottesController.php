@@ -4,12 +4,6 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
-use App\Models\TondoLog;
-use App\Models\TondoPaiement;
-use App\Models\TondoParticipant;
-use App\Models\TondoPayin;
-use App\Models\TondoPayout;
-use App\Models\TondoSignalement;
 use App\Services\AirtelFeesCalculator;
 use App\Services\OneSignalService;
 use App\Services\TondoConfigService;
@@ -456,14 +450,17 @@ class CagnottesController extends Controller
         // cagnotte « vierge » où une cotisation a été initiée puis abandonnée
         // (un payin existe mais montant_collecte reste 0). Sûr ici car la
         // cagnotte n'a reçu aucun versement (garde ci-dessus).
+        // On passe par DB::table(project_table(...)) — même pattern que le reste
+        // du contrôleur (cf. retirerParticipant) : gère le préfixe de table par
+        // projet et évite toute dépendance à des modèles Eloquent.
+        // Liste = TOUTES les tables ayant une FK réelle vers tondo_cagnottes
+        // (vérifiées via information_schema). payout_paynala avant payout (détail
+        // d'un payout). Ni `logs` (pas de cagnotte_id) ni la vue transactions_unified.
         DB::transaction(function () use ($cagnotte) {
             $id = $cagnotte->id;
-            TondoPayin::where('cagnotte_id', $id)->delete();
-            TondoPayout::where('cagnotte_id', $id)->delete();
-            TondoPaiement::where('cagnotte_id', $id)->delete();
-            TondoParticipant::where('cagnotte_id', $id)->delete();
-            TondoSignalement::where('cagnotte_id', $id)->delete();
-            TondoLog::where('cagnotte_id', $id)->delete();
+            foreach (['payin', 'payout_paynala', 'payout', 'paiements', 'participants', 'signalements'] as $suffixe) {
+                DB::table(project_table($suffixe))->where('cagnotte_id', $id)->delete();
+            }
             $cagnotte->delete();
         });
 
