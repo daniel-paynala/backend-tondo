@@ -2,22 +2,24 @@
 
 namespace App\Services\WhatsApp;
 
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Envoie des messages WhatsApp sortants via l'API REST Twilio.
  *
- * Utilisé pour les notifications proactives (confirmation de paiement,
- * expiration de session, reçu PDF joint). Toute communication sortante
- * du bot passe par cette classe plutôt que par la réponse TwiML synchrone.
+ * Implémentation Twilio du contrat {@see WhatsAppSender}. Utilisé pour les
+ * notifications proactives (confirmation de paiement, expiration de session,
+ * reçu PDF joint). Toute communication sortante du bot passe par cette classe
+ * plutôt que par la réponse TwiML synchrone.
  *
  * Configuration requise dans config/services.php (clés Twilio WhatsApp) :
  *   services.twilio.wa_account_sid   → Account SID Twilio
  *   services.twilio.wa_auth_token    → Auth token Twilio
  *   services.twilio.wa_number        → Numéro expéditeur au format "whatsapp:+14155238886"
  */
-class TwilioSenderService
+class TwilioSenderService implements WhatsAppSender
 {
     /** Account SID Twilio (identifiant de compte). */
     private string $accountSid;

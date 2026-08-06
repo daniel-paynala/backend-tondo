@@ -8,7 +8,7 @@ use App\Models\TondoUser;
 use App\Services\ReceiptService;
 use App\Services\WhatsApp\CotisationService;
 use App\Services\WhatsApp\SessionService;
-use App\Services\WhatsApp\TwilioSenderService;
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -41,13 +41,13 @@ class VerifierPaiementsEnAttenteCommand extends Command
      *
      * @param  CotisationService   $cotisationSvc Interroge l'API agrégateur pour le statut.
      * @param  SessionService      $sessionSvc    Gère l'état de conversation WhatsApp.
-     * @param  TwilioSenderService $twilio        Envoie les messages sortants via Twilio.
+     * @param  WhatsAppSender $twilio        Envoie les messages sortants via Twilio.
      * @param  ReceiptService      $receiptSvc    Génère les reçus PDF.
      */
     public function handle(
         CotisationService   $cotisationSvc,
         SessionService      $sessionSvc,
-        TwilioSenderService $twilio,
+        WhatsAppSender $twilio,
         ReceiptService      $receiptSvc,
     ): void {
         $expireAt = now()->subMinutes(self::TIMEOUT_MINUTES);
@@ -130,12 +130,12 @@ class VerifierPaiementsEnAttenteCommand extends Command
      * La génération du PDF est optionnelle : si elle échoue, le message de
      * confirmation est quand même envoyé sans la ligne reçu (dégradé gracieux).
      *
-     * @param  TwilioSenderService   $twilio     Service d'envoi de messages WhatsApp.
+     * @param  WhatsAppSender   $twilio     Service d'envoi de messages WhatsApp.
      * @param  ReceiptService        $receiptSvc Service de génération de reçus PDF.
      * @param  TondoPaiementEnAttente $p          Enregistrement du paiement confirmé.
      */
     private function envoyerSucces(
-        TwilioSenderService $twilio,
+        WhatsAppSender $twilio,
         ReceiptService $receiptSvc,
         TondoPaiementEnAttente $p,
     ): void {

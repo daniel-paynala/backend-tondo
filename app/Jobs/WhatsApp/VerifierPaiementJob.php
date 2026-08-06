@@ -7,7 +7,7 @@ use App\Models\TondoUser;
 use App\Services\ReceiptService;
 use App\Services\WhatsApp\CotisationService;
 use App\Services\WhatsApp\SessionService;
-use App\Services\WhatsApp\TwilioSenderService;
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -64,13 +64,13 @@ class VerifierPaiementJob implements ShouldQueue
      *
      * @param  CotisationService   $cotisationSvc Interroge l'API agrégateur.
      * @param  SessionService      $sessionSvc    Gère l'état de conversation WhatsApp.
-     * @param  TwilioSenderService $twilio        Envoie les messages sortants.
+     * @param  WhatsAppSender $twilio        Envoie les messages sortants.
      * @param  ReceiptService      $receiptSvc    Génère les reçus PDF (via EnvoyerRecuJob).
      */
     public function handle(
         CotisationService  $cotisationSvc,
         SessionService     $sessionSvc,
-        TwilioSenderService $twilio,
+        WhatsAppSender $twilio,
         ReceiptService     $receiptSvc,
     ): void {
         // Si la session a déjà été réinitialisée (l'utilisateur a navigué entre-temps), abandonner.
@@ -127,11 +127,11 @@ class VerifierPaiementJob implements ShouldQueue
      * La confirmation est envoyée immédiatement. Le PDF est envoyé dans un job
      * séparé avec 4 secondes de délai pour ne pas bloquer le message principal.
      *
-     * @param  TwilioSenderService $twilio     Service d'envoi WhatsApp.
+     * @param  WhatsAppSender $twilio     Service d'envoi WhatsApp.
      * @param  ReceiptService      $receiptSvc Service de génération PDF (via job).
      * @return bool                            True si Twilio a accepté le message.
      */
-    private function envoyerSucces(TwilioSenderService $twilio, ReceiptService $receiptSvc): bool
+    private function envoyerSucces(WhatsAppSender $twilio, ReceiptService $receiptSvc): bool
     {
         $cagnotte   = TondoCagnotte::where('reference', $this->cagnotteRef)->first();
         $montantFmt = number_format($this->montant, 0, ',', ' ');
@@ -177,10 +177,10 @@ class VerifierPaiementJob implements ShouldQueue
     /**
      * Envoie un message d'erreur quand le paiement est refusé ou échoue côté opérateur.
      *
-     * @param  TwilioSenderService $twilio Service d'envoi WhatsApp.
+     * @param  WhatsAppSender $twilio Service d'envoi WhatsApp.
      * @return bool                        True si Twilio a accepté le message.
      */
-    private function envoyerEchec(TwilioSenderService $twilio): bool
+    private function envoyerEchec(WhatsAppSender $twilio): bool
     {
         return $twilio->envoyer($this->numeroWa, <<<TXT
         ❌ *Paiement échoué ou refusé.*
@@ -205,9 +205,9 @@ class VerifierPaiementJob implements ShouldQueue
      *
      * Appelle reset() sur la session avant de dispatcher ce message (dans handle()).
      *
-     * @param  TwilioSenderService $twilio Service d'envoi WhatsApp.
+     * @param  WhatsAppSender $twilio Service d'envoi WhatsApp.
      */
-    private function envoyerTimeout(TwilioSenderService $twilio): void
+    private function envoyerTimeout(WhatsAppSender $twilio): void
     {
         $twilio->envoyer($this->numeroWa, <<<TXT
         ⏰ *Délai de 3 minutes dépassé.*

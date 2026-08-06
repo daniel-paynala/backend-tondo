@@ -127,4 +127,34 @@ return [
         'override_recipient' => env('TWILIO_OVERRIDE_RECIPIENT'),
     ],
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Canal WhatsApp — fournisseur commutable (Twilio ↔ Meta Cloud API).
+    //
+    // `driver` est l'UNIQUE point de bascule : il pilote À LA FOIS la réception
+    // (parsing + validation de signature du webhook) ET l'envoi sortant. La
+    // config Twilio ci-dessus reste intacte : repasser driver = 'twilio'
+    // réactive le canal existant sans aucune autre modification.
+    //   - 'twilio' (défaut) : webhook TwiML + TwilioSenderService (existant).
+    //   - 'meta'            : webhook JSON Cloud API + MetaSenderService (Graph API).
+    // ────────────────────────────────────────────────────────────────────────
+    'whatsapp' => [
+        'driver' => env('WHATSAPP_DRIVER', 'twilio'),
+
+        // Meta WhatsApp Cloud API — utilisé uniquement si driver = 'meta'.
+        'meta' => [
+            // Access token permanent (System User) pour appeler la Graph API.
+            'token'           => env('META_WHATSAPP_TOKEN'),
+            // Identifiant du numéro expéditeur (Phone Number ID, pas le numéro lui-même).
+            'phone_number_id' => env('META_WHATSAPP_PHONE_NUMBER_ID'),
+            // App Secret Meta — sert à valider la signature X-Hub-Signature-256 des webhooks.
+            'app_secret'      => env('META_WHATSAPP_APP_SECRET'),
+            // Token de vérification du webhook, comparé au hub.verify_token du GET Meta.
+            'verify_token'    => env('META_WHATSAPP_VERIFY_TOKEN'),
+            // Version de la Graph API (ex : v21.0).
+            'graph_version'   => env('META_GRAPH_VERSION', 'v21.0'),
+            // Bypass de la validation de signature (dev/CI uniquement, jamais en prod).
+            'skip_signature'  => env('META_WHATSAPP_SKIP_SIGNATURE', false),
+        ],
+    ],
+
 ];

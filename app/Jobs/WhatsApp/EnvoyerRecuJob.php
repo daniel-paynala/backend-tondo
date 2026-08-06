@@ -5,7 +5,7 @@ namespace App\Jobs\WhatsApp;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
-use App\Services\WhatsApp\TwilioSenderService;
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -43,10 +43,10 @@ class EnvoyerRecuJob implements ShouldQueue
      * En cas d'échec (génération PDF ou envoi Twilio), l'erreur est logguée
      * sans relancer le job — l'absence de reçu est non-bloquante pour l'utilisateur.
      *
-     * @param  TwilioSenderService $twilio     Service d'envoi de messages WhatsApp.
+     * @param  WhatsAppSender $twilio     Service d'envoi de messages WhatsApp.
      * @param  ReceiptService      $receiptSvc Service de génération de reçus PDF.
      */
-    public function handle(TwilioSenderService $twilio, ReceiptService $receiptSvc): void
+    public function handle(WhatsAppSender $twilio, ReceiptService $receiptSvc): void
     {
         // Charger les entités depuis la DB — null toléré si introuvables (pas de crash).
         $user     = $this->userId      ? TondoUser::find($this->userId)                               : null;

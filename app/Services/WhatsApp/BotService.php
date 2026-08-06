@@ -66,6 +66,10 @@ use Illuminate\Support\Facades\Log;
  */
 class BotService
 {
+    // Le bot est volontairement AGNOSTIQUE au fournisseur WhatsApp : il ne
+    // produit que du contenu (texte, ou [texte, urlPdf]). L'envoi effectif est
+    // pris en charge par le contrôleur webhook (réponse) ou par un
+    // WhatsAppSender (envois proactifs) — d'où l'absence de tout sender ici.
     public function __construct(
         private SessionService       $session,
         private CotisationService    $cotisationSvc,
@@ -73,7 +77,6 @@ class BotService
         private CreerCagnotteService $creerCagnotteSvc,
         private GererCagnotteService $gererCagnotteSvc,
         private OtpService           $otpService,
-        private TwilioSenderService  $twilio,
     ) {}
 
     // ── Point d'entrée ────────────────────────────────────────────────────────

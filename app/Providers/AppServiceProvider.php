@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
+use App\Services\WhatsApp\MetaSenderService;
+use App\Services\WhatsApp\TwilioSenderService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -28,7 +31,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Sender WhatsApp sortant : l'implémentation résolue dépend du driver
+        // global (services.whatsapp.driver). Les appelants (cron paiements,
+        // jobs de reçu, réponse Meta du webhook) type-hintent l'interface
+        // WhatsAppSender et reçoivent donc automatiquement le bon fournisseur.
+        $this->app->bind(WhatsAppSender::class, function ($app) {
+            return config('services.whatsapp.driver') === 'meta'
+                ? $app->make(MetaSenderService::class)
+                : $app->make(TwilioSenderService::class);
+        });
     }
 
     /**

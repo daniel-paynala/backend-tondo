@@ -4,26 +4,70 @@ namespace App\Http\Controllers\Api\WhatsApp;
 
 use App\Http\Controllers\Controller;
 use App\Services\WhatsApp\BotService;
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use App\Services\WhatsApp\SessionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Webhook Twilio WhatsApp — point d'entrée des messages entrants.
+ * Webhook WhatsApp — point d'entrée des messages entrants.
  *
- * URL à configurer dans la console Twilio :
- *   http://<domaine>/api/whatsapp/webhook   (méthode POST)
+ * Deux fournisseurs cohabitent, pilotés par le driver global
+ * `services.whatsapp.driver` :
+ *   - 'twilio' (défaut) : POST form-encoded, signature X-Twilio-Signature,
+ *                         réponse synchrone en TwiML XML.
+ *   - 'meta'            : GET de vérification (hub.challenge), POST JSON Cloud
+ *                         API, signature X-Hub-Signature-256, réponse 200 vide
+ *                         puis envoi de la réponse du bot via la Graph API.
  *
- * Signature : désactivée si TWILIO_SKIP_SIGNATURE=true dans .env
- * (à n'utiliser qu'en dev/test, jamais en production).
+ * URL à configurer :
+ *   - Twilio : console Twilio > WhatsApp Senders > Webhook URL (POST)
+ *   - Meta   : console Meta > WhatsApp > Configuration > URL de rappel (GET+POST)
+ *
+ * Le moteur conversationnel (BotService) est commun aux deux fournisseurs :
+ * seul le transport (parsing + réponse) diffère selon le driver.
  */
 class WebhookController extends Controller
 {
     public function __construct(
         private BotService     $bot,
         private SessionService $session,
+        // Sender résolu selon le driver (Twilio ou Meta). Sert à répondre aux
+        // messages Meta, qui n'autorisent pas de réponse synchrone au webhook.
+        private WhatsAppSender $sender,
     ) {}
+
+    /**
+     * GET /api/whatsapp/webhook — vérification du webhook Meta (hub.challenge).
+     *
+     * Meta appelle cet endpoint en GET lors de l'enregistrement de l'URL de
+     * rappel, avec hub.mode=subscribe, hub.verify_token=<token configuré> et
+     * hub.challenge=<valeur aléatoire>. On renvoie la valeur de hub.challenge
+     * en texte brut si le token correspond, 403 sinon.
+     *
+     * Sans effet côté Twilio (Twilio n'appelle jamais l'URL en GET).
+     */
+    public function verifier(Request $request): Response
+    {
+        $mode      = $request->query('hub_mode');
+        $token     = $request->query('hub_verify_token');
+        $challenge = $request->query('hub_challenge', '');
+
+        $attendu = config('services.whatsapp.meta.verify_token');
+
+        // Token correct et mode d'abonnement → on renvoie le challenge tel quel.
+        if ($mode === 'subscribe' && $attendu && hash_equals((string) $attendu, (string) $token)) {
+            return response((string) $challenge, 200, ['Content-Type' => 'text/plain']);
+        }
+
+        Log::warning('WhatsApp webhook (Meta) : vérification refusée', [
+            'ip'   => $request->ip(),
+            'mode' => $mode,
+        ]);
+        return response('Forbidden', 403, ['Content-Type' => 'text/plain']);
+    }
 
     /**
      * POST /api/whatsapp/webhook
@@ -45,6 +89,13 @@ class WebhookController extends Controller
      */
     public function recevoir(Request $request): Response
     {
+        // Aiguillage selon le fournisseur actif. Le chemin Twilio ci-dessous
+        // reste strictement inchangé ; Meta est traité à part (JSON + réponse
+        // asynchrone via la Graph API).
+        if (config('services.whatsapp.driver') === 'meta') {
+            return $this->recevoirMeta($request);
+        }
+
         if (! $this->signatureValide($request)) {
             Log::warning('WhatsApp webhook : signature Twilio invalide', [
                 'ip'        => $request->ip(),
@@ -108,6 +159,168 @@ class WebhookController extends Controller
         }
 
         return $this->twiml($reponse);
+    }
+
+    // ── Meta Cloud API ──────────────────────────────────────────────────────
+
+    /**
+     * Traite un webhook Meta WhatsApp Cloud API (POST JSON).
+     *
+     * Différences majeures avec Twilio :
+     *  - Corps JSON structuré (entry[].changes[].value.messages[] / statuses[]).
+     *  - Signature HMAC-SHA256 dans l'en-tête X-Hub-Signature-256 (app secret).
+     *  - Pas de réponse synchrone : on renvoie 200 vide, et la réponse du bot
+     *    part par un appel sortant à la Graph API (via $this->sender).
+     *
+     * On répond toujours 200 pour éviter que Meta ne retente le webhook.
+     */
+    private function recevoirMeta(Request $request): Response
+    {
+        // 1. Validation de la signature (bypass hors production, comme Twilio).
+        if (! $this->signatureMetaValide($request)) {
+            Log::warning('WhatsApp webhook (Meta) : signature invalide', [
+                'ip'  => $request->ip(),
+                'sig' => $request->header('X-Hub-Signature-256'),
+            ]);
+            if (app()->environment('production')) {
+                // 200 quand même : ne pas déclencher les retries Meta.
+                return response('', 200);
+            }
+        }
+
+        $data = $request->json()->all();
+
+        // 2. Parcours du payload : chaque entry peut contenir plusieurs changes.
+        foreach ($data['entry'] ?? [] as $entry) {
+            foreach ($entry['changes'] ?? [] as $change) {
+                $value = $change['value'] ?? [];
+
+                // 2a. Accusés de statut (sent/delivered/read/failed) → journalisés.
+                foreach ($value['statuses'] ?? [] as $statut) {
+                    $this->journaliserStatutMeta($statut);
+                }
+
+                // 2b. Messages entrants → moteur du bot puis réponse sortante.
+                foreach ($value['messages'] ?? [] as $message) {
+                    $this->traiterMessageMeta($message);
+                }
+            }
+        }
+
+        // Meta attend un 2xx rapide.
+        return response('', 200);
+    }
+
+    /**
+     * Traite un message Meta entrant : extrait l'expéditeur + le texte, appelle
+     * le bot, puis envoie la réponse via la Graph API (texte ou texte + PDF).
+     *
+     * @param array<string,mixed> $message Un élément de value.messages[].
+     */
+    private function traiterMessageMeta(array $message): void
+    {
+        // Meta fournit le numéro en chiffres (ex : "24177..."). On le normalise
+        // en +E.164 pour rester cohérent avec le format Twilio et les clés de
+        // session (SessionService retire le "+" de son côté).
+        $from = '+' . ltrim((string) ($message['from'] ?? ''), '+');
+
+        // Seuls les messages texte sont pris en charge par le FSM. Les autres
+        // types (image, audio…) sont traités comme du texte vide → menu d'aide.
+        $body = $message['type'] === 'text'
+            ? trim((string) ($message['text']['body'] ?? ''))
+            : '';
+
+        Log::info('WhatsApp entrant (Meta)', [
+            'from'       => $from,
+            'body'       => $body,
+            'message_id' => $message['id'] ?? null,
+            'type'       => $message['type'] ?? null,
+        ]);
+
+        try {
+            $reponse = $this->bot->traiter($from, $body);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp BotService exception (Meta)', [
+                'from'    => $from,
+                'body'    => $body,
+                'etape'   => $this->session->etape($from),
+                'message' => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+            ]);
+            // Reset de session pour ne pas bloquer l'utilisateur dans un état cassé.
+            $this->session->reset($from);
+            $reponse = "⚠️ Une erreur inattendue s'est produite. Votre session a été réinitialisée."
+                . "\n\nTapez *1* pour Cotiser, *2* pour Rejoindre, *3* pour Créer, *4* pour Gérer, *5* pour Aide.";
+        }
+
+        // Réponse tableau = [texte, urlPDF] → document joint ; sinon texte simple.
+        if (is_array($reponse)) {
+            [$texte, $pdfUrl] = $reponse;
+            $this->sender->envoyerAvecPdf($from, $texte, $pdfUrl);
+        } elseif ($reponse !== '') {
+            $this->sender->envoyer($from, $reponse);
+        }
+    }
+
+    /**
+     * Enregistre un accusé de statut Meta dans tondo_whatsapp_logs.
+     *
+     * Table partagée avec les statuts Twilio (StatusController) : on mappe les
+     * champs Meta (id, status, recipient_id) sur le même schéma. Tolérant à
+     * l'absence de table (upsert dans un try/catch).
+     *
+     * @param array<string,mixed> $statut Un élément de value.statuses[].
+     */
+    private function journaliserStatutMeta(array $statut): void
+    {
+        try {
+            DB::table(project_table('whatsapp_logs'))->updateOrInsert(
+                ['message_sid' => $statut['id'] ?? ''],
+                [
+                    'statut'        => $statut['status']       ?? null,
+                    'numero_dest'   => $statut['recipient_id'] ?? null,
+                    'error_code'    => $statut['errors'][0]['code']    ?? null,
+                    'error_message' => $statut['errors'][0]['title']   ?? null,
+                    'updated_at'    => now(),
+                    'created_at'    => now(),
+                ],
+            );
+        } catch (\Throwable $e) {
+            Log::debug(project_table('whatsapp_logs') . ' (Meta) non disponible : ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Valide la signature X-Hub-Signature-256 d'un webhook Meta.
+     *
+     * Meta signe le corps BRUT de la requête en HMAC-SHA256 avec l'App Secret,
+     * et transmet le résultat préfixé "sha256=" dans l'en-tête. On recalcule et
+     * on compare en temps constant.
+     *
+     * Bypass si services.whatsapp.meta.skip_signature (dev/CI) ou hors production.
+     */
+    private function signatureMetaValide(Request $request): bool
+    {
+        // Bypass explicite (local/CI) ou automatique hors production.
+        if (config('services.whatsapp.meta.skip_signature', false)) {
+            return true;
+        }
+        if (! app()->environment('production')) {
+            return true;
+        }
+
+        $appSecret = config('services.whatsapp.meta.app_secret');
+        $signature = $request->header('X-Hub-Signature-256', '');
+
+        if (! $appSecret || ! $signature) {
+            return false;
+        }
+
+        // Signature attendue = "sha256=" + HMAC-SHA256(corps brut, app secret).
+        $attendu = 'sha256=' . hash_hmac('sha256', $request->getContent(), $appSecret);
+
+        return hash_equals($attendu, $signature);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

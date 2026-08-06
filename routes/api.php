@@ -33,12 +33,20 @@ Route::get('/health', fn () => response()->json([
 
 // ============================================================================
 //  Canal WhatsApp — préfixe /api/whatsapp/
-//  Public (pas d'auth Sanctum) — sécurisé par validation de la signature
-//  X-Twilio-Signature à l'intérieur du controller.
-//  URL à saisir dans la console Twilio > Messaging > WhatsApp Senders > Webhook URL
+//  Public (pas d'auth Sanctum) — sécurisé DANS le controller par validation de
+//  signature (X-Twilio-Signature côté Twilio, X-Hub-Signature-256 côté Meta).
+//  URL webhook à saisir :
+//    - Twilio : console > Messaging > WhatsApp Senders > Webhook URL (POST)
+//    - Meta   : console > WhatsApp > Configuration > URL de rappel (le GET sert
+//               à la vérification hub.challenge, le POST reçoit les messages).
 // ============================================================================
 Route::prefix('whatsapp')->group(function () {
+    // GET : vérification du webhook Meta (hub.challenge). Sans effet côté Twilio
+    // (Twilio n'appelle jamais l'URL en GET).
+    Route::get('/webhook',  [WhatsAppWebhookController::class, 'verifier']);
     Route::post('/webhook', [WhatsAppWebhookController::class, 'recevoir']);
+    // Callback de statut : utilisé par Twilio uniquement. Chez Meta, les statuts
+    // arrivent dans le même POST /webhook (tableau statuses[]).
     Route::post('/status',  [WhatsAppStatusController::class,  'recevoir']);
 });
 
