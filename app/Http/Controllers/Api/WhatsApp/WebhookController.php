@@ -152,13 +152,22 @@ class WebhookController extends Controller
                 . "\n\nTapez *1* pour Cotiser, *2* pour Rejoindre, *3* pour Créer, *4* pour Gérer, *5* pour Aide.";
         }
 
-        // Réponse tableau = [texte, urlPDF] — cas du reçu de paiement.
+        // Envoi de la réponse via l'API REST Twilio plutôt qu'en TwiML.
+        //
+        // Le numéro WhatsApp est rattaché à un Messaging Service Twilio : dans
+        // cette configuration, Twilio IGNORE les réponses TwiML <Message> du
+        // webhook. La réponse doit donc partir par l'API REST (via $this->sender,
+        // ici l'implémentation Twilio car driver = twilio). On renvoie ensuite un
+        // TwiML vide (<Response/>) comme simple accusé 200.
         if (is_array($reponse)) {
+            // Réponse tableau = [texte, urlPDF] — cas du reçu de paiement.
             [$texte, $pdfUrl] = $reponse;
-            return $this->twimlAvecMedia($texte, $pdfUrl);
+            $this->sender->envoyerAvecPdf($from, $texte, $pdfUrl);
+        } elseif ($reponse !== '') {
+            $this->sender->envoyer($from, $reponse);
         }
 
-        return $this->twiml($reponse);
+        return $this->twiml('');
     }
 
     // ── Meta Cloud API ──────────────────────────────────────────────────────
@@ -336,26 +345,6 @@ class WebhookController extends Controller
         $xml  = $message === ''
             ? '<?xml version="1.0" encoding="UTF-8"?><Response/>'
             : "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Message>{$safe}</Message></Response>";
-
-        return response($xml, 200, ['Content-Type' => 'text/xml; charset=utf-8']);
-    }
-
-    /**
-     * Construit une réponse TwiML texte + média (PDF reçu de paiement).
-     * Twilio récupère le fichier à l'URL donnée et l'envoie en pièce jointe.
-     */
-    private function twimlAvecMedia(string $message, string $mediaUrl): Response
-    {
-        $safe = htmlspecialchars($message, ENT_XML1 | ENT_COMPAT, 'UTF-8');
-        $xml  = <<<XML
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Message>
-            {$safe}
-            <Media>{$mediaUrl}</Media>
-          </Message>
-        </Response>
-        XML;
 
         return response($xml, 200, ['Content-Type' => 'text/xml; charset=utf-8']);
     }
