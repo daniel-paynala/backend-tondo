@@ -42,7 +42,27 @@ class TondoAdmin extends Authenticatable
         'role',            // Ex : 'super_admin', 'admin', 'support'.
         'actif',
         'derniere_connexion',
+        'notif_prefs',     // Préférences d'e-mails système (jsonb).
     ];
+
+    /**
+     * Préférences de notification par e-mail par défaut (opt-out : tout activé).
+     * Clés = catégories d'événements système envoyés par e-mail à l'admin.
+     */
+    public const DEFAULT_NOTIF_PREFS = [
+        'signalements' => true,   // Nouveaux signalements (cagnottes / utilisateurs)
+        'problemes'    => true,   // Problèmes techniques / erreurs système
+        'autre'        => true,   // Autres événements système
+    ];
+
+    /**
+     * Retourne les préférences fusionnées avec les défauts (une clé absente en
+     * base est considérée comme activée).
+     */
+    public function notifPrefs(): array
+    {
+        return array_merge(self::DEFAULT_NOTIF_PREFS, $this->notif_prefs ?? []);
+    }
 
     /** Colonnes masquées dans la sérialisation JSON (ex : réponse API). */
     protected $hidden = [
@@ -53,6 +73,7 @@ class TondoAdmin extends Authenticatable
     protected $casts = [
         'actif'             => 'boolean',
         'derniere_connexion' => 'datetime',
+        'notif_prefs'       => 'array',
     ];
 
     /**

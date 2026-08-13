@@ -89,6 +89,8 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         // Changement de son propre mot de passe (après invitation par e-mail).
         Route::patch('/me/password', [AuthController::class, 'changePassword']);
+        // Préférences d'e-mails système de l'admin (signalements, problèmes…).
+        Route::patch('/me/notifications', [AuthController::class, 'updateNotifications']);
 
         // Utilisateurs Tondo (mobile end-users)
         Route::get('/users', [UsersController::class, 'index']);

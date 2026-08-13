@@ -87,7 +87,36 @@ class AuthController extends Controller
             'prenom' => $admin->prenom,
             'role' => $admin->role,
             'derniere_connexion' => $admin->derniere_connexion,
+            // Préférences d'e-mails système (fusionnées avec les défauts).
+            'notif_prefs' => $admin->notifPrefs(),
         ]);
+    }
+
+    /**
+     * PATCH /api/admin/me/notifications
+     *
+     * Met à jour les préférences d'e-mails système de l'admin authentifié
+     * (signalements, problèmes techniques, autres événements).
+     *
+     * Body : { signalements: bool, problemes: bool, autre: bool }
+     */
+    public function updateNotifications(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'signalements' => ['required', 'boolean'],
+            'problemes'    => ['required', 'boolean'],
+            'autre'        => ['required', 'boolean'],
+        ]);
+
+        $admin = $request->user();
+        $admin->notif_prefs = [
+            'signalements' => $data['signalements'],
+            'problemes'    => $data['problemes'],
+            'autre'        => $data['autre'],
+        ];
+        $admin->save();
+
+        return response()->json(['ok' => true, 'notif_prefs' => $admin->notifPrefs()]);
     }
 
     /**
