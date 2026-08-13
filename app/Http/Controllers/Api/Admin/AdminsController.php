@@ -102,16 +102,20 @@ class AdminsController extends Controller
 
         $motDePasse = $data['password'] ?? Str::password(12);
 
-        $admin = TondoAdmin::create([
+        // password_hash n'est PAS dans $fillable (champ sensible) → on le pose
+        // explicitement après l'assignation de masse des champs autorisés,
+        // sinon il serait supprimé et violerait la contrainte NOT NULL.
+        $admin = new TondoAdmin([
             'project_id' => $request->user()->project_id,
             // Normalisation en minuscules pour éviter les doublons case-sensitifs.
             'email' => strtolower($data['email']),
-            'password_hash' => Hash::make($motDePasse),
             'nom' => $data['nom'],
             'prenom' => $data['prenom'],
             'role' => $data['role'],
             'actif' => true,
         ]);
+        $admin->password_hash = Hash::make($motDePasse);
+        $admin->save();
 
         // Invitation par e-mail (identifiants + lien de connexion). Non bloquant :
         // si l'envoi échoue, l'admin est quand même créé (email_envoye = false).
