@@ -121,11 +121,11 @@ class ReversementsController extends Controller
         // ── Génération des identifiants Paynala ──────────────────────────────
         $nextNum        = DB::table(project_table('payout'))->count() + 1;
         $typeLabel      = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
-        $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = 'TONDO-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
+        $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
+        $idempotencyKey = 'TONJI-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
 
         $payoutId = (string) Str::uuid();
-        $transId  = 'TONDOPAYOUT' . strtoupper(Str::random(9));
+        $transId  = 'TONJIPAYOUT' . strtoupper(Str::random(9));
 
         // ── PHASE 1 : réserver les fonds sous row-lock ───────────────────────
         // On verrouille la ligne cagnotte, on re-vérifie le solde et on insère

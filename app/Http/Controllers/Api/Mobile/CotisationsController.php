@@ -311,7 +311,7 @@ class CotisationsController extends Controller
         int    $penalite = 0,
     ): JsonResponse {
         // request_id alphanumérique uniquement (contrainte API Paynala — pas de tirets).
-        $transId = 'TONDOPAYIN' . strtoupper(Str::random(10));
+        $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
 
         // Numéro local Airtel (9 chiffres : 074XXXXXX).
         $phoneE164      = ltrim($numeroPayeurE164, '+');
@@ -428,7 +428,7 @@ class CotisationsController extends Controller
         int    $montantBrut,
         int    $penalite = 0,
     ): JsonResponse {
-        $transId = 'TONDOPAYIN' . strtoupper(Str::random(10));
+        $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
 
         try {
             DB::transaction(function () use (
