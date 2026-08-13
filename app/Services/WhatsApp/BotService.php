@@ -3283,7 +3283,7 @@ class BotService
         static $id = null;
         if ($id === null) {
             // Lecture unique depuis la DB, puis mise en cache statique pour la durée de la requête
-            $id = DB::table('projects')->where('slug', 'tondo')->value('id') ?? '';
+            $id = DB::table('projects')->where('slug', config('project.slug'))->value('id') ?? '';
         }
         return $id;
     }

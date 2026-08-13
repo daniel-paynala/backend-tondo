@@ -241,7 +241,7 @@ class UssdController extends Controller
     {
         static $id = null;
         if ($id === null) {
-            $id = DB::table('projects')->where('slug', 'tondo')->value('id') ?? '';
+            $id = DB::table('projects')->where('slug', config('project.slug'))->value('id') ?? '';
         }
         return $id;
     }
