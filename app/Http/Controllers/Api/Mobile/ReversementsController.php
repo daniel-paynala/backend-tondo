@@ -228,26 +228,38 @@ class ReversementsController extends Controller
                 'error'           => $e->getMessage(),
             ]);
 
-            // Alerte email à tous les admins actifs.
+            // Alerte e-mail aux admins ayant activé « problèmes techniques »
+            // (notif_prefs). Format pro via AdminNotifier / EmailLayout.
             try {
-                $adminEmails = DB::table(project_table('admins'))
-                    ->where('actif', true)
-                    ->pluck('email')
-                    ->toArray();
+                $ref = e($cagnotte->reference);
+                $montantFmt = number_format((float) $data['montant'], 0, ',', ' ').' FCFA';
+                $benef = e($numeroBeneficiaireE164);
+                $err = e($e->getMessage());
+                $corps = <<<HTML
+                <p>Un <strong>reversement a échoué</strong> et n'a pas pu être envoyé au bénéficiaire. Une intervention manuelle est nécessaire.</p>
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#FFF0EE;border:1px solid #F3C9C3;border-radius:12px;margin:8px 0;">
+                  <tr><td style="padding:16px;font-size:14px;line-height:1.7;">
+                    <strong>Cagnotte :</strong> {$ref}<br>
+                    <strong>Montant :</strong> {$montantFmt}<br>
+                    <strong>Bénéficiaire :</strong> {$benef}<br>
+                    <strong>Transaction :</strong> {$transId}<br>
+                    <strong>Erreur :</strong> {$err}
+                  </td></tr>
+                </table>
+                <p>Vérifiez le statut du transfert et relancez-le si nécessaire depuis la réconciliation.</p>
+                HTML;
 
-                if (! empty($adminEmails)) {
-                    Mail::to($adminEmails)->send(new DisbursementFailedMail(
-                        payoutId:          $payoutId,
-                        transId:           $transId,
-                        cagnotteReference: $cagnotte->reference,
-                        montant:           $data['montant'],
-                        numeroBeneficiaire: $numeroBeneficiaireE164,
-                        idempotencyKey:    $idempotencyKey,
-                        errorMessage:      $e->getMessage(),
-                    ));
-                }
+                app(\App\Services\Mail\AdminNotifier::class)->notifier(
+                    $cagnotte->project_id,
+                    'problemes',
+                    'Échec de reversement — action requise',
+                    'Échec de reversement',
+                    $corps,
+                    'Ouvrir la réconciliation',
+                    rtrim((string) config('services.admin_dashboard_url'), '/').'/reconciliation',
+                );
             } catch (\Throwable $mailEx) {
-                Log::error('[reversement] impossible d\'envoyer l\'alerte email', [
+                Log::error('[reversement] impossible d\'envoyer l\'alerte admin', [
                     'mail_error' => $mailEx->getMessage(),
                 ]);
             }

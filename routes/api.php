@@ -170,6 +170,9 @@ Route::prefix('mobile')->group(function () {
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
 
+        // Signalement d'une cagnotte (notifie les admins abonnés par e-mail)
+        Route::post('/signalements', [\App\Http\Controllers\Api\Mobile\SignalementsController::class, 'store']);
+
         // Lookup numéro (autocompletion ajout participant)
         Route::get('/users/lookup', [MobileProfilController::class, 'lookup']);
 

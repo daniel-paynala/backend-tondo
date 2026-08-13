@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoAdmin;
+use App\Services\Mail\EmailLayout;
 use App\Services\Mail\MailgunSender;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -127,34 +128,36 @@ class AdminsController extends Controller
     }
 
     /**
-     * Corps HTML de l'e-mail d'invitation admin (branding Tonji, français).
+     * Corps HTML de l'e-mail d'invitation admin, via le gabarit pro EmailLayout.
      */
     private function htmlInvitation(string $prenom, string $email, string $motDePasse): string
     {
         $url = config('services.admin_dashboard_url');
-        $prenom = e($prenom);
-        $email = e($email);
+        $prenomSafe = e($prenom);
+        $emailSafe = e($email);
         $mdp = e($motDePasse);
 
-        return <<<HTML
-        <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#14202E;">
-          <div style="background:#0A6847;padding:24px;border-radius:16px 16px 0 0;">
-            <span style="color:#fff;font-size:22px;font-weight:800;">Ton<span style="color:#E8A830;">ji</span></span>
-            <div style="color:rgba(255,255,255,.75);font-size:12px;letter-spacing:1px;margin-top:4px;">DASHBOARD ADMINISTRATION</div>
-          </div>
-          <div style="border:1px solid #E8EDE9;border-top:none;border-radius:0 0 16px 16px;padding:24px;">
-            <p>Bonjour {$prenom},</p>
-            <p>Un accès administrateur au dashboard <strong>Tonji</strong> vient d'être créé pour vous.</p>
-            <div style="background:#F6F7F4;border:1px solid #E8EDE9;border-radius:12px;padding:16px;margin:16px 0;">
-              <p style="margin:0 0 8px;"><strong>E-mail :</strong> {$email}</p>
-              <p style="margin:0;"><strong>Mot de passe provisoire :</strong> <code style="background:#fff;padding:2px 6px;border-radius:4px;">{$mdp}</code></p>
-            </div>
-            <p><a href="{$url}" style="display:inline-block;background:#0A6847;color:#fff;text-decoration:none;padding:12px 22px;border-radius:12px;font-weight:700;">Se connecter au dashboard</a></p>
-            <p style="color:#4A5568;font-size:13px;">Par sécurité, changez votre mot de passe dès votre première connexion. Si vous n'attendiez pas cette invitation, ignorez cet e-mail.</p>
-          </div>
-          <p style="color:#8A94A0;font-size:12px;text-align:center;margin-top:16px;">Tonji — un service de Paynala</p>
-        </div>
+        $corps = <<<HTML
+        <p>Bonjour {$prenomSafe},</p>
+        <p>Un accès administrateur au dashboard <strong>Tonji</strong> vient d'être créé pour vous. Voici vos identifiants de connexion :</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#F6F7F4;border:1px solid #E8EDE9;border-radius:12px;margin:8px 0;">
+          <tr><td style="padding:16px;">
+            <p style="margin:0 0 8px;font-size:14px;"><strong>E-mail :</strong> {$emailSafe}</p>
+            <p style="margin:0;font-size:14px;"><strong>Mot de passe provisoire :</strong>
+              <span style="font-family:monospace;background:#ffffff;border:1px solid #E8EDE9;padding:3px 8px;border-radius:6px;">{$mdp}</span>
+            </p>
+          </td></tr>
+        </table>
+        <p style="color:#4A5568;font-size:14px;">Par sécurité, <strong>changez votre mot de passe</strong> dès votre première connexion (icône cadenas, en haut du dashboard). Si vous n'attendiez pas cette invitation, ignorez cet e-mail.</p>
         HTML;
+
+        return EmailLayout::render(
+            'Votre accès au dashboard Tonji',
+            $corps,
+            'Se connecter au dashboard',
+            $url,
+            "Vos identifiants d'accès au dashboard admin Tonji.",
+        );
     }
 
     /**
