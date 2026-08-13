@@ -157,4 +157,18 @@ return [
         ],
     ],
 
+    // Envoi d'e-mails transactionnels via l'API Mailgun (réutilise le compte
+    // Paynala, domaine paynala.com). Appelée en HTTP direct — pas besoin du
+    // transport Mailgun de Laravel ni d'un package composer supplémentaire.
+    'mailgun' => [
+        'domain'   => env('MAILGUN_DOMAIN', 'paynala.com'),
+        'secret'   => env('MAILGUN_SECRET'),
+        'endpoint' => env('MAILGUN_ENDPOINT', 'api.eu.mailgun.net'),
+        'from'     => env('MAIL_FROM_ADDRESS', 'noreply@paynala.com'),
+        'from_name'=> env('MAIL_FROM_NAME', 'Tonji'),
+    ],
+
+    // URL du dashboard admin (pour les liens dans les e-mails d'invitation).
+    'admin_dashboard_url' => env('ADMIN_DASHBOARD_URL', 'https://api.tonji.ga'),
+
 ];

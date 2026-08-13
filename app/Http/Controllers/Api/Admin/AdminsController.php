@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoAdmin;
+use App\Services\Mail\MailgunSender;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -82,31 +84,77 @@ class AdminsController extends Controller
      *
      * @return JsonResponse TondoAdmin créé (201)
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, MailgunSender $mailer): JsonResponse
     {
         // Seuls les super_admin peuvent créer d'autres admins.
         $this->authorizeSuper($request);
 
         $data = $request->validate([
             'email' => ['required', 'email', 'unique:'.project_table('admins').',email'],
-            'password' => ['required', 'string', 'min:8'],
+            // Optionnel : si absent, un mot de passe provisoire est généré et
+            // envoyé par e-mail (parcours « invitation »).
+            'password' => ['nullable', 'string', 'min:8'],
             'nom' => ['required', 'string', 'max:64'],
             'prenom' => ['required', 'string', 'max:64'],
             'role' => ['required', Rule::in(['super_admin', 'admin', 'operateur', 'lecteur'])],
         ]);
 
+        $motDePasse = $data['password'] ?? Str::password(12);
+
         $admin = TondoAdmin::create([
             'project_id' => $request->user()->project_id,
             // Normalisation en minuscules pour éviter les doublons case-sensitifs.
             'email' => strtolower($data['email']),
-            'password_hash' => Hash::make($data['password']),
+            'password_hash' => Hash::make($motDePasse),
             'nom' => $data['nom'],
             'prenom' => $data['prenom'],
             'role' => $data['role'],
             'actif' => true,
         ]);
 
-        return response()->json($admin, 201);
+        // Invitation par e-mail (identifiants + lien de connexion). Non bloquant :
+        // si l'envoi échoue, l'admin est quand même créé (email_envoye = false).
+        $emailEnvoye = $mailer->envoyer(
+            $admin->email,
+            'Votre accès au dashboard admin Tonji',
+            $this->htmlInvitation($admin->prenom, $admin->email, $motDePasse),
+        );
+
+        return response()->json([
+            'admin'        => $admin,
+            'email_envoye' => $emailEnvoye,
+        ], 201);
+    }
+
+    /**
+     * Corps HTML de l'e-mail d'invitation admin (branding Tonji, français).
+     */
+    private function htmlInvitation(string $prenom, string $email, string $motDePasse): string
+    {
+        $url = config('services.admin_dashboard_url');
+        $prenom = e($prenom);
+        $email = e($email);
+        $mdp = e($motDePasse);
+
+        return <<<HTML
+        <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#14202E;">
+          <div style="background:#0A6847;padding:24px;border-radius:16px 16px 0 0;">
+            <span style="color:#fff;font-size:22px;font-weight:800;">Ton<span style="color:#E8A830;">ji</span></span>
+            <div style="color:rgba(255,255,255,.75);font-size:12px;letter-spacing:1px;margin-top:4px;">DASHBOARD ADMINISTRATION</div>
+          </div>
+          <div style="border:1px solid #E8EDE9;border-top:none;border-radius:0 0 16px 16px;padding:24px;">
+            <p>Bonjour {$prenom},</p>
+            <p>Un accès administrateur au dashboard <strong>Tonji</strong> vient d'être créé pour vous.</p>
+            <div style="background:#F6F7F4;border:1px solid #E8EDE9;border-radius:12px;padding:16px;margin:16px 0;">
+              <p style="margin:0 0 8px;"><strong>E-mail :</strong> {$email}</p>
+              <p style="margin:0;"><strong>Mot de passe provisoire :</strong> <code style="background:#fff;padding:2px 6px;border-radius:4px;">{$mdp}</code></p>
+            </div>
+            <p><a href="{$url}" style="display:inline-block;background:#0A6847;color:#fff;text-decoration:none;padding:12px 22px;border-radius:12px;font-weight:700;">Se connecter au dashboard</a></p>
+            <p style="color:#4A5568;font-size:13px;">Par sécurité, changez votre mot de passe dès votre première connexion. Si vous n'attendiez pas cette invitation, ignorez cet e-mail.</p>
+          </div>
+          <p style="color:#8A94A0;font-size:12px;text-align:center;margin-top:16px;">Tonji — un service de Paynala</p>
+        </div>
+        HTML;
     }
 
     /**

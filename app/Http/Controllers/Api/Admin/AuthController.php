@@ -105,4 +105,34 @@ class AuthController extends Controller
 
         return response()->json(['ok' => true]);
     }
+
+    /**
+     * PATCH /api/admin/me/password
+     *
+     * Permet à l'admin authentifié de changer son propre mot de passe
+     * (notamment après réception d'un mot de passe provisoire par e-mail).
+     * Vérifie le mot de passe actuel avant d'appliquer le nouveau.
+     *
+     * Body : { current_password, new_password }
+     *
+     * @return JsonResponse { ok: true } ou 422 si le mot de passe actuel est faux.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'new_password' => ['required', 'string', 'min:8', 'different:current_password'],
+        ]);
+
+        $admin = $request->user();
+
+        if (! Hash::check($data['current_password'], $admin->password_hash)) {
+            return response()->json(['message' => 'Mot de passe actuel incorrect.'], 422);
+        }
+
+        $admin->password_hash = Hash::make($data['new_password']);
+        $admin->save();
+
+        return response()->json(['ok' => true]);
+    }
 }
