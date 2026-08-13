@@ -56,9 +56,9 @@ class EmailLayout
             <tr><td align="center">
               <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 
-                <!-- En-tête -->
-                <tr><td style="background:#0A6847;padding:22px 28px;border-radius:16px 16px 0 0;">
-                  <span style="font-size:24px;font-weight:800;letter-spacing:-.5px;color:#ffffff;">Ton<span style="color:#E8A830;">ji</span></span>
+                <!-- En-tête : vrai logo Tonji (icône app) sur fond vert marque -->
+                <tr><td style="background:#0A6847;padding:20px 28px;border-radius:16px 16px 0 0;">
+                  <img src="https://tonji.ga/logo-tonji.png" alt="Tonji" width="46" height="46" style="display:block;width:46px;height:46px;border-radius:10px;">
                 </td></tr>
 
                 <!-- Corps -->
