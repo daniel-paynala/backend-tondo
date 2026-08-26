@@ -81,7 +81,7 @@ class BotUiMenus
                 ['id' => '3', 'titre' => 'Créer une cagnotte'],
                 // Groupe 2 (message 2)
                 ['id' => '4', 'titre' => 'Gérer mes cagnottes'],
-                ['id' => '5', 'titre' => 'Aide & support'],
+                ['id' => '5', 'titre' => 'Contacter le support'],
             ],
         ];
     }
