@@ -37,11 +37,12 @@ class ResumeQuotidienCommand extends Command
     {
         $dryRun = (bool) $this->option('dry-run');
 
-        // Template requis (sinon la fonctionnalité est simplement désactivée).
+        // Template requis pour l'ENVOI réel. En --dry-run on prévisualise quand
+        // même (utile pour tester avant d'avoir créé/approuvé le template).
         $template = config('services.whatsapp.templates.resume_quotidien');
         $langue   = config('services.whatsapp.templates.langue', 'fr');
-        if (empty($template)) {
-            $this->warn('Template resume_quotidien non configuré → rien à envoyer.');
+        if (empty($template) && ! $dryRun) {
+            $this->warn('Template resume_quotidien non configuré → rien à envoyer. (Utilise --dry-run pour prévisualiser sans template.)');
             return self::SUCCESS;
         }
 
@@ -84,7 +85,9 @@ class ResumeQuotidienCommand extends Command
             $totalFmt    = number_format($totalGlobal, 0, ',', ' ');
 
             if ($dryRun) {
-                $this->line("  [dry] {$user->numero} → {$detail} | Total {$totalFmt} FCFA");
+                // Détail multi-lignes → aplati avec « · » pour la console.
+                $detailConsole = str_replace("\n", ' · ', $detail);
+                $this->line("  [dry] {$user->numero} → {$detailConsole} | Total {$totalFmt} FCFA");
                 continue;
             }
 
