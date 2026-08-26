@@ -53,34 +53,24 @@ class BotUiMenus
     }
 
     /**
-     * Menu principal en LISTE (5 options > 3 boutons possibles → liste).
-     * Libellés alignés sur l'état des tontines ; id 1→5 = dispatch de handleMenu().
+     * Menu principal en BOUTONS (WhatsApp = 3 boutons max).
+     *
+     * On expose les 3 actions principales (Cotiser=1, Créer=3, Gérer=4). Les 2
+     * options secondaires — Rejoindre (2) et Aide (5) — restent joignables en
+     * tapant le chiffre (le bot texte les gère toujours via handleMenu) ; elles
+     * sont rappelées dans le corps du message via 'texte'. Les id correspondent
+     * exactement au dispatch de handleMenu().
      */
     private static function menuPrincipal(): array
     {
-        // Même source de vérité que BotService::tontinesActives() → libellés cohérents.
-        $tontines = (bool) config('tondo.tontines_actives', false);
-
-        $lignes = $tontines
-            ? [
-                ['id' => '1', 'titre' => 'Cotiser'],
-                ['id' => '2', 'titre' => 'Rejoindre une tontine'],
-                ['id' => '3', 'titre' => 'Créer', 'desc' => 'Tontine ou cagnotte'],
-                ['id' => '4', 'titre' => 'Gérer', 'desc' => 'Tontine ou cagnotte'],
-                ['id' => '5', 'titre' => 'Aide & support'],
-            ]
-            : [
-                ['id' => '1', 'titre' => 'Cotiser', 'desc' => 'À une cagnotte'],
-                ['id' => '2', 'titre' => 'Rejoindre', 'desc' => 'Une cagnotte'],
-                ['id' => '3', 'titre' => 'Créer une cagnotte'],
-                ['id' => '4', 'titre' => 'Gérer mes cagnottes'],
-                ['id' => '5', 'titre' => 'Aide & support'],
-            ];
-
         return [
-            'type'     => 'liste',
-            'bouton'   => 'Ouvrir le menu',
-            'sections' => [['titre' => 'Menu Tonji', 'lignes' => $lignes]],
+            'type'    => 'boutons',
+            'texte'   => "🎉 *Bienvenue sur Tonji !*\nQue souhaitez-vous faire ?\n\n_Autres : tapez 2 (Rejoindre) ou 5 (Aide)._",
+            'boutons' => [
+                ['id' => '1', 'titre' => '💰 Cotiser'],
+                ['id' => '3', 'titre' => '➕ Créer'],
+                ['id' => '4', 'titre' => '📋 Gérer'],
+            ],
         ];
     }
 
