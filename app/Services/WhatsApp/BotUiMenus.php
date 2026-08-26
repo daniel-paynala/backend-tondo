@@ -40,7 +40,9 @@ class BotUiMenus
     public static function pour(?string $etape): ?array
     {
         return match ($etape) {
-            'menu'                       => self::menuPrincipal(),
+            // 'menu' en PAUSE : menu principal gardé en TEXTE le temps de trancher
+            // le rendu (2 messages + corps « Ou : » du 2e). Réactiver = décommenter.
+            // 'menu'                    => self::menuPrincipal(),
             'creer.type'                 => self::choixType(),
             'creer.tontine.periodicite'  => self::periodicite(),
             'creer.tontine.jour_mois'    => self::jourDuMois(),
