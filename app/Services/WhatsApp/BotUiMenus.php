@@ -44,7 +44,10 @@ class BotUiMenus
             // le rendu (2 messages + corps « Ou : » du 2e). Réactiver = décommenter.
             // 'menu'                    => self::menuPrincipal(),
             'creer.type'                 => self::choixType(),
-            'creer.cotisation.nom'       => self::flowCreerCagnotte(),
+            // 'creer.cotisation.nom' en PAUSE : création de cagnotte gardée en
+            // PARCOURS TEXTE (le Flow n'est pas encore publié chez Meta).
+            // Réactiver = décommenter (et renseigner TONJI_FLOW_CREER_CAGNOTTE_ID).
+            // 'creer.cotisation.nom'    => self::flowCreerCagnotte(),
             'creer.tontine.periodicite'  => self::periodicite(),
             'creer.tontine.jour_mois'    => self::jourDuMois(),
             'creer.recap'                => self::confirmationCreation(),
