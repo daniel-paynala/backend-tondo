@@ -258,6 +258,17 @@ class WebhookController extends Controller
             'type'       => $message['type'] ?? null,
         ]);
 
+        // Mode moderne (Meta) : dès la réception, on accuse lecture (coches bleues)
+        // et on affiche « en train d'écrire… » pendant que le bot réfléchit — il
+        // paraît ainsi vivant. Best-effort, gaté comme les menus tappables :
+        // en mode 'texte' (défaut) rien ne change.
+        $senderMeta = $this->sender;
+        if (config('services.whatsapp.ui') === 'moderne'
+            && $senderMeta instanceof \App\Services\WhatsApp\MetaSenderService
+            && ! empty($message['id'])) {
+            $senderMeta->marquerLuEtEcrit((string) $message['id']);
+        }
+
         try {
             $reponse = $this->bot->traiter($from, $body);
         } catch (\Throwable $e) {

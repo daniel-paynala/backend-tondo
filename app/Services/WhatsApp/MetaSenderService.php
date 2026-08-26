@@ -166,6 +166,54 @@ class MetaSenderService implements WhatsAppSender
         ]);
     }
 
+    /**
+     * Accuse réception d'un message entrant (coches bleues) ET affiche
+     * l'indicateur « en train d'écrire… » côté utilisateur.
+     *
+     * La Cloud API combine les deux dans un seul appel « mark as read » enrichi
+     * d'un typing_indicator. L'indicateur reste actif ~25 s ou jusqu'au prochain
+     * message du bot (donc dissipé dès que la réponse part). Best-effort : toute
+     * erreur est loggée sans être propagée (n'interrompt jamais le bot).
+     *
+     * NB : payload différent des envois (pas de 'to' ni 'recipient_type', mais
+     * un 'status'='read' + 'message_id'), d'où un appel direct plutôt que call().
+     *
+     * @param  string $messageId  Identifiant du message entrant (wamid…).
+     * @return bool               true si l'API répond 2xx, false sinon.
+     */
+    public function marquerLuEtEcrit(string $messageId): bool
+    {
+        $url = "https://graph.facebook.com/{$this->graphVersion}/{$this->phoneNumberId}/messages";
+
+        try {
+            $response = Http::withToken($this->token)
+                ->asJson()
+                ->post($url, [
+                    'messaging_product' => 'whatsapp',
+                    'status'            => 'read',
+                    'message_id'        => $messageId,
+                    'typing_indicator'  => ['type' => 'text'],
+                ]);
+
+            if ($response->successful()) {
+                return true;
+            }
+
+            Log::warning('MetaSenderService: accusé lu/écrit non-2xx', [
+                'status'     => $response->status(),
+                'body'       => $response->body(),
+                'message_id' => $messageId,
+            ]);
+            return false;
+        } catch (\Throwable $e) {
+            Log::error('MetaSenderService: exception accusé lu/écrit', [
+                'message'    => $e->getMessage(),
+                'message_id' => $messageId,
+            ]);
+            return false;
+        }
+    }
+
     // ── Privé ─────────────────────────────────────────────────────────────────
 
     /**
