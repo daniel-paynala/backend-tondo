@@ -264,6 +264,34 @@ class MetaSenderService implements WhatsAppSender
         ]);
     }
 
+    /**
+     * Envoie un message avec un BOUTON LIEN (interactive type "cta_url") : un
+     * bouton qui ouvre une URL dans le navigateur (reçu, cagnotte, app…).
+     *
+     * @param  string $to      Numéro E.164 du destinataire.
+     * @param  string $texte   Corps du message (au-dessus du bouton).
+     * @param  string $label   Libellé du bouton (≤20 car.).
+     * @param  string $url      URL https ouverte au clic.
+     * @return bool             true si envoyé, false sinon (→ repli texte par l'appelant).
+     */
+    public function envoyerCta(string $to, string $texte, string $label, string $url): bool
+    {
+        return $this->call($to, [
+            'type'        => 'interactive',
+            'interactive' => [
+                'type'   => 'cta_url',
+                'body'   => ['text' => mb_substr($texte, 0, 1024)],
+                'action' => [
+                    'name'       => 'cta_url',
+                    'parameters' => [
+                        'display_text' => mb_substr($label, 0, 20),
+                        'url'          => $url,
+                    ],
+                ],
+            ],
+        ]);
+    }
+
     // ── Privé ─────────────────────────────────────────────────────────────────
 
     /**

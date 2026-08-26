@@ -332,6 +332,21 @@ class WebhookController extends Controller
             return;
         }
 
+        // 2-bis) Reçu de paiement : recu() insère le lien du reçu en texte
+        //        (« 📄 *Votre reçu :* https://…/receipts/x.pdf »). En moderne on le
+        //        transforme en BOUTON LIEN « Voir le reçu » et on retire la ligne
+        //        du corps. Échec d'envoi → repli sur le texte complet (avec le lien).
+        if (preg_match('#📄 \*Votre reçu\s*:\*\s*(https?://\S+)#u', $texte, $m)) {
+            $corps = trim(str_replace($m[0], '', $texte));
+            if ($corps === '') {
+                $corps = '✅ Paiement effectué.';
+            }
+            if (! $sender->envoyerCta($from, $corps, '📄 Voir le reçu', $m[1])) {
+                $this->sender->envoyer($from, $texte);
+            }
+            return;
+        }
+
         // 3) L'étape courante (après traiter) a-t-elle une version interactive ?
         $etape = $this->session->etape($from);
         $spec  = \App\Services\WhatsApp\BotUiMenus::pour($etape);
