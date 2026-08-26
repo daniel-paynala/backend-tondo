@@ -292,6 +292,43 @@ class MetaSenderService implements WhatsAppSender
         ]);
     }
 
+    /**
+     * Envoie un TEMPLATE pré-approuvé (notification proactive hors fenêtre 24 h).
+     *
+     * Seul moyen d'écrire à un utilisateur qui n'a pas parlé au bot depuis > 24 h.
+     * Les variables remplissent les paramètres {{1}}, {{2}}… du corps du template,
+     * dans l'ordre du tableau. Le template doit être créé et APPROUVÉ chez Meta.
+     *
+     * @param  string             $to         Numéro E.164 du destinataire.
+     * @param  string             $nom        Nom exact du template approuvé.
+     * @param  string             $langue     Code langue du template (ex : 'fr').
+     * @param  array<int,string>  $variables  Valeurs des paramètres du corps ({{1}}, {{2}}…).
+     * @return bool                           true si envoyé, false sinon.
+     */
+    public function envoyerTemplate(string $to, string $nom, string $langue, array $variables = []): bool
+    {
+        $template = [
+            'name'     => $nom,
+            'language' => ['code' => $langue],
+        ];
+
+        // Un seul composant « body » avec les paramètres texte, si des variables.
+        if (! empty($variables)) {
+            $template['components'] = [[
+                'type'       => 'body',
+                'parameters' => array_map(
+                    static fn ($v) => ['type' => 'text', 'text' => (string) $v],
+                    array_values($variables),
+                ),
+            ]];
+        }
+
+        return $this->call($to, [
+            'type'     => 'template',
+            'template' => $template,
+        ]);
+    }
+
     // ── Privé ─────────────────────────────────────────────────────────────────
 
     /**

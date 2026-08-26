@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\CleanReceiptsCommand;
+use App\Console\Commands\ResumeQuotidienCommand;
 use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
 use App\Console\Commands\TraiterReversementsAutoCagnottes;
@@ -68,3 +69,16 @@ Schedule::command(CleanReceiptsCommand::class)
     ->dailyAt('02:00')
     ->timezone('Africa/Libreville')
     ->withoutOverlapping();
+
+/*
+ * Résumé quotidien du soir aux créateurs de cagnottes — 20h heure de Libreville.
+ * N'envoie qu'aux créateurs dont AU MOINS UNE cagnotte a reçu une cotisation
+ * aujourd'hui (« seulement s'il y a eu du mouvement »). Chaque envoi est un
+ * template payant (UTILITY) : au plus 1/jour/créateur actif. Ne fait rien tant
+ * que services.whatsapp.templates.resume_quotidien n'est pas renseigné.
+ */
+Schedule::command(ResumeQuotidienCommand::class)
+    ->dailyAt('20:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();

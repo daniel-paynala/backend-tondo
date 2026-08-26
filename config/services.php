@@ -173,6 +173,14 @@ return [
         'flows' => [
             'creer_cagnotte' => env('TONJI_FLOW_CREER_CAGNOTTE_ID'),
         ],
+
+        // ── Templates (notifications proactives hors fenêtre 24 h) ─────────────
+        // Nom EXACT de chaque template APPROUVÉ chez Meta. Vide = fonctionnalité
+        // désactivée (la commande cron ne fait rien). Chaque envoi est PAYANT (UTILITY).
+        'templates' => [
+            'langue'           => env('WHATSAPP_TEMPLATE_LANG', 'fr'),
+            'resume_quotidien' => env('TONJI_TEMPLATE_RESUME_QUOTIDIEN'),
+        ],
     ],
 
     // Envoi d'e-mails transactionnels via l'API Mailgun (réutilise le compte
