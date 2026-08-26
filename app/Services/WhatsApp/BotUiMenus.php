@@ -63,18 +63,25 @@ class BotUiMenus
      */
     private static function menuPrincipal(): array
     {
+        // Ordre d'origine du bot (= handleMenu) : Cotiser(1), Rejoindre(2),
+        // Créer(3), Gérer(4), Aide(5). Sans emoji. Les 5 boutons partent en 2
+        // messages (3 puis 2) via le découpage du WebhookController.
+        //
+        // ⚠️ Titres de bouton limités à 20 car. par WhatsApp : « Cotiser à une
+        // cagnotte » (22) et « Rejoindre une cagnotte » (22) ne rentrent pas —
+        // on garde la forme courte. Créer/Gérer tiennent en entier.
         return [
             'type'    => 'boutons',
-            'texte'   => "🎉 *Bienvenue sur Tonji !*\nQue souhaitez-vous faire ?",
-            'suite'   => '⤵️ Ou :',
+            'texte'   => "Bienvenue sur Tonji ! Que souhaitez-vous faire ?",
+            'suite'   => 'Ou :',
             'boutons' => [
                 // Groupe 1 (message 1)
-                ['id' => '1', 'titre' => '💰 Cotiser'],
-                ['id' => '3', 'titre' => '➕ Créer'],
-                ['id' => '4', 'titre' => '📋 Gérer'],
+                ['id' => '1', 'titre' => 'Cotiser'],
+                ['id' => '2', 'titre' => 'Rejoindre'],
+                ['id' => '3', 'titre' => 'Créer une cagnotte'],
                 // Groupe 2 (message 2)
-                ['id' => '2', 'titre' => '🤝 Rejoindre'],
-                ['id' => '5', 'titre' => '❓ Aide'],
+                ['id' => '4', 'titre' => 'Gérer mes cagnottes'],
+                ['id' => '5', 'titre' => 'Aide & support'],
             ],
         ];
     }
