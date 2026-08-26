@@ -72,16 +72,16 @@ class BotUiMenus
         // on garde la forme courte. Créer/Gérer tiennent en entier.
         return [
             'type'    => 'boutons',
-            'texte'   => "Bienvenue sur Tonji ! Que souhaitez-vous faire ?",
+            'texte'   => "Bienvenue sur Tonji ! Que veux-tu faire ?",
             'suite'   => 'Ou :',
             'boutons' => [
-                // Groupe 1 (message 1)
-                ['id' => '1', 'titre' => 'Cotiser'],
-                ['id' => '2', 'titre' => 'Rejoindre'],
-                ['id' => '3', 'titre' => 'Créer une cagnotte'],
+                // Groupe 1 (message 1) — formes conjuguées (tutoiement), ≤ 20 car.
+                ['id' => '1', 'titre' => 'Cotise'],
+                ['id' => '2', 'titre' => 'Rejoins une cagnotte'],
+                ['id' => '3', 'titre' => 'Crée une cagnotte'],
                 // Groupe 2 (message 2)
-                ['id' => '4', 'titre' => 'Gérer mes cagnottes'],
-                ['id' => '5', 'titre' => 'Contacter le support'],
+                ['id' => '4', 'titre' => 'Gère tes cagnottes'],
+                ['id' => '5', 'titre' => 'Contacte le support'],
             ],
         ];
     }
