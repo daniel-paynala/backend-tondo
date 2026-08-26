@@ -78,6 +78,94 @@ class MetaSenderService implements WhatsAppSender
         ]);
     }
 
+    /**
+     * Envoie un menu à BOUTONS de réponse tappables (interactive type "button").
+     *
+     * WhatsApp accepte 3 boutons au maximum ; les titres sont tronqués à 20 car.
+     * L'`id` de chaque bouton est renvoyé tel quel par Meta quand l'utilisateur
+     * tape → il doit correspondre au choix attendu par le bot texte (ex : "1").
+     * N'existe PAS sur l'interface WhatsAppSender : méthode spécifique à Meta,
+     * appelée uniquement après un test instanceof côté WebhookController.
+     *
+     * @param  string $to       Numéro E.164 du destinataire.
+     * @param  string $texte    Corps du message (la question).
+     * @param  array<int,array{id:string,titre:string}> $boutons  Options (≤3).
+     * @return bool             true si envoyé, false sinon (→ repli texte par l'appelant).
+     */
+    public function envoyerBoutons(string $to, string $texte, array $boutons): bool
+    {
+        // Construction des boutons (max 3, imposé par WhatsApp).
+        $items = [];
+        foreach (array_slice($boutons, 0, 3) as $b) {
+            $items[] = [
+                'type'  => 'reply',
+                'reply' => [
+                    'id'    => (string) $b['id'],
+                    'title' => mb_substr((string) $b['titre'], 0, 20),
+                ],
+            ];
+        }
+
+        return $this->call($to, [
+            'type'        => 'interactive',
+            'interactive' => [
+                'type'   => 'button',
+                'body'   => ['text' => mb_substr($texte, 0, 1024)],
+                'action' => ['buttons' => $items],
+            ],
+        ]);
+    }
+
+    /**
+     * Envoie un menu LISTE (interactive type "list") : un bouton qui déroule
+     * jusqu'à 10 lignes réparties en sections.
+     *
+     * Limites WhatsApp appliquées défensivement : libellé du bouton ≤20 car.,
+     * titre de section ≤24, titre de ligne ≤24, description ≤72. Les `id` de
+     * ligne suivent la même règle que les boutons (= choix du bot texte).
+     *
+     * @param  string $to        Numéro E.164 du destinataire.
+     * @param  string $texte     Corps du message (la question).
+     * @param  string $bouton    Libellé du bouton d'ouverture (ex : "Menu").
+     * @param  array<int,array{titre:string,lignes:array<int,array{id:string,titre:string,desc?:string}>}> $sections
+     * @return bool              true si envoyé, false sinon (→ repli texte par l'appelant).
+     */
+    public function envoyerListe(string $to, string $texte, string $bouton, array $sections): bool
+    {
+        // Transformation des sections « métier » vers le format attendu par Meta.
+        $secs = [];
+        foreach ($sections as $s) {
+            $rows = [];
+            foreach ($s['lignes'] as $r) {
+                $row = [
+                    'id'    => (string) $r['id'],
+                    'title' => mb_substr((string) $r['titre'], 0, 24),
+                ];
+                // La description est optionnelle côté Meta.
+                if (! empty($r['desc'])) {
+                    $row['description'] = mb_substr((string) $r['desc'], 0, 72);
+                }
+                $rows[] = $row;
+            }
+            $secs[] = [
+                'title' => mb_substr((string) $s['titre'], 0, 24),
+                'rows'  => $rows,
+            ];
+        }
+
+        return $this->call($to, [
+            'type'        => 'interactive',
+            'interactive' => [
+                'type'   => 'list',
+                'body'   => ['text' => mb_substr($texte, 0, 1024)],
+                'action' => [
+                    'button'   => mb_substr($bouton, 0, 20),
+                    'sections' => $secs,
+                ],
+            ],
+        ]);
+    }
+
     // ── Privé ─────────────────────────────────────────────────────────────────
 
     /**

@@ -140,6 +140,16 @@ return [
     'whatsapp' => [
         'driver' => env('WHATSAPP_DRIVER', 'twilio'),
 
+        // ── Rendu de l'interface du bot — commutable (texte ↔ moderne) ──────────
+        // Variable globale UNIQUE qui pilote l'APPARENCE des menus WhatsApp :
+        //   - 'texte'   (défaut) : menus « tapez 1/2/3 » historiques. Aucun changement.
+        //   - 'moderne'          : menus tappables (boutons ≤3, listes ≤10) quand
+        //                          l'étape a une version interactive (BotUiMenus) ;
+        //                          sinon, OU en cas d'échec d'envoi → RETOMBÉE
+        //                          automatique sur le texte. BotService n'est jamais
+        //                          modifié. N'a d'effet que sur le canal Meta.
+        'ui' => env('WHATSAPP_UI', 'texte'),
+
         // Meta WhatsApp Cloud API — utilisé uniquement si driver = 'meta'.
         'meta' => [
             // Access token permanent (System User) pour appeler la Graph API.

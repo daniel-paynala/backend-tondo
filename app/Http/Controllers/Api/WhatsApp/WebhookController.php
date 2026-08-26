@@ -235,9 +235,21 @@ class WebhookController extends Controller
 
         // Seuls les messages texte sont pris en charge par le FSM. Les autres
         // types (image, audio…) sont traités comme du texte vide → menu d'aide.
-        $body = $message['type'] === 'text'
-            ? trim((string) ($message['text']['body'] ?? ''))
-            : '';
+        // Corps du message selon le type :
+        //  - 'text'        → le texte tapé.
+        //  - 'interactive' → réponse à un bouton/liste : on récupère l'`id` du
+        //                    choix (ex "1"), réinjecté tel quel dans le bot texte,
+        //                    donc le FSM existant le traite sans aucune modification.
+        //  - autre (image, audio…) → chaîne vide → menu d'aide.
+        $body = match ($message['type'] ?? '') {
+            'text'        => trim((string) ($message['text']['body'] ?? '')),
+            'interactive' => trim((string) (
+                $message['interactive']['button_reply']['id']
+                ?? $message['interactive']['list_reply']['id']
+                ?? ''
+            )),
+            default       => '',
+        };
 
         Log::info('WhatsApp entrant (Meta)', [
             'from'       => $from,
@@ -263,12 +275,78 @@ class WebhookController extends Controller
                 . "\n\nTapez *1* pour Cotiser, *2* pour Rejoindre, *3* pour Créer, *4* pour Gérer, *5* pour Aide.";
         }
 
-        // Réponse tableau = [texte, urlPDF] → document joint ; sinon texte simple.
+        // Réponse tableau = [texte, urlPDF] → document joint ; sinon texte (ou interactif).
         if (is_array($reponse)) {
             [$texte, $pdfUrl] = $reponse;
             $this->sender->envoyerAvecPdf($from, $texte, $pdfUrl);
         } elseif ($reponse !== '') {
-            $this->sender->envoyer($from, $reponse);
+            $this->envoyerReponse($from, $reponse);
+        }
+    }
+
+    /**
+     * Envoie la réponse texte du bot — en version INTERACTIVE si le mode
+     * « moderne » est actif ET que l'étape courante a une version tappable.
+     *
+     * Filet de sécurité à plusieurs niveaux, dans cet ordre :
+     *   1. services.whatsapp.ui ≠ 'moderne'      → texte (comportement historique).
+     *   2. Fournisseur ≠ Meta (ex : Twilio)      → texte (interactif non géré ici).
+     *   3. Étape sans version interactive         → texte (BotUiMenus::pour null).
+     *   4. Échec de l'envoi interactif            → texte (repli).
+     * Le bot texte (BotService) n'est jamais touché : on ne fait que CHOISIR le
+     * rendu de sa réponse.
+     *
+     * @param string $from   Destinataire E.164.
+     * @param string $texte  Réponse texte du bot (sert aussi de repli).
+     */
+    private function envoyerReponse(string $from, string $texte): void
+    {
+        // 1) Mode texte (défaut) : aucun changement.
+        if (config('services.whatsapp.ui') !== 'moderne') {
+            $this->sender->envoyer($from, $texte);
+            return;
+        }
+
+        // 2) Les menus interactifs sont une capacité SPÉCIFIQUE à Meta. Sur tout
+        //    autre fournisseur (Twilio…), on garde le texte inchangé.
+        $sender = $this->sender;
+        if (! $sender instanceof \App\Services\WhatsApp\MetaSenderService) {
+            $this->sender->envoyer($from, $texte);
+            return;
+        }
+
+        // 3) L'étape courante (après traiter) a-t-elle une version interactive ?
+        $etape = $this->session->etape($from);
+        $spec  = \App\Services\WhatsApp\BotUiMenus::pour($etape);
+        if ($spec === null) {
+            $sender->envoyer($from, $texte);
+            return;
+        }
+
+        // 4) Corps du message interactif = texte du bot NETTOYÉ de son bloc
+        //    d'options numérotées (préserve intro/récap/avertissements dynamiques),
+        //    ou un corps sur-mesure si le spec en fournit un ('texte'). Si le
+        //    nettoyage vide tout, on retombe sur le texte brut.
+        $corps = $spec['texte'] ?? \App\Services\WhatsApp\BotUiMenus::corpsSansOptions($texte);
+        if ($corps === '') {
+            $corps = $texte;
+        }
+
+        // Tentative d'envoi interactif ; tout échec → repli sur le texte.
+        $envoye = false;
+        try {
+            $envoye = $spec['type'] === 'liste'
+                ? $sender->envoyerListe($from, $corps, $spec['bouton'], $spec['sections'])
+                : $sender->envoyerBoutons($from, $corps, $spec['boutons']);
+        } catch (\Throwable $e) {
+            Log::warning('WhatsApp UI moderne : échec du rendu interactif, repli texte', [
+                'etape' => $etape,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        if (! $envoye) {
+            $sender->envoyer($from, $texte);
         }
     }
 
