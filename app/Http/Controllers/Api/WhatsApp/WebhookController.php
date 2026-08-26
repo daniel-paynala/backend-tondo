@@ -241,6 +241,13 @@ class WebhookController extends Controller
             return;
         }
 
+        // Bouton « Parler à un agent » (écran Aide) → handoff humain, hors FSM texte.
+        if (($message['type'] ?? '') === 'interactive'
+            && ($message['interactive']['button_reply']['id'] ?? '') === 'handoff_conseiller') {
+            $this->traiterHandoffConseiller($from);
+            return;
+        }
+
         // Corps du message selon le type :
         //  - 'text'        → le texte tapé.
         //  - 'interactive' → réponse à un bouton/liste : on récupère l'`id` du
@@ -342,6 +349,23 @@ class WebhookController extends Controller
                 $corps = '✅ Paiement effectué.';
             }
             if (! $sender->envoyerCta($from, $corps, '📄 Voir le reçu', $m[1])) {
+                $this->sender->envoyer($from, $texte);
+            }
+            return;
+        }
+
+        // 2-ter) Aide & support : on affiche l'aide + un bouton « Parler à un agent ».
+        //        Le handoff humain ne se déclenche QU'AU CLIC sur ce bouton (voir
+        //        l'interception de l'id 'handoff_conseiller' en amont), jamais à la
+        //        simple consultation de l'aide.
+        if (str_contains($texte, 'Aide & support Tonji')) {
+            // Garder la partie aide (avant le séparateur), sans le menu ré-appendé.
+            $corps = trim(explode('————', $texte, 2)[0]);
+            if ($corps === '') {
+                $corps = $texte;
+            }
+            $bouton = [['id' => 'handoff_conseiller', 'titre' => 'Parler à un agent']];
+            if (! $sender->envoyerBoutons($from, $corps, $bouton)) {
                 $this->sender->envoyer($from, $texte);
             }
             return;
@@ -452,6 +476,70 @@ class WebhookController extends Controller
         if ($reponse !== '') {
             $sender->envoyer($from, $reponse);
         }
+    }
+
+    /**
+     * Handoff humain : l'utilisateur a tapé « Parler à un agent » depuis l'aide.
+     *
+     * Notifie le support par e-mail (AdminNotifier, catégorie « autre ») avec les
+     * coordonnées de l'utilisateur, puis lui confirme qu'on va le recontacter.
+     * Best-effort ; gaté comme le reste du mode moderne (Meta uniquement).
+     *
+     * @param string $from  Numéro E.164 de l'utilisateur.
+     */
+    private function traiterHandoffConseiller(string $from): void
+    {
+        $sender = $this->sender;
+        if (config('services.whatsapp.ui') !== 'moderne'
+            || ! $sender instanceof \App\Services\WhatsApp\MetaSenderService) {
+            return;
+        }
+
+        // Contexte : projet + utilisateur, pour personnaliser la notif support.
+        $projectId = (string) (\Illuminate\Support\Facades\DB::table('projects')
+            ->where('slug', config('project.slug'))->value('id') ?? '');
+        $suffixe = substr(preg_replace('/\D/', '', $from), -9);
+        $user    = \App\Models\TondoUser::where('project_id', $projectId)
+            ->where('numero', 'like', "%{$suffixe}")
+            ->first();
+        $libelle = $user ? trim((string) $user->prenom . ' ' . (string) $user->nom) : '';
+        $libelle = $libelle !== '' ? $libelle : $from;
+
+        // Notifier le support par e-mail (best-effort).
+        try {
+            $libelleSafe = e($libelle);
+            $numeroSafe  = e($from);
+            $corps = <<<HTML
+            <p>Un utilisateur demande à <strong>parler à un conseiller</strong> via le bot WhatsApp.</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#F6F7F4;border:1px solid #E8EDE9;border-radius:12px;margin:8px 0;">
+              <tr><td style="padding:16px;font-size:14px;line-height:1.7;">
+                <strong>Utilisateur :</strong> {$libelleSafe}<br>
+                <strong>Numéro WhatsApp :</strong> {$numeroSafe}
+              </td></tr>
+            </table>
+            <p>Recontacte-le directement sur WhatsApp.</p>
+            HTML;
+
+            app(\App\Services\Mail\AdminNotifier::class)->notifier(
+                $projectId,
+                'autre',
+                'Demande de conseiller — WhatsApp',
+                'Parler à un conseiller',
+                $corps,
+            );
+        } catch (\Throwable $e) {
+            Log::error('handoff conseiller : notification support échouée', [
+                'from'  => $from,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Confirmer à l'utilisateur.
+        $sender->envoyer(
+            $from,
+            "✅ C'est noté ! Un conseiller Tonji va te recontacter au plus vite.\n"
+            . 'Tu peux aussi écrire à support@tonji.ga.',
+        );
     }
 
     /**
