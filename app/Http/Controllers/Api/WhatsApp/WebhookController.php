@@ -335,9 +335,23 @@ class WebhookController extends Controller
         // Tentative d'envoi interactif ; tout échec → repli sur le texte.
         $envoye = false;
         try {
-            $envoye = $spec['type'] === 'liste'
-                ? $sender->envoyerListe($from, $corps, $spec['bouton'], $spec['sections'])
-                : $sender->envoyerBoutons($from, $corps, $spec['boutons']);
+            if ($spec['type'] === 'liste') {
+                $envoye = $sender->envoyerListe($from, $corps, $spec['bouton'], $spec['sections']);
+            } else {
+                // Boutons : WhatsApp plafonne à 3/message → on découpe en groupes
+                // de 3 et on envoie PLUSIEURS messages à la suite (ex. menu à 5 =
+                // un message de 3 puis un de 2). Le corps des messages suivants
+                // vient de 'suite'. Le succès se juge sur le 1er groupe (l'essentiel) :
+                // un échec sur un groupe suivant est logué par le sender mais ne
+                // redéclenche pas le repli texte (les premiers boutons sont déjà partis).
+                foreach (array_chunk($spec['boutons'], 3) as $i => $groupe) {
+                    $corpsGroupe = $i === 0 ? $corps : ($spec['suite'] ?? '⤵️ Ou :');
+                    $ok = $sender->envoyerBoutons($from, $corpsGroupe, $groupe);
+                    if ($i === 0) {
+                        $envoye = $ok;
+                    }
+                }
+            }
         } catch (\Throwable $e) {
             Log::warning('WhatsApp UI moderne : échec du rendu interactif, repli texte', [
                 'etape' => $etape,

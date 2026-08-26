@@ -53,23 +53,28 @@ class BotUiMenus
     }
 
     /**
-     * Menu principal en BOUTONS (WhatsApp = 3 boutons max).
+     * Menu principal en BOUTONS, sur DEUX messages (3 puis 2).
      *
-     * On expose les 3 actions principales (Cotiser=1, Créer=3, Gérer=4). Les 2
-     * options secondaires — Rejoindre (2) et Aide (5) — restent joignables en
-     * tapant le chiffre (le bot texte les gère toujours via handleMenu) ; elles
-     * sont rappelées dans le corps du message via 'texte'. Les id correspondent
-     * exactement au dispatch de handleMenu().
+     * WhatsApp plafonne à 3 boutons/message : on fournit les 5 boutons et le
+     * WebhookController les découpe automatiquement en groupes de 3 → un 1er
+     * message (Cotiser/Créer/Gérer) puis un 2e (Rejoindre/Aide), tous tappables.
+     * Le corps du 2e message vient de 'suite'. Les id correspondent au dispatch
+     * de handleMenu() (1=Cotiser, 2=Rejoindre, 3=Créer, 4=Gérer, 5=Aide).
      */
     private static function menuPrincipal(): array
     {
         return [
             'type'    => 'boutons',
-            'texte'   => "🎉 *Bienvenue sur Tonji !*\nQue souhaitez-vous faire ?\n\n_Autres : tapez 2 (Rejoindre) ou 5 (Aide)._",
+            'texte'   => "🎉 *Bienvenue sur Tonji !*\nQue souhaitez-vous faire ?",
+            'suite'   => '⤵️ Ou :',
             'boutons' => [
+                // Groupe 1 (message 1)
                 ['id' => '1', 'titre' => '💰 Cotiser'],
                 ['id' => '3', 'titre' => '➕ Créer'],
                 ['id' => '4', 'titre' => '📋 Gérer'],
+                // Groupe 2 (message 2)
+                ['id' => '2', 'titre' => '🤝 Rejoindre'],
+                ['id' => '5', 'titre' => '❓ Aide'],
             ],
         ];
     }
