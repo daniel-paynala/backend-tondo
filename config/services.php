@@ -165,6 +165,14 @@ return [
             // Bypass de la validation de signature (dev/CI uniquement, jamais en prod).
             'skip_signature'  => env('META_WHATSAPP_SKIP_SIGNATURE', false),
         ],
+
+        // ── Flows (formulaires natifs WhatsApp) ────────────────────────────────
+        // ID de chaque Flow PUBLIÉ chez Meta. Vide = Flow non configuré → repli
+        // automatique sur le parcours texte. Un Flow n'a d'effet que si
+        // WHATSAPP_UI=moderne ET son ID ci-dessous est renseigné (+ driver=meta).
+        'flows' => [
+            'creer_cagnotte' => env('TONJI_FLOW_CREER_CAGNOTTE_ID'),
+        ],
     ],
 
     // Envoi d'e-mails transactionnels via l'API Mailgun (réutilise le compte

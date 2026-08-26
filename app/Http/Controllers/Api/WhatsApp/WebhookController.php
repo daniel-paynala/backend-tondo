@@ -233,8 +233,14 @@ class WebhookController extends Controller
         // session (SessionService retire le "+" de son côté).
         $from = '+' . ltrim((string) ($message['from'] ?? ''), '+');
 
-        // Seuls les messages texte sont pris en charge par le FSM. Les autres
-        // types (image, audio…) sont traités comme du texte vide → menu d'aide.
+        // Soumission d'un Flow (formulaire natif) → handler dédié, HORS machine à
+        // états texte (le response_json n'est pas une saisie texte à dispatcher).
+        if (($message['type'] ?? '') === 'interactive'
+            && ($message['interactive']['type'] ?? '') === 'nfm_reply') {
+            $this->traiterReponseFlow($from, $message);
+            return;
+        }
+
         // Corps du message selon le type :
         //  - 'text'        → le texte tapé.
         //  - 'interactive' → réponse à un bouton/liste : on récupère l'`id` du
@@ -346,7 +352,21 @@ class WebhookController extends Controller
         // Tentative d'envoi interactif ; tout échec → repli sur le texte.
         $envoye = false;
         try {
-            if ($spec['type'] === 'liste') {
+            if ($spec['type'] === 'flow') {
+                // Formulaire natif : on pré-remplit le numéro par défaut avec le
+                // numéro WhatsApp de l'expéditeur (local 0XXXXXXXX). Le flow_token
+                // sert à corréler la soumission côté nfm_reply.
+                $numeroLocal = '0' . substr(preg_replace('/\D/', '', $from), -8);
+                $envoye = $sender->envoyerFlow(
+                    $from,
+                    $corps,
+                    (string) $spec['flow_id'],
+                    (string) ($spec['cta'] ?? 'Ouvrir'),
+                    'flow_' . ($spec['flow'] ?? 'x'),
+                    (string) $spec['screen'],
+                    ['numero' => $numeroLocal],
+                );
+            } elseif ($spec['type'] === 'liste') {
                 $envoye = $sender->envoyerListe($from, $corps, $spec['bouton'], $spec['sections']);
             } else {
                 // Boutons : WhatsApp plafonne à 3/message → on découpe en groupes
@@ -372,6 +392,50 @@ class WebhookController extends Controller
 
         if (! $envoye) {
             $sender->envoyer($from, $texte);
+        }
+    }
+
+    /**
+     * Traite la soumission d'un Flow (formulaire natif), hors machine à états texte.
+     *
+     * Décode le `response_json` du nfm_reply et délègue au handler métier
+     * (ex. création de cagnotte), puis renvoie sa réponse texte. Gaté comme le
+     * reste du mode moderne (Meta uniquement) ; toute erreur est capturée et la
+     * session réinitialisée pour ne pas bloquer l'utilisateur.
+     *
+     * @param string              $from     Destinataire E.164.
+     * @param array<string,mixed> $message  Message Meta (value.messages[]) de type interactive/nfm_reply.
+     */
+    private function traiterReponseFlow(string $from, array $message): void
+    {
+        // Le JSON des réponses du formulaire est dans interactive.nfm_reply.response_json.
+        $brut   = $message['interactive']['nfm_reply']['response_json'] ?? '{}';
+        $champs = json_decode((string) $brut, true) ?: [];
+
+        Log::info('WhatsApp Flow reçu (Meta)', ['from' => $from, 'champs' => $champs]);
+
+        // Cohérent avec l'envoi : uniquement en mode moderne + fournisseur Meta.
+        $sender = $this->sender;
+        if (config('services.whatsapp.ui') !== 'moderne'
+            || ! $sender instanceof \App\Services\WhatsApp\MetaSenderService) {
+            return;
+        }
+
+        try {
+            // Pour l'instant, un seul Flow (création de cagnotte). Le flow_token
+            // permettra d'aiguiller vers d'autres Flows quand il y en aura.
+            $reponse = app(\App\Services\WhatsApp\FlowCagnotteHandler::class)->traiter($from, $champs);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp Flow handler exception', [
+                'from'  => $from,
+                'error' => $e->getMessage(),
+            ]);
+            $this->session->reset($from);
+            $reponse = "❌ Une erreur est survenue. Réessaie en tapant *3*.";
+        }
+
+        if ($reponse !== '') {
+            $sender->envoyer($from, $reponse);
         }
     }
 

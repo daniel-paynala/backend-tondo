@@ -44,6 +44,7 @@ class BotUiMenus
             // le rendu (2 messages + corps « Ou : » du 2e). Réactiver = décommenter.
             // 'menu'                    => self::menuPrincipal(),
             'creer.type'                 => self::choixType(),
+            'creer.cotisation.nom'       => self::flowCreerCagnotte(),
             'creer.tontine.periodicite'  => self::periodicite(),
             'creer.tontine.jour_mois'    => self::jourDuMois(),
             'creer.recap'                => self::confirmationCreation(),
@@ -85,6 +86,32 @@ class BotUiMenus
                 ['id' => '4', 'titre' => 'Gère tes cagnottes'],
                 ['id' => '5', 'titre' => 'Contacte le support'],
             ],
+        ];
+    }
+
+    /**
+     * Créer une cagnotte → FORMULAIRE natif (Flow) au lieu du parcours texte.
+     *
+     * Se déclenche quand l'utilisateur vient de choisir « Créer » (étape
+     * 'creer.cotisation.nom', où le bot texte allait demander le nom). Renvoie
+     * null si aucun Flow n'est publié/configuré → le parcours texte reprend
+     * normalement. Le pré-remplissage du numéro est ajouté par le WebhookController
+     * (il a le numéro de l'expéditeur ; ici on ne connaît que l'étape).
+     */
+    private static function flowCreerCagnotte(): ?array
+    {
+        $flowId = config('services.whatsapp.flows.creer_cagnotte');
+        if (empty($flowId)) {
+            return null;   // Flow non configuré → parcours texte
+        }
+
+        return [
+            'type'    => 'flow',
+            'texte'   => "✨ Créons ta cagnotte — remplis le formulaire 👇",
+            'flow'    => 'creer_cagnotte',
+            'flow_id' => (string) $flowId,
+            'cta'     => 'Créer une cagnotte',
+            'screen'  => 'CREER_CAGNOTTE',
         ];
     }
 

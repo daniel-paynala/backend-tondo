@@ -214,6 +214,56 @@ class MetaSenderService implements WhatsAppSender
         }
     }
 
+    /**
+     * Envoie un message « Flow » : un bouton qui ouvre un formulaire natif WhatsApp.
+     *
+     * À la soumission du formulaire, Meta renvoie au webhook un message
+     * interactif de type `nfm_reply` contenant les réponses (JSON). Le
+     * `flow_token` permet de corréler la soumission au parcours (ex. quel Flow).
+     *
+     * @param  string               $to         Numéro E.164 du destinataire.
+     * @param  string               $texte      Corps du message (au-dessus du bouton).
+     * @param  string               $flowId     ID du Flow PUBLIÉ chez Meta.
+     * @param  string               $cta        Libellé du bouton d'ouverture (≤30 car.).
+     * @param  string               $flowToken  Jeton de corrélation (renvoyé dans le nfm_reply).
+     * @param  string               $screen     ID de l'écran d'entrée du Flow (ex : 'CREER_CAGNOTTE').
+     * @param  array<string,mixed>  $data       Données initiales injectées dans l'écran (pré-remplissage).
+     * @return bool                             true si envoyé, false sinon (→ repli texte par l'appelant).
+     */
+    public function envoyerFlow(
+        string $to,
+        string $texte,
+        string $flowId,
+        string $cta,
+        string $flowToken,
+        string $screen,
+        array $data = [],
+    ): bool {
+        // Charge utile du bouton Flow (Cloud API « flow_message_version » = "3").
+        $parametres = [
+            'flow_message_version' => '3',
+            'flow_token'           => $flowToken,
+            'flow_id'              => $flowId,
+            'flow_cta'             => mb_substr($cta, 0, 30),
+            'flow_action'          => 'navigate',
+            'flow_action_payload'  => ['screen' => $screen],
+        ];
+
+        // Pré-remplissage éventuel de l'écran d'entrée (ex. numéro par défaut).
+        if (! empty($data)) {
+            $parametres['flow_action_payload']['data'] = $data;
+        }
+
+        return $this->call($to, [
+            'type'        => 'interactive',
+            'interactive' => [
+                'type'   => 'flow',
+                'body'   => ['text' => mb_substr($texte, 0, 1024)],
+                'action' => ['name' => 'flow', 'parameters' => $parametres],
+            ],
+        ]);
+    }
+
     // ── Privé ─────────────────────────────────────────────────────────────────
 
     /**

@@ -1,0 +1,76 @@
+{
+  "version": "6.3",
+  "screens": [
+    {
+      "id": "CREER_CAGNOTTE",
+      "title": "Créer une cagnotte",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "numero": {
+          "type": "string",
+          "__example__": "077607752"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextBody",
+            "text": "Renseigne ta cagnotte, puis appuie sur Créer."
+          },
+          {
+            "type": "Form",
+            "name": "form",
+            "children": [
+              {
+                "type": "TextInput",
+                "name": "titre",
+                "label": "Nom de la cagnotte",
+                "input-type": "text",
+                "required": true,
+                "helper-text": "3 à 120 caractères"
+              },
+              {
+                "type": "TextInput",
+                "name": "objectif",
+                "label": "Objectif en FCFA (optionnel)",
+                "input-type": "number",
+                "required": false,
+                "helper-text": "Laisse vide = aucune limite"
+              },
+              {
+                "type": "DatePicker",
+                "name": "date_fin",
+                "label": "Date de fin (optionnel)",
+                "required": false
+              },
+              {
+                "type": "TextInput",
+                "name": "numero_retrait",
+                "label": "Numéro de retrait",
+                "input-type": "phone",
+                "required": true,
+                "init-value": "${data.numero}",
+                "helper-text": "Là où l'argent sera reversé"
+              },
+              {
+                "type": "Footer",
+                "label": "Créer la cagnotte",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "titre": "${form.titre}",
+                    "objectif": "${form.objectif}",
+                    "date_fin": "${form.date_fin}",
+                    "numero_retrait": "${form.numero_retrait}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
