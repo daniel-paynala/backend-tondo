@@ -13,20 +13,22 @@ journée). Envoyé par la commande `tonji:resume-quotidien` (cron 20h Libreville
 ### Corps (Body)
 ```
 Bonsoir {{1}} 👋
-Activité du jour sur tes cagnottes Tonji : {{2}}.
-Total reçu aujourd'hui : {{3}} FCFA. 🎉 Bonne soirée !
+Voici tes cagnottes qui ont reçu aujourd'hui :
+{{2}}
+Total reçu : {{3}} FCFA. 🎉 Bonne soirée !
 ```
 
 ### Variables (exemples à fournir à Meta pour la validation)
 | Variable | Sens | Exemple |
 |----------|------|---------|
 | `{{1}}` | Prénom du créateur | `Daniel` |
-| `{{2}}` | Détail par cagnotte (1 ligne, séparateur « · ») | `Mariage de Paul +5 000 (2) · Anniversaire +7 000 (1)` |
+| `{{2}}` | Détail **une ligne par cagnotte** (puces) | `• Maman : 5 000 FCFA (2)`<br>`• Papa : 7 000 FCFA (1)` |
 | `{{3}}` | Total reçu dans la journée (FCFA) | `12 000` |
 
-> Note : `{{2}}` est volontairement **sur une seule ligne** (séparateurs « · »)
-> pour éviter les rejets Meta liés aux variables multi-lignes. Le code plafonne
-> à 5 cagnottes détaillées puis ajoute « et N autre(s) ».
+> Note : `{{2}}` contient **une ligne par cagnotte** (retours à la ligne). Meta
+> accepte généralement les `\n` dans un paramètre de template ; si un envoi réel
+> est refusé pour ce motif, repasser à un séparateur « · » (une ligne).
+> Le code plafonne à **5 cagnottes** détaillées puis ajoute « et N autre(s) ».
 
 ## Une fois approuvé
 Dans le `.env` du serveur :

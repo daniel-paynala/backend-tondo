@@ -102,9 +102,12 @@ class ResumeQuotidienCommand extends Command
     }
 
     /**
-     * Construit la ligne de détail (une seule ligne, séparateurs « · ») listant
-     * les cagnottes ayant reçu, plafonnée à MAX_DETAIL (« et N autres » au-delà).
-     * Une seule ligne évite les rejets Meta liés aux variables multi-lignes.
+     * Construit le détail : UNE LIGNE PAR CAGNOTTE (puce « • titre : montant (nb) »),
+     * plafonné à MAX_DETAIL (« et N autre(s) » au-delà).
+     *
+     * NB : les lignes sont séparées par des retours à la ligne (\n) — Meta les
+     * accepte dans les paramètres de template. Si un envoi réel est refusé pour
+     * cause de nouvelle ligne, repasser à un séparateur « · » (implode(' · ')).
      *
      * @param  \Illuminate\Support\Collection $cagnottes  Lignes agrégées par cagnotte.
      * @return string
@@ -113,14 +116,14 @@ class ResumeQuotidienCommand extends Command
     {
         $parts = $cagnottes->take(self::MAX_DETAIL)->map(function ($c) {
             $montant = number_format((float) $c->total, 0, ',', ' ');
-            return trim((string) $c->titre) . " +{$montant} ({$c->nb})";
+            return '• ' . trim((string) $c->titre) . " : {$montant} FCFA ({$c->nb})";
         })->all();
 
         $reste = $cagnottes->count() - self::MAX_DETAIL;
         if ($reste > 0) {
-            $parts[] = "et {$reste} autre(s)";
+            $parts[] = "• et {$reste} autre(s)";
         }
 
-        return implode(' · ', $parts);
+        return implode("\n", $parts);
     }
 }
