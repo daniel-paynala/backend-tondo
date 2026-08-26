@@ -65,7 +65,7 @@ class VerifierPaiementsEnAttenteCommand extends Command
 
             Nous n'avons pas reçu de confirmation de votre paiement.
 
-            ⚠️ _Si vous avez bien validé sur votre Mobile Money et qu'un prélèvement a eu lieu, contactez-nous à support@tonji.ga._
+            ⚠️ _Si vous avez bien validé sur votre Mobile Money et qu'un prélèvement a eu lieu, contactez-nous à contact@tonji.ga._
 
             _Tapez_ *#️⃣* _pour revenir au menu ou *1* pour réessayer._
             TXT);
@@ -106,7 +106,7 @@ class VerifierPaiementsEnAttenteCommand extends Command
                 $twilio->envoyer($p->numero_wa, <<<TXT
                 ❌ *Paiement échoué ou refusé.*
 
-                ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tonji.ga._
+                ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à contact@tonji.ga._
 
                 ————————————————
                 🎉 *Que souhaitez-vous faire ?*

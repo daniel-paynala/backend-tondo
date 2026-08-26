@@ -538,7 +538,7 @@ class WebhookController extends Controller
         $sender->envoyer(
             $from,
             "✅ C'est noté ! Un conseiller Tonji va te recontacter au plus vite.\n"
-            . 'Tu peux aussi écrire à support@tonji.ga.',
+            . 'Tu peux aussi écrire à contact@tonji.ga.',
         );
     }
 

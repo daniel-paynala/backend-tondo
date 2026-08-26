@@ -677,7 +677,7 @@ class BotService
             return <<<TXT
             ❌ *Paiement échoué ou refusé.*
 
-            ⚠️ _Si vous constatez un problème, contactez-nous à support@tonji.ga._
+            ⚠️ _Si vous constatez un problème, contactez-nous à contact@tonji.ga._
 
             TXT . "\n" . $this->afficherMenu($numero);
         }
@@ -1634,7 +1634,7 @@ class BotService
             $cagnotte = $this->creerCagnotteSvc->creer($data, $user);
         } catch (\Throwable $e) {
             Log::error('handleCreerRecap: échec création', ['err' => $e->getMessage()]);
-            return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez support@tonji.ga.");
+            return $this->erreurEtMenu($numero, "❌ Erreur lors de la création. Réessayez ou contactez contact@tonji.ga.");
         }
 
         $type = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
@@ -2752,7 +2752,7 @@ class BotService
             return "❌ " . $e->getMessage() . "\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         } catch (\Throwable $e) {
             Log::error('handleGererReversementOtp: erreur inattendue', ['err' => $e->getMessage()]);
-            return "❌ Erreur technique. Contactez support@tonji.ga.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            return "❌ Erreur technique. Contactez contact@tonji.ga.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
@@ -2942,7 +2942,7 @@ class BotService
             return "❌ " . $e->getMessage() . "\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         } catch (\Throwable $e) {
             Log::error('handleGererFermerOtp: erreur reversement', ['err' => $e->getMessage()]);
-            return "❌ Erreur technique. Contactez support@tonji.ga.\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            return "❌ Erreur technique. Contactez contact@tonji.ga.\n\nLa cagnotte reste ouverte.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
         }
 
         // Reversement réussi → clôturer la cagnotte
@@ -3103,7 +3103,7 @@ class BotService
 
         Pour toute question, problème ou réclamation, notre équipe est disponible :
 
-        📧 *Email* : support@tonji.ga
+        📧 *Email* : contact@tonji.ga
         _(Réponse sous 24h, jours ouvrables)_
 
         ————————————————

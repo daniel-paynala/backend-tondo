@@ -185,7 +185,7 @@ class VerifierPaiementJob implements ShouldQueue
         return $twilio->envoyer($this->numeroWa, <<<TXT
         ❌ *Paiement échoué ou refusé.*
 
-        ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à support@tonji.ga._
+        ⚠️ _Si vous constatez un prélèvement sur votre compte sans confirmation de notre part, contactez-nous immédiatement à contact@tonji.ga._
 
         ————————————————
         🎉 *Que souhaitez-vous faire ?*

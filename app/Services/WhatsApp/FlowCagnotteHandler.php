@@ -82,7 +82,7 @@ class FlowCagnotteHandler
         } catch (\Throwable $e) {
             Log::error('[flow creer_cagnotte] échec création', ['from' => $from, 'error' => $e->getMessage()]);
             $this->session->reset($from);
-            return "❌ Erreur lors de la création. Réessaie en tapant *3*, ou contacte support@tonji.ga.";
+            return "❌ Erreur lors de la création. Réessaie en tapant *3*, ou contacte contact@tonji.ga.";
         }
 
         // Parcours terminé → on repart d'une session propre.
