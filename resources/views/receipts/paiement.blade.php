@@ -203,6 +203,7 @@ table.rows td.v {
           @else
             <span style="color:#fff;font-size:20px;font-weight:900;">Tonji</span>
           @endif
+          <div style="color:#fff;opacity:.85;font-size:6px;font-weight:600;margin-top:2px;white-space:nowrap;">Cotisez simplement.</div>
         </td>
         <td class="hdr-right">
           <div class="recu-label">Reçu de paiement</div>
