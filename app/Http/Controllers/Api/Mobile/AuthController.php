@@ -513,22 +513,15 @@ class AuthController extends Controller
         return '+' . $ind . $num;
     }
 
+    /**
+     * Sérialisation du compte pour l'API mobile.
+     *
+     * Délègue à {@see TondoUser::toApiArray()} (source unique, partagée avec
+     * l'AssociationController) : mêmes champs qu'avant + `type_compte` et
+     * `organisation_statut` pour le gate du router côté app.
+     */
     private function serializeUser(TondoUser $user): array
     {
-        return [
-            'id'             => $user->id,
-            'nom'            => $user->nom,
-            'prenom'         => $user->prenom,
-            'numero'         => $user->numero,
-            'date_naissance' => $user->date_naissance?->toDateString(),
-            'type_client'    => $user->type_client,
-            'kyc_valide'     => $user->kyc_valide,
-            'operateur'      => $user->operateur,
-            'pays'           => $user->pays,
-            'indicatif'      => $user->indicatif,
-            'sexe'           => $user->sexe,
-            'adresse'        => $user->adresse,
-            'email'          => $user->email,
-        ];
+        return $user->toApiArray();
     }
 }

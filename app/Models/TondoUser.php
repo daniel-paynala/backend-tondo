@@ -75,4 +75,44 @@ class TondoUser extends Authenticatable
     {
         return '';
     }
+
+    /**
+     * Sérialise le compte pour l'API mobile. **Source unique** de l'objet
+     * `user` renvoyé par `/auth/me` et `/auth/verify-otp` — donc exactement ce
+     * que lit le gate du router côté app.
+     *
+     * En plus du profil de base, expose :
+     *  – `type_compte`          : NULL (pas encore choisi) | 'particulier' | 'association'.
+     *  – `organisation_statut`  : statut du dossier si compte association, sinon NULL.
+     */
+    public function toApiArray(): array
+    {
+        // On ne requête l'organisation que pour un compte association
+        // (aucune requête inutile pour les particuliers, cas majoritaire).
+        $organisationStatut = null;
+        if ($this->type_compte === 'association') {
+            $organisationStatut = TondoOrganisation::query()
+                ->where('project_id', $this->project_id)
+                ->where('user_id', $this->id)
+                ->value('statut');
+        }
+
+        return [
+            'id'                  => $this->id,
+            'nom'                 => $this->nom,
+            'prenom'              => $this->prenom,
+            'numero'              => $this->numero,
+            'date_naissance'      => $this->date_naissance?->toDateString(),
+            'type_client'         => $this->type_client,
+            'kyc_valide'          => $this->kyc_valide,
+            'operateur'           => $this->operateur,
+            'pays'                => $this->pays,
+            'indicatif'           => $this->indicatif,
+            'sexe'                => $this->sexe,
+            'adresse'             => $this->adresse,
+            'email'               => $this->email,
+            'type_compte'         => $this->type_compte,
+            'organisation_statut' => $organisationStatut,
+        ];
+    }
 }

@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
+use App\Http\Controllers\Api\Mobile\AssociationController as MobileAssociationController;
 use App\Http\Controllers\Api\Admin\CagnottesController as AdminCagnottesController;
 use App\Http\Controllers\Api\Public\CagnottesController as PublicCagnottesController;
 use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
@@ -175,6 +176,16 @@ Route::prefix('mobile')->group(function () {
 
         // Lookup numéro (autocompletion ajout participant)
         Route::get('/users/lookup', [MobileProfilController::class, 'lookup']);
+
+        // Type de compte (aiguillage post-inscription : particulier / association)
+        Route::post('/compte/type-compte', [MobileAssociationController::class, 'definirTypeCompte']);
+
+        // Associations — dossier (nom, description, statut) + pièces requises
+        Route::get('/association',                       [MobileAssociationController::class, 'show']);
+        Route::post('/association',                      [MobileAssociationController::class, 'store']);
+        Route::post('/association/soumettre',            [MobileAssociationController::class, 'soumettre']);
+        Route::post('/association/documents',            [MobileAssociationController::class, 'uploadDocument']);
+        Route::get('/association/documents/{typePiece}', [MobileAssociationController::class, 'showDocument']);
 
         // Cagnottes (gérant)
         Route::get('/cagnottes/generate-reference',           [MobileCagnottesController::class, 'generateReference']);
