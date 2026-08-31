@@ -139,6 +139,9 @@ Route::prefix('admin')->group(function () {
         // Plafonds TOTAUX de collecte des cagnottes (particulier / association)
         Route::get('/plafonds-cagnotte',   [AdminPlafondsController::class, 'show']);
         Route::patch('/plafonds-cagnotte', [AdminPlafondsController::class, 'update']);  // super_admin
+        // Frais de retrait configurables (matrice cotisation × user)
+        Route::get('/frais-retrait',       [AdminPlafondsController::class, 'showFrais']);
+        Route::patch('/frais-retrait',     [AdminPlafondsController::class, 'updateFrais']);  // super_admin
 
         // Configuration tarifaire per-opérateur / per-pays (CRUD)
         Route::get('/config',                               [AdminConfigController::class, 'index']);

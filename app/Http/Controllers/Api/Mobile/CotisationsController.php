@@ -63,6 +63,21 @@ class CotisationsController extends Controller
     }
 
     /**
+     * Taux de frais de retrait applicable (décimal), lu dans la matrice config
+     * croisant le type de cotisation (cagnotte/tontine) et le type de compte du
+     * gérant (particulier/association). 0 par défaut = aucun frais de retrait.
+     */
+    private function fraisRetraitRate(mixed $cagnotte, array $config): float
+    {
+        $matrice        = $config['frais_retrait'] ?? [];
+        $typeCotisation = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $gerant         = \App\Models\TondoUser::find($cagnotte->user_id);
+        $typeUser       = ($gerant && $gerant->type_compte === 'association') ? 'association' : 'particulier';
+
+        return (float) ($matrice[$typeCotisation][$typeUser] ?? 0);
+    }
+
+    /**
      * POST /api/mobile/cotisations
      * Body : {
      *   cagnotte_reference: string,  // 4-5 chiffres
@@ -162,15 +177,17 @@ class CotisationsController extends Controller
         $operateurInfo = $this->detector->detect($user->project_id, $numeroPayeurE164);
         $isAirtel      = $operateurInfo && $operateurInfo['operateur'] === 'airtel';
 
-        // Frais : commission Paynala UNIQUEMENT. Les frais de retrait Airtel ont
-        // été retirés le 2026-08-31 (amende RÈGLE 3) — le cotisant ne les paie
-        // plus ; ils sont à la charge du bénéficiaire (~3 % à son retrait).
+        // Frais de retrait CONFIGURABLES (matrice cotisation × user ; 0 par défaut) —
+        // à la charge du cotisant quand > 0. Commission Paynala toujours appliquée.
+        $fraisRetraitRate = $this->fraisRetraitRate($cagnotte, $config);
+        $totalAEnvoyer    = (int) round($montantNet * (1 + $fraisRetraitRate));
+
         if ($isAirtel) {
             $commission  = (float) $config['commission_paynala'];  // $config déjà chargé (plafond)
-            $montantBrut = (int) ceil($montantNet * (1 + $commission));
+            $montantBrut = (int) ceil($totalAEnvoyer * (1 + $commission));
         } else {
             $commission  = $this->commissionPaynala($user->project_id);
-            $montantBrut = (int) round($montantNet * (1 + $commission));
+            $montantBrut = (int) round($totalAEnvoyer * (1 + $commission));
         }
         $frais = $montantBrut - $montantNet;
 

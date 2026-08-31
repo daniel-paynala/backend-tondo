@@ -62,4 +62,63 @@ class PlafondsController extends Controller
             'plafond_cagnotte_association' => $data['plafond_cagnotte_association'],
         ]);
     }
+
+    /** GET /api/admin/frais-retrait — matrice des frais de retrait (cotisation × user). */
+    public function showFrais(Request $request): JsonResponse
+    {
+        $config = app(TondoConfigService::class)->getOperatorConfig(Project::tondoId());
+
+        return response()->json([
+            'frais_retrait' => $config['frais_retrait'] ?? [
+                'cagnotte' => ['particulier' => 0, 'association' => 0],
+                'tontine'  => ['particulier' => 0, 'association' => 0],
+            ],
+        ]);
+    }
+
+    /** PATCH /api/admin/frais-retrait — réservé aux super_admin. Taux décimaux (0.03 = 3 %). */
+    public function updateFrais(Request $request): JsonResponse
+    {
+        abort_unless(
+            $request->user()->role === 'super_admin',
+            403,
+            'Action réservée aux super admins.',
+        );
+
+        $data = $request->validate([
+            'frais_retrait'                      => ['required', 'array'],
+            'frais_retrait.cagnotte.particulier' => ['required', 'numeric', 'min:0', 'max:0.5'],
+            'frais_retrait.cagnotte.association' => ['required', 'numeric', 'min:0', 'max:0.5'],
+            'frais_retrait.tontine.particulier'  => ['required', 'numeric', 'min:0', 'max:0.5'],
+            'frais_retrait.tontine.association'  => ['required', 'numeric', 'min:0', 'max:0.5'],
+        ]);
+
+        // Normalise en float et applique à la config projet.
+        $matrice = [
+            'cagnotte' => [
+                'particulier' => (float) $data['frais_retrait']['cagnotte']['particulier'],
+                'association' => (float) $data['frais_retrait']['cagnotte']['association'],
+            ],
+            'tontine' => [
+                'particulier' => (float) $data['frais_retrait']['tontine']['particulier'],
+                'association' => (float) $data['frais_retrait']['tontine']['association'],
+            ],
+        ];
+
+        $maj = TondoProjectConfig::where('project_id', Project::tondoId())->update([
+            'frais_retrait' => json_encode($matrice),
+            'updated_at'    => now(),
+        ]);
+
+        if ($maj === 0) {
+            return response()->json([
+                'message' => 'Aucune configuration projet à mettre à jour (config opérateur manquante).',
+            ], 422);
+        }
+
+        return response()->json([
+            'message'       => 'Frais de retrait mis à jour.',
+            'frais_retrait' => $matrice,
+        ]);
+    }
 }

@@ -51,6 +51,7 @@ class TondoProjectConfig extends Model
         'plafond_journalier' => 'integer',
         'plafond_cagnotte_particulier' => 'integer',
         'plafond_cagnotte_association' => 'integer',
+        'frais_retrait'                => 'array',
         'tranches'           => 'array',   // Tranches de frais opérateur (JSON array).
         'prefixes'           => 'array',   // Préfixes locaux valides (JSON array).
         'actif'              => 'boolean',
@@ -77,6 +78,10 @@ class TondoProjectConfig extends Model
             'plafond_journalier' => $this->plafond_journalier,
             'plafond_cagnotte_particulier' => (int) ($this->plafond_cagnotte_particulier ?? 2500000),
             'plafond_cagnotte_association' => (int) ($this->plafond_cagnotte_association ?? 10000000),
+            'frais_retrait'      => $this->frais_retrait ?? [
+                'cagnotte' => ['particulier' => 0, 'association' => 0],
+                'tontine'  => ['particulier' => 0, 'association' => 0],
+            ],
             'tranches'           => $this->tranches ?? [],    // Tableau vide si non défini.
             'logo'               => $this->logo,
         ];

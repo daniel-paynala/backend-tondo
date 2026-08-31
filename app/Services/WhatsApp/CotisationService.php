@@ -208,17 +208,17 @@ class CotisationService
         $operateurInfo = $this->detector->detect($cagnotte->project_id, $user->numero);
         $isAirtel      = $operateurInfo && $operateurInfo['operateur'] === 'airtel';
 
-        // Calcul des frais selon l'opérateur
+        // Frais de retrait CONFIGURABLES (matrice cotisation × user ; 0 par défaut).
+        $fraisRetraitRate = $this->fraisRetraitRate($cagnotte, $config);
+        $totalAEnvoyer    = (int) round($montant * (1 + $fraisRetraitRate));
+
+        // Calcul des frais selon l'opérateur (commission Paynala + frais de retrait éventuel)
         if ($isAirtel) {
-            // Frais de retrait Airtel RETIRÉS (2026-08-31, amende RÈGLE 3) : seule
-            // la commission Paynala ; les frais de retrait sont à la charge du
-            // bénéficiaire (~3 % à son retrait).
             $commission  = (float) $config['commission_paynala'];  // $config déjà chargé (plafond)
-            $montantBrut = (int) ceil($montant * (1 + $commission));
+            $montantBrut = (int) ceil($totalAEnvoyer * (1 + $commission));
         } else {
-            // Mock / opérateur non reconnu : seule la commission Paynala (2 % par défaut)
             $commission  = (float) ($config['commission_paynala'] ?? 0.02);
-            $montantBrut = (int) round($montant * (1 + $commission));
+            $montantBrut = (int) round($totalAEnvoyer * (1 + $commission));
         }
 
         // Frais = différence entre ce que paie le cotisant et ce que reçoit le bénéficiaire
@@ -259,6 +259,20 @@ class CotisationService
             return (int) ($org?->plafond_fcfa ?? ($config['plafond_cagnotte_association'] ?? 10000000));
         }
         return (int) ($config['plafond_cagnotte_particulier'] ?? 2500000);
+    }
+
+    /**
+     * Taux de frais de retrait applicable (décimal) : matrice config croisant
+     * cotisation (cagnotte/tontine) × user (particulier/association). 0 par défaut.
+     */
+    private function fraisRetraitRate(TondoCagnotte $cagnotte, array $config): float
+    {
+        $matrice        = $config['frais_retrait'] ?? [];
+        $typeCotisation = $cagnotte->type === 'tontine_periodique' ? 'tontine' : 'cagnotte';
+        $gerant         = TondoUser::find($cagnotte->user_id);
+        $typeUser       = ($gerant && $gerant->type_compte === 'association') ? 'association' : 'particulier';
+
+        return (float) ($matrice[$typeCotisation][$typeUser] ?? 0);
     }
 
     // ── Vérifier le statut d'une transaction ─────────────────────────────────
