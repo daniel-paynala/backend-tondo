@@ -348,7 +348,7 @@ class TraiterRetraitsTontines extends Command
                 if (! empty($tousIds)) {
                     $notif->notify(
                         userIds: $tousIds,
-                        titleFr: 'Rotation terminée 🎉',
+                        titleFr: 'Rotation terminée',
                         bodyFr:  "Tous les membres de « {$cagnotte->titre} » ont reçu leur mise. Merci à tous !",
                         data:    ['type' => 'rotation_terminee', 'cagnotte_id' => $cagnotte->id],
                     );

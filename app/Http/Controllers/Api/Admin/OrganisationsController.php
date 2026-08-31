@@ -75,7 +75,7 @@ class OrganisationsController extends Controller
     private function notifierRepresentant(TondoOrganisation $org, string $statut, ?string $motif): void
     {
         [$titre, $corps] = match ($statut) {
-            'approuve' => ['Association validée 🎉', "« {$org->nom} » est validée. Vous pouvez maintenant collecter sur Tonji."],
+            'approuve' => ['Association validée', "« {$org->nom} » est validée. Vous pouvez maintenant collecter sur Tonji."],
             'rejete'   => ['Dossier refusé', "Le dossier de « {$org->nom} » n'a pas été validé." . ($motif ? " Motif : {$motif}" : '')],
             'suspendu' => ['Association suspendue', "« {$org->nom} » a été suspendue." . ($motif ? " Motif : {$motif}" : '')],
             default    => ['Tonji', 'Mise à jour de votre dossier d\'association.'],

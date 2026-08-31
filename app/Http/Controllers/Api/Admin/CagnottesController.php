@@ -112,7 +112,7 @@ class CagnottesController extends Controller
     private function notifierCreateur(TondoCagnotte $c, string $statut, ?string $motif): void
     {
         [$titre, $corps] = match ($statut) {
-            'approuvee' => ['Cagnotte approuvée 🎉', "Votre cagnotte « {$c->titre} » est maintenant publique sur Tonji."],
+            'approuvee' => ['Cagnotte approuvée', "Votre cagnotte « {$c->titre} » est maintenant publique sur Tonji."],
             'rejetee'   => ['Cagnotte refusée', "« {$c->titre} » n'a pas été approuvée." . ($motif ? " Motif : {$motif}" : '')],
             'suspendue' => ['Cagnotte suspendue', "« {$c->titre} » a été suspendue." . ($motif ? " Motif : {$motif}" : '')],
             default     => ['Tonji', 'Mise à jour de votre cagnotte.'],
