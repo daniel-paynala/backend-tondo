@@ -116,6 +116,19 @@ class TestPushCommand extends Command
             $chiffres && str_starts_with($chiffres, '241') ? '0' . substr($chiffres, 3) : null,
         ]));
 
-        return TondoUser::whereIn('numero', $variantes)->first();
+        $user = TondoUser::whereIn('numero', $variantes)->first();
+        if ($user) {
+            return $user;
+        }
+
+        // Fallback robuste : match sur les chiffres significatifs (sans indicatif
+        // 241 ni 0 de tête), quel que soit le format stocké (0…, 241…, +241…).
+        $significatif = str_starts_with($chiffres, '241') ? substr($chiffres, 3) : $chiffres;
+        $significatif = ltrim($significatif, '0');
+        if (strlen($significatif) >= 6) {
+            return TondoUser::where('numero', 'like', '%' . $significatif . '%')->first();
+        }
+
+        return null;
     }
 }
