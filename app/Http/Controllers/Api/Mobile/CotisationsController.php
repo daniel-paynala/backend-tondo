@@ -66,9 +66,15 @@ class CotisationsController extends Controller
             'montant'            => ['required', 'integer', 'min:100', 'max:500000'],
             'indicatif_payeur'   => ['nullable', 'string', 'regex:/^\+?\d{1,4}$/'],
             'numero_payeur'      => ['nullable', 'string', 'regex:/^\d{6,12}$/'],
+            // Canal d'origine (app par défaut ; 'web' pour tondo-web qui tape le
+            // même endpoint). Le bot et l'USSD passent par d'autres entrées.
+            'canal'              => ['nullable', 'in:app,web'],
         ]);
 
         $user = $request->user();
+
+        // Canal traçable de la cotisation (défaut 'app' si le client ne l'envoie pas).
+        $canal = $data['canal'] ?? 'app';
 
         $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
             ->where('reference', $data['cagnotte_reference'])
@@ -155,6 +161,7 @@ class CotisationsController extends Controller
                 frais: $frais,
                 montantBrut: $montantTotal,
                 penalite: $penalite,
+                canal: $canal,
             );
         }
 
@@ -166,6 +173,7 @@ class CotisationsController extends Controller
             frais: $frais,
             montantBrut: $montantTotal,
             penalite: $penalite,
+            canal: $canal,
         );
     }
 
@@ -214,14 +222,21 @@ class CotisationsController extends Controller
 
             try {
                 DB::transaction(function () use ($payin, $statusData, $netAmount) {
-                    // 1) Marque le payin comme réussi.
-                    DB::table(project_table('payin'))
+                    // 1) CLAIM ATOMIQUE : seule la requête qui fait réellement passer
+                    //    le payin de 'initie' → 'succes' a le droit de créditer. Un
+                    //    2e appel concurrent (polling multiple) obtient 0 ligne
+                    //    affectée et sort SANS re-créditer → anti double-cotisation.
+                    $claimed = DB::table(project_table('payin'))
                         ->where('trans_id', $payin->trans_id)
+                        ->where('statut', 'initie')
                         ->update([
                             'statut'     => 'succes',
                             'response'   => json_encode($statusData),
                             'updated_at' => now(),
                         ]);
+                    if ($claimed === 0) {
+                        return; // déjà crédité par un autre déclencheur
+                    }
 
                     // 2) Met à jour le membre.
                     $participant = DB::table(project_table('participants'))
@@ -246,6 +261,8 @@ class CotisationsController extends Controller
                         'cagnotte_id'    => $payin->cagnotte_id,
                         'participant_id' => $participant?->id,
                         'user_id'        => $payin->user_id,
+                        'canal'          => $payin->canal ?? 'app',
+                        'trans_id'       => $payin->trans_id,
                         'montant'        => $netAmount,
                         'date'           => now(),
                         'created_at'     => now(),
@@ -309,6 +326,7 @@ class CotisationsController extends Controller
         int    $frais,
         int    $montantBrut,
         int    $penalite = 0,
+        string $canal = 'app',
     ): JsonResponse {
         // request_id alphanumérique uniquement (contrainte API Paynala — pas de tirets).
         $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
@@ -334,7 +352,7 @@ class CotisationsController extends Controller
         try {
             DB::transaction(function () use (
                 $user, $cagnotte, $numeroPayeurE164,
-                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite
+                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite, $canal
             ) {
                 // 1) Membre (placeholder en_attente).
                 $participant = DB::table(project_table('participants'))
@@ -383,6 +401,7 @@ class CotisationsController extends Controller
                     'trans_id'      => $transId,
                     'operateur_id'  => $paymentData['paymentId'] ?? null,
                     'numero_tel'    => $numeroPayeurE164,
+                    'canal'            => $canal,
                     'montant'          => $montantBrut,
                     'montant_penalite' => $penalite,
                     'statut'           => 'initie',
@@ -427,12 +446,13 @@ class CotisationsController extends Controller
         int    $frais,
         int    $montantBrut,
         int    $penalite = 0,
+        string $canal = 'app',
     ): JsonResponse {
         $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
 
         try {
             DB::transaction(function () use (
-                $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut, $penalite
+                $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut, $penalite, $canal
             ) {
                 $participant = DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
@@ -480,6 +500,8 @@ class CotisationsController extends Controller
                     'cagnotte_id'    => $cagnotte->id,
                     'participant_id' => $participantId,
                     'user_id'        => $user->id,
+                    'canal'          => $canal,
+                    'trans_id'       => $transId,
                     'montant'        => $montantNet,
                     'date'           => now(),
                     'created_at'     => now(),
@@ -493,6 +515,7 @@ class CotisationsController extends Controller
                     'trans_id'      => $transId,
                     'operateur_id'  => 'MOCK-' . substr($transId, -8),
                     'numero_tel'    => $numeroPayeur,
+                    'canal'            => $canal,
                     'montant'          => $montantBrut,
                     'montant_penalite' => $penalite,
                     'statut'           => 'succes',

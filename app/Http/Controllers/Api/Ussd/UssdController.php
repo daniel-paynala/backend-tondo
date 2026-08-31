@@ -198,7 +198,7 @@ class UssdController extends Controller
 
         // ── Lancement du paiement ────────────────────────────────────────────
         try {
-            $resultat = $this->cotisationSvc->initier($user, $cagnotte, $montant);
+            $resultat = $this->cotisationSvc->initier($user, $cagnotte, $montant, canal: 'ussd');
         } catch (\Throwable $e) {
             return response()->json([
                 'erreur' => 'Erreur lors du lancement du paiement : ' . $e->getMessage(),

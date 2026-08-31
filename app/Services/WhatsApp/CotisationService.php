@@ -174,6 +174,7 @@ class CotisationService
         TondoUser    $user,
         TondoCagnotte $cagnotte,
         int           $montant,
+        string        $canal = 'bot',
     ): array {
         // Calcul de la pénalité (tontine uniquement, si paiement en retard)
         $penalite = 0;
@@ -223,6 +224,7 @@ class CotisationService
                 montantNet: $montant, frais: $frais,
                 montantBrut: $montantTotal, penalite: $penalite,
                 operateurIndicatif: $operateurInfo['indicatif'],
+                canal: $canal,
             );
         }
 
@@ -230,6 +232,7 @@ class CotisationService
             user: $user, cagnotte: $cagnotte,
             montantNet: $montant, frais: $frais,
             montantBrut: $montantTotal, penalite: $penalite,
+            canal: $canal,
         );
     }
 
@@ -329,6 +332,7 @@ class CotisationService
         int           $montantBrut,
         int           $penalite,
         string        $operateurIndicatif,
+        string        $canal = 'bot',
     ): array {
         // Identifiant de transaction interne unique (traçabilité)
         $transId       = 'TONDOPAYIN' . strtoupper(Str::random(10));
@@ -354,7 +358,7 @@ class CotisationService
         try {
             DB::transaction(function () use (
                 $user, $cagnotte, $transId,
-                $montantNet, $montantBrut, $frais, $penalite, $paymentData, $phoneAirtel
+                $montantNet, $montantBrut, $frais, $penalite, $paymentData, $phoneAirtel, $canal
             ) {
                 // Vérifier si l'utilisateur est déjà membre (paiement partiel antérieur)
                 $participant = DB::table(project_table('participants'))
@@ -397,6 +401,7 @@ class CotisationService
                     'trans_id'         => $transId,
                     'operateur_id'     => $paymentData['paymentId'] ?? null,  // ID Airtel retourné
                     'numero_tel'       => $user->numero,
+                    'canal'            => $canal,
                     'montant'          => $montantBrut,   // montant débité au cotisant
 
                     'statut'           => 'initie',
@@ -450,12 +455,13 @@ class CotisationService
         int           $frais,
         int           $montantBrut,
         int           $penalite,
+        string        $canal = 'bot',
     ): array {
         $transId = 'TONDOPAYIN' . strtoupper(Str::random(10));
 
         try {
             DB::transaction(function () use (
-                $user, $cagnotte, $transId, $montantNet, $montantBrut, $penalite
+                $user, $cagnotte, $transId, $montantNet, $montantBrut, $penalite, $canal
             ) {
                 $participant = DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
@@ -500,6 +506,8 @@ class CotisationService
                     'cagnotte_id'    => $cagnotte->id,
                     'participant_id' => $participantId,
                     'user_id'        => $user->id,
+                    'canal'          => $canal,
+                    'trans_id'       => $transId,
                     'montant'        => $montantNet,   // montant net (ce que reçoit le bénéficiaire)
                     'date'           => now(),
                     'created_at'     => now(),
@@ -514,6 +522,7 @@ class CotisationService
                     'trans_id'      => $transId,
                     'operateur_id'  => 'MOCK-' . substr($transId, -8),   // ID fictif traçable
                     'numero_tel'    => $user->numero,
+                    'canal'            => $canal,
                     'montant'          => $montantBrut,
 
                     'statut'           => 'succes',
@@ -565,12 +574,21 @@ class CotisationService
         $netAmount   = $requestMeta['montant_net'] ?? (int) round($payin->montant * 0.98);
 
         DB::transaction(function () use ($payin, $statusData, $netAmount) {
-            // 1. Marquer le payin comme confirmé
-            DB::table(project_table('payin'))->where('trans_id', $payin->trans_id)->update([
-                'statut'     => 'succes',
-                'response'   => json_encode($statusData),
-                'updated_at' => now(),
-            ]);
+            // 1. CLAIM ATOMIQUE : seul l'appel qui fait réellement passer le payin
+            //    'initie' → 'succes' a le droit de créditer. Le bot a 3 déclencheurs
+            //    concurrents (Job, cron, interaction) ; les perdants obtiennent
+            //    0 ligne affectée et sortent SANS re-créditer → anti double-cotisation.
+            $claimed = DB::table(project_table('payin'))
+                ->where('trans_id', $payin->trans_id)
+                ->where('statut', 'initie')
+                ->update([
+                    'statut'     => 'succes',
+                    'response'   => json_encode($statusData),
+                    'updated_at' => now(),
+                ]);
+            if ($claimed === 0) {
+                return; // déjà crédité par un autre déclencheur
+            }
 
             // 2. Mettre à jour le membre correspondant
             $participant = DB::table(project_table('participants'))
@@ -592,6 +610,8 @@ class CotisationService
                     'cagnotte_id'    => $payin->cagnotte_id,
                     'participant_id' => $participant->id,
                     'user_id'        => $payin->user_id,
+                    'canal'          => $payin->canal ?? 'bot',
+                    'trans_id'       => $payin->trans_id,
                     'montant'        => $netAmount,
                     'date'           => now(),
                     'created_at'     => now(),
