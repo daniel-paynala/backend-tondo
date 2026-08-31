@@ -403,6 +403,7 @@ class CotisationsController extends Controller
                     'numero_tel'    => $numeroPayeurE164,
                     'canal'            => $canal,
                     'montant'          => $montantBrut,
+                    'montant_net'      => $montantNet,
                     'montant_penalite' => $penalite,
                     'statut'           => 'initie',
                     'request'          => json_encode([
@@ -517,6 +518,7 @@ class CotisationsController extends Controller
                     'numero_tel'    => $numeroPayeur,
                     'canal'            => $canal,
                     'montant'          => $montantBrut,
+                    'montant_net'      => $montantNet,
                     'montant_penalite' => $penalite,
                     'statut'           => 'succes',
                     'request'          => json_encode(['note' => 'mock — agrégateur non intégré', 'penalite' => $penalite]),

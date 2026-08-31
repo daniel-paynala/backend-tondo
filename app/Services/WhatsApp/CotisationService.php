@@ -403,6 +403,7 @@ class CotisationService
                     'numero_tel'       => $user->numero,
                     'canal'            => $canal,
                     'montant'          => $montantBrut,   // montant débité au cotisant
+                    'montant_net'      => $montantNet,    // net crédité (pour la réconciliation)
 
                     'statut'           => 'initie',
                     'request'          => json_encode([
@@ -524,6 +525,7 @@ class CotisationService
                     'numero_tel'    => $user->numero,
                     'canal'            => $canal,
                     'montant'          => $montantBrut,
+                    'montant_net'      => $montantNet,
 
                     'statut'           => 'succes',
                     'request'          => json_encode(['note' => 'mock whatsapp', 'canal' => 'whatsapp']),
