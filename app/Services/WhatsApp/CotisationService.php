@@ -4,7 +4,6 @@ namespace App\Services\WhatsApp;
 
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
-use App\Services\AirtelFeesCalculator;
 use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
 use App\Services\TondoConfigService;
@@ -156,9 +155,9 @@ class CotisationService
      * Initie le payin (Airtel push ou mock selon l'opérateur détecté).
      *
      * Calcul des frais :
-     *   - Airtel : utilise AirtelFeesCalculator (plan) + commission Paynala sur le total
-     *   - Mock   : commission Paynala seule (2 % par défaut)
-     * Les frais sont toujours à la charge du cotisant (montant_brut > montant_net).
+     *   - Commission Paynala UNIQUEMENT. Les frais de retrait Airtel ont été
+     *     retirés le 2026-08-31 (amende RÈGLE 3) — à la charge du bénéficiaire.
+     * Les frais sont à la charge du cotisant (montant_brut > montant_net).
      *
      * Pour les tontines : une pénalité peut s'ajouter au montant brut si des cycles
      * ont déjà été complétés et que la tontine est configurée avec pénalité de retard.
@@ -199,13 +198,12 @@ class CotisationService
 
         // Calcul des frais selon l'opérateur
         if ($isAirtel) {
-            // Airtel : frais de retrait calculés par AirtelFeesCalculator + commission Paynala
+            // Frais de retrait Airtel RETIRÉS (2026-08-31, amende RÈGLE 3) : seule
+            // la commission Paynala ; les frais de retrait sont à la charge du
+            // bénéficiaire (~3 % à son retrait).
             $airtelConfig = $this->config->getOperatorConfig($cagnotte->project_id);
-            $calc         = new AirtelFeesCalculator($airtelConfig);
             $commission   = (float) $airtelConfig['commission_paynala'];
-            $plan         = $calc->plan($montant);
-            // total_a_envoyer inclut déjà les frais Airtel ; on y ajoute la commission Paynala
-            $montantBrut  = (int) ceil($plan['total_a_envoyer'] * (1 + $commission));
+            $montantBrut  = (int) ceil($montant * (1 + $commission));
         } else {
             // Mock / opérateur non reconnu : seule la commission Paynala (2 % par défaut)
             $configData  = $this->config->getOperatorConfig($cagnotte->project_id);

@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
-use App\Services\AirtelFeesCalculator;
 use App\Services\OneSignalService;
 use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
@@ -135,13 +134,13 @@ class CotisationsController extends Controller
         $operateurInfo = $this->detector->detect($user->project_id, $numeroPayeurE164);
         $isAirtel      = $operateurInfo && $operateurInfo['operateur'] === 'airtel';
 
-        // Modèle A : frais calculés sur montantNet uniquement (pas sur la pénalité).
+        // Frais : commission Paynala UNIQUEMENT. Les frais de retrait Airtel ont
+        // été retirés le 2026-08-31 (amende RÈGLE 3) — le cotisant ne les paie
+        // plus ; ils sont à la charge du bénéficiaire (~3 % à son retrait).
         if ($isAirtel) {
             $airtelConfig = app(TondoConfigService::class)->getOperatorConfig($user->project_id);
-            $calc         = new AirtelFeesCalculator($airtelConfig);
             $commission   = (float) $airtelConfig['commission_paynala'];
-            $plan         = $calc->plan($montantNet);
-            $montantBrut  = (int) ceil($plan['total_a_envoyer'] * (1 + $commission));
+            $montantBrut  = (int) ceil($montantNet * (1 + $commission));
         } else {
             $commission  = $this->commissionPaynala($user->project_id);
             $montantBrut = (int) round($montantNet * (1 + $commission));
