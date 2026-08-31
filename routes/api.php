@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Admin\SignalementsController;
 use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
 use App\Http\Controllers\Api\Admin\UsersController;
+use App\Http\Controllers\Api\Admin\OrganisationsController as AdminOrganisationsController;
 use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
 use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
@@ -114,6 +115,12 @@ Route::prefix('admin')->group(function () {
         Route::post('/cagnottes/{reference}/approuver',  [AdminCagnottesController::class, 'approuver']);
         Route::post('/cagnottes/{reference}/rejeter',    [AdminCagnottesController::class, 'rejeter']);
         Route::post('/cagnottes/{reference}/suspendre',  [AdminCagnottesController::class, 'suspendre']);
+
+        // Modération des ASSOCIATIONS (validation des dossiers)
+        Route::post('/organisations/{id}/approuver',            [AdminOrganisationsController::class, 'approuver']);
+        Route::post('/organisations/{id}/rejeter',              [AdminOrganisationsController::class, 'rejeter']);
+        Route::post('/organisations/{id}/suspendre',            [AdminOrganisationsController::class, 'suspendre']);
+        Route::get('/organisations/{id}/documents/{typePiece}', [AdminOrganisationsController::class, 'showDocument']);
 
         // Transactions
         Route::get('/transactions', [TransactionsController::class, 'index']);
