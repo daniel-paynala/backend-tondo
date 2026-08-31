@@ -145,6 +145,9 @@ Route::prefix('admin')->group(function () {
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);
         Route::get('/cagnottes/{reference}/reconcile',       [ReconciliationController::class, 'show']);
+        // Diagnostic + correction automatique d'un écart de réconciliation
+        Route::post('/cagnottes/{reference}/reconcile/diagnostiquer', [ReconciliationController::class, 'diagnostiquer']);
+        Route::post('/cagnottes/{reference}/reconcile/corriger',      [ReconciliationController::class, 'corriger']);
     });
 });
 

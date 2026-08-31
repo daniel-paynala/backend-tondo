@@ -349,6 +349,7 @@ class CagnottesController extends Controller
         $historiqueQuery = DB::table(project_table('paiements'))
             ->join(project_table('participants'), project_table('paiements').'.participant_id', '=', project_table('participants').'.id')
             ->where(project_table('paiements').'.cagnotte_id', $cagnotte->id)
+            ->where(project_table('paiements').'.actif', true) // exclut les doublons désactivés
             ->orderBy(project_table('paiements').'.date', 'desc')
             ->limit(50)
             ->select(
