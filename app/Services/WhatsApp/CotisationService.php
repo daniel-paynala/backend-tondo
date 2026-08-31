@@ -175,6 +175,18 @@ class CotisationService
         int           $montant,
         string        $canal = 'bot',
     ): array {
+        // ── Plafond total de collecte selon le type de cagnotte ──────────────
+        // Chargé une fois ici, réutilisé pour la commission plus bas.
+        $config  = $this->config->getOperatorConfig($cagnotte->project_id);
+        $plafond = $this->plafondCagnotte($cagnotte, $config);
+        if ((int) $cagnotte->montant_collecte + $montant > $plafond) {
+            return [
+                'statut'  => 'erreur',
+                'message' => 'Cette cagnotte a atteint son plafond de '
+                    . number_format($plafond, 0, ',', ' ') . ' FCFA.',
+            ];
+        }
+
         // Calcul de la pénalité (tontine uniquement, si paiement en retard)
         $penalite = 0;
         if ($cagnotte->type === 'tontine_periodique') {
@@ -201,13 +213,11 @@ class CotisationService
             // Frais de retrait Airtel RETIRÉS (2026-08-31, amende RÈGLE 3) : seule
             // la commission Paynala ; les frais de retrait sont à la charge du
             // bénéficiaire (~3 % à son retrait).
-            $airtelConfig = $this->config->getOperatorConfig($cagnotte->project_id);
-            $commission   = (float) $airtelConfig['commission_paynala'];
-            $montantBrut  = (int) ceil($montant * (1 + $commission));
+            $commission  = (float) $config['commission_paynala'];  // $config déjà chargé (plafond)
+            $montantBrut = (int) ceil($montant * (1 + $commission));
         } else {
             // Mock / opérateur non reconnu : seule la commission Paynala (2 % par défaut)
-            $configData  = $this->config->getOperatorConfig($cagnotte->project_id);
-            $commission  = (float) ($configData['commission_paynala'] ?? 0.02);
+            $commission  = (float) ($config['commission_paynala'] ?? 0.02);
             $montantBrut = (int) round($montant * (1 + $commission));
         }
 
@@ -232,6 +242,23 @@ class CotisationService
             montantBrut: $montantTotal, penalite: $penalite,
             canal: $canal,
         );
+    }
+
+    /**
+     * Plafond TOTAL de collecte d'une cagnotte selon le type de compte du gérant.
+     * Association → plafond de l'organisation (défaut = plafond association config) ;
+     * particulier (ou type inconnu) → plafond particulier config.
+     */
+    private function plafondCagnotte(TondoCagnotte $cagnotte, array $config): int
+    {
+        $gerant = TondoUser::find($cagnotte->user_id);
+        if ($gerant && $gerant->type_compte === 'association') {
+            $org = \App\Models\TondoOrganisation::query()
+                ->where('user_id', $gerant->id)
+                ->first();
+            return (int) ($org?->plafond_fcfa ?? ($config['plafond_cagnotte_association'] ?? 10000000));
+        }
+        return (int) ($config['plafond_cagnotte_particulier'] ?? 2500000);
     }
 
     // ── Vérifier le statut d'une transaction ─────────────────────────────────

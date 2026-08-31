@@ -46,6 +46,8 @@ class TondoConfigService
             'commission_paynala' => (float) $c['commission_paynala'],
             'plafond_par_envoi'  => (int) $c['plafond_par_envoi'],
             'plafond_journalier' => (int) $c['plafond_journalier'],
+            'plafond_cagnotte_particulier' => (int) ($c['plafond_cagnotte_particulier'] ?? 2500000),
+            'plafond_cagnotte_association' => (int) ($c['plafond_cagnotte_association'] ?? 10000000),
             'tranches'           => $c['tranches'] ?? [],
         ];
     }

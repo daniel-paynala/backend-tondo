@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
 use App\Http\Controllers\Api\Admin\UsersController;
 use App\Http\Controllers\Api\Admin\OrganisationsController as AdminOrganisationsController;
+use App\Http\Controllers\Api\Admin\PlafondsController as AdminPlafondsController;
 use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
 use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
@@ -134,6 +135,10 @@ Route::prefix('admin')->group(function () {
 
         // Logs (audit)
         Route::get('/logs', [LogsController::class, 'index']);
+
+        // Plafonds TOTAUX de collecte des cagnottes (particulier / association)
+        Route::get('/plafonds-cagnotte',   [AdminPlafondsController::class, 'show']);
+        Route::patch('/plafonds-cagnotte', [AdminPlafondsController::class, 'update']);  // super_admin
 
         // Configuration tarifaire per-opérateur / per-pays (CRUD)
         Route::get('/config',                               [AdminConfigController::class, 'index']);

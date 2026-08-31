@@ -46,6 +46,23 @@ class CotisationsController extends Controller
     }
 
     /**
+     * Plafond TOTAL de collecte d'une cagnotte selon le type de compte du gérant.
+     * Association → plafond de l'organisation (défaut = plafond association config).
+     * Particulier (ou type inconnu) → plafond particulier config.
+     */
+    private function plafondCagnotte(mixed $cagnotte, array $config): int
+    {
+        $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
+        if ($gerant && $gerant->type_compte === 'association') {
+            $org = \App\Models\TondoOrganisation::query()
+                ->where('user_id', $gerant->id)
+                ->first();
+            return (int) ($org?->plafond_fcfa ?? ($config['plafond_cagnotte_association'] ?? 10000000));
+        }
+        return (int) ($config['plafond_cagnotte_particulier'] ?? 2500000);
+    }
+
+    /**
      * POST /api/mobile/cotisations
      * Body : {
      *   cagnotte_reference: string,  // 4-5 chiffres
@@ -89,6 +106,17 @@ class CotisationsController extends Controller
         if (! in_array($cagnotte->statut, $statutsValides)) {
             throw ValidationException::withMessages([
                 'cagnotte_reference' => 'Cagnotte clôturée — cotisation impossible.',
+            ]);
+        }
+
+        // ── Plafond total de collecte (selon le type de cagnotte) ────────────
+        // Chargé une fois ici, réutilisé pour la commission plus bas.
+        $config  = app(TondoConfigService::class)->getOperatorConfig($user->project_id);
+        $plafond = $this->plafondCagnotte($cagnotte, $config);
+        if ((int) $cagnotte->montant_collecte + (int) $data['montant'] > $plafond) {
+            throw ValidationException::withMessages([
+                'montant' => 'Cette cagnotte a atteint son plafond de '
+                    . number_format($plafond, 0, ',', ' ') . ' FCFA.',
             ]);
         }
 
@@ -138,9 +166,8 @@ class CotisationsController extends Controller
         // été retirés le 2026-08-31 (amende RÈGLE 3) — le cotisant ne les paie
         // plus ; ils sont à la charge du bénéficiaire (~3 % à son retrait).
         if ($isAirtel) {
-            $airtelConfig = app(TondoConfigService::class)->getOperatorConfig($user->project_id);
-            $commission   = (float) $airtelConfig['commission_paynala'];
-            $montantBrut  = (int) ceil($montantNet * (1 + $commission));
+            $commission  = (float) $config['commission_paynala'];  // $config déjà chargé (plafond)
+            $montantBrut = (int) ceil($montantNet * (1 + $commission));
         } else {
             $commission  = $this->commissionPaynala($user->project_id);
             $montantBrut = (int) round($montantNet * (1 + $commission));
