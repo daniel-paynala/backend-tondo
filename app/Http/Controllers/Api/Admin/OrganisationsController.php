@@ -4,12 +4,9 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
-use App\Models\TondoOrganisationDocument;
 use App\Services\OneSignalService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Modération des **associations** (dashboard admin).
@@ -25,15 +22,6 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class OrganisationsController extends Controller
 {
-    /** Les 5 types de pièces (aligné avec le CHECK SQL). */
-    private const TYPES_PIECES = [
-        'recepisse',
-        'statuts',
-        'pv_designation',
-        'piece_identite',
-        'autorisation_collecte',
-    ];
-
     /** POST /api/admin/organisations/{id}/approuver */
     public function approuver(Request $request, string $id): JsonResponse
     {
@@ -78,32 +66,6 @@ class OrganisationsController extends Controller
             'message' => 'Statut du dossier mis à jour.',
             'statut'  => $statut,
         ]);
-    }
-
-    /**
-     * GET /api/admin/organisations/{id}/documents/{typePiece}
-     *
-     * Stream une pièce du dossier pour visualisation par l'admin. Les fichiers
-     * vivent sur le disque privé Laravel — ce endpoint (protégé par l'auth
-     * admin) est le seul moyen d'y accéder ; le dashboard le relaie via un proxy.
-     */
-    public function showDocument(string $id, string $typePiece): StreamedResponse|JsonResponse
-    {
-        if (! in_array($typePiece, self::TYPES_PIECES, true)) {
-            return response()->json(['message' => 'Type de pièce inconnu.'], 404);
-        }
-
-        $doc = TondoOrganisationDocument::query()
-            ->where('organisation_id', $id)
-            ->where('type_piece', $typePiece)
-            ->first();
-
-        if (! $doc || ! Storage::disk('local')->exists($doc->chemin)) {
-            return response()->json(['message' => 'Pièce introuvable.'], 404);
-        }
-
-        // Affichage inline (PDF/image visualisable directement dans le navigateur).
-        return Storage::disk('local')->response($doc->chemin, $doc->nom_fichier);
     }
 
     /**

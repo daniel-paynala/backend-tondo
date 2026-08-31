@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
 use App\Models\TondoOrganisationDocument;
+use App\Services\SupabaseStorageService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Socle « Associations » côté mobile.
@@ -144,22 +144,28 @@ class AssociationController extends Controller
         $fichier   = $request->file('fichier');
         $extension = strtolower($fichier->getClientOriginalExtension() ?: $fichier->extension());
 
-        // 1 fichier par type et par organisation (chemin déterministe).
-        $cheminNouveau = Storage::disk('local')->putFileAs(
-            "associations/{$org->id}",
-            $fichier,
-            "{$data['type_piece']}.{$extension}"
-        );
+        // Chemin déterministe dans le bucket privé (1 fichier par type et par orga).
+        $cheminNouveau = "associations/{$org->id}/{$data['type_piece']}.{$extension}";
 
-        // Pièce existante de ce type ? On remplace le fichier + la ligne.
+        // Pièce existante de ce type ? On remplace l'objet + la ligne.
         $doc = TondoOrganisationDocument::query()
             ->where('organisation_id', $org->id)
             ->where('type_piece', $data['type_piece'])
             ->first();
 
-        // Supprime l'ancien fichier si son chemin diffère (extension changée).
+        $storage = app(SupabaseStorageService::class);
+
+        // Téléverse (upsert) sur Supabase Storage — bucket privé, aucun fichier
+        // sur le disque du serveur applicatif.
+        $storage->upload(
+            $cheminNouveau,
+            (string) file_get_contents($fichier->getRealPath()),
+            $fichier->getClientMimeType()
+        );
+
+        // Supprime l'ancien objet si le chemin diffère (extension changée).
         if ($doc && $doc->chemin && $doc->chemin !== $cheminNouveau) {
-            Storage::disk('local')->delete($doc->chemin);
+            $storage->delete($doc->chemin);
         }
 
         if (! $doc) {
@@ -187,7 +193,7 @@ class AssociationController extends Controller
      * Stream le fichier d'une pièce — uniquement pour l'organisation du compte
      * courant (pièces sensibles).
      */
-    public function showDocument(Request $request, string $typePiece): StreamedResponse|JsonResponse
+    public function showDocument(Request $request, string $typePiece): RedirectResponse|JsonResponse
     {
         $org = $this->organisationDuUser($request->user());
         if (! $org) {
@@ -199,11 +205,13 @@ class AssociationController extends Controller
             ->where('type_piece', $typePiece)
             ->first();
 
-        if (! $doc || ! Storage::disk('local')->exists($doc->chemin)) {
+        if (! $doc) {
             return response()->json(['message' => 'Pièce introuvable.'], 404);
         }
 
-        return Storage::disk('local')->response($doc->chemin, $doc->nom_fichier);
+        // Redirige vers une URL signée temporaire du bucket privé Supabase.
+        $url = app(SupabaseStorageService::class)->signedUrl($doc->chemin);
+        return redirect()->away($url);
     }
 
     /**

@@ -197,4 +197,12 @@ return [
     // URL du dashboard admin (pour les liens dans les e-mails d'invitation).
     'admin_dashboard_url' => env('ADMIN_DASHBOARD_URL', 'https://api.tonji.ga'),
 
+    // Supabase Storage — stockage des pièces des associations (bucket PRIVÉ).
+    // Réutilise l'URL + la clé service_role déjà présentes dans le .env.
+    'supabase' => [
+        'url'          => env('SUPABASE_URL'),
+        'service_role' => env('SUPABASE_SERVICE_ROLE_KEY'),
+        'bucket'       => env('SUPABASE_STORAGE_BUCKET', 'tonji-documents'),
+    ],
+
 ];

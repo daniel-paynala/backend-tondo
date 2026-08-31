@@ -120,7 +120,6 @@ Route::prefix('admin')->group(function () {
         Route::post('/organisations/{id}/approuver',            [AdminOrganisationsController::class, 'approuver']);
         Route::post('/organisations/{id}/rejeter',              [AdminOrganisationsController::class, 'rejeter']);
         Route::post('/organisations/{id}/suspendre',            [AdminOrganisationsController::class, 'suspendre']);
-        Route::get('/organisations/{id}/documents/{typePiece}', [AdminOrganisationsController::class, 'showDocument']);
 
         // Transactions
         Route::get('/transactions', [TransactionsController::class, 'index']);
