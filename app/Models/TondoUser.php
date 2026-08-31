@@ -90,11 +90,14 @@ class TondoUser extends Authenticatable
         // On ne requête l'organisation que pour un compte association
         // (aucune requête inutile pour les particuliers, cas majoritaire).
         $organisationStatut = null;
+        $organisationMotif = null;
         if ($this->type_compte === 'association') {
-            $organisationStatut = TondoOrganisation::query()
+            $org = TondoOrganisation::query()
                 ->where('project_id', $this->project_id)
                 ->where('user_id', $this->id)
-                ->value('statut');
+                ->first(['statut', 'motif_rejet']);
+            $organisationStatut = $org?->statut;
+            $organisationMotif = $org?->motif_rejet; // raison affichée si rejeté/suspendu
         }
 
         return [
@@ -113,6 +116,7 @@ class TondoUser extends Authenticatable
             'email'               => $this->email,
             'type_compte'         => $this->type_compte,
             'organisation_statut' => $organisationStatut,
+            'organisation_motif'  => $organisationMotif,
         ];
     }
 }
