@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -82,7 +82,7 @@ class OrganisationsController extends Controller
         };
 
         try {
-            app(OneSignalService::class)->notifyOne((string) $org->user_id, $titre, $corps, [
+            app(PushNotifier::class)->notifyOne((string) $org->user_id, $titre, $corps, [
                 'type'            => 'moderation_association',
                 'organisation_id' => $org->id,
                 'statut'          => $statut,

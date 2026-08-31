@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsCo
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\Mobile\AssociationController as MobileAssociationController;
+use App\Http\Controllers\Api\Mobile\DeviceTokensController as MobileDeviceTokensController;
 use App\Http\Controllers\Api\Admin\CagnottesController as AdminCagnottesController;
 use App\Http\Controllers\Api\Public\CagnottesController as PublicCagnottesController;
 use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
@@ -196,6 +197,10 @@ Route::prefix('mobile')->group(function () {
 
         // Type de compte (aiguillage post-inscription : particulier / association)
         Route::post('/compte/type-compte', [MobileAssociationController::class, 'definirTypeCompte']);
+
+        // Jeton push (FCM) de l'appareil courant — (dés)enregistrement à la (dé)connexion
+        Route::post('/devices',   [MobileDeviceTokensController::class, 'store']);
+        Route::delete('/devices', [MobileDeviceTokensController::class, 'destroy']);
 
         // Associations — dossier (nom, description, statut) + pièces requises
         Route::get('/association',                       [MobileAssociationController::class, 'show']);

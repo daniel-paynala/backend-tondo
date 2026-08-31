@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Mail\DisbursementFailedMail;
 use App\Models\TondoCagnotte;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use App\Services\PaynalaPaymentService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -46,12 +46,12 @@ class TraiterReversementsAutoCagnottes extends Command
      * selon le mode déterminé par `determinerMode()`.
      *
      * @param  PaynalaPaymentService $paynala Service de décaissement Mobile Money.
-     * @param  OneSignalService      $notif   Service de notifications push.
+     * @param  PushNotifier      $notif   Service de notifications push.
      * @return int                            Code de retour (self::SUCCESS).
      */
     public function handle(
         PaynalaPaymentService $paynala,
-        OneSignalService      $notif,
+        PushNotifier      $notif,
     ): int {
         $isDryRun = (bool) $this->option('dry-run');
         // Heure locale Gabon pour éviter un décalage de date lié à UTC.
@@ -177,14 +177,14 @@ class TraiterReversementsAutoCagnottes extends Command
      * @param  TondoCagnotte         $cagnotte Cagnotte à reverser.
      * @param  string                $mode     Mode déterminé par determinerMode().
      * @param  PaynalaPaymentService $paynala  Service de décaissement.
-     * @param  OneSignalService      $notif    Service de notifications push.
+     * @param  PushNotifier      $notif    Service de notifications push.
      * @return bool                            True si le reversement a réussi, false sinon.
      */
     private function traiter(
         TondoCagnotte         $cagnotte,
         string                $mode,
         PaynalaPaymentService $paynala,
-        OneSignalService      $notif,
+        PushNotifier      $notif,
     ): bool {
         // On reverse l'intégralité du solde collecté.
         $montant    = (int) $cagnotte->montant_collecte;

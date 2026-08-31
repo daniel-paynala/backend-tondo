@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\TondoCagnotte;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use App\Services\TontineService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -37,10 +37,10 @@ class TontineRappelsCommand extends Command
      * Point d'entrée de la commande.
      *
      * @param  TontineService  $tontineService Calcule la prochaine date de retrait.
-     * @param  OneSignalService $notif          Envoie les notifications push.
+     * @param  PushNotifier $notif          Envoie les notifications push.
      * @return int Code de retour (self::SUCCESS ou self::FAILURE).
      */
-    public function handle(TontineService $tontineService, OneSignalService $notif): int
+    public function handle(TontineService $tontineService, PushNotifier $notif): int
     {
         $isDryRun = (bool) $this->option('dry-run');
         // Heure locale Gabon pour éviter les décalages UTC.
@@ -124,11 +124,11 @@ class TontineRappelsCommand extends Command
                     );
                     $envoyes += count($nonPayes);
                 } catch (\Throwable $e) {
-                    Log::error('[tontines:rappels] Échec envoi OneSignal', [
+                    Log::error('[tontines:rappels] Échec envoi push', [
                         'cagnotte' => $cagnotte->reference,
                         'error'    => $e->getMessage(),
                     ]);
-                    $this->error("  Erreur OneSignal : {$e->getMessage()}");
+                    $this->error("  Erreur push : {$e->getMessage()}");
                 }
             }
         }

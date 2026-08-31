@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
 use App\Services\TondoConfigService;
@@ -622,7 +622,7 @@ class CotisationsController extends Controller
         }
 
         $payeur = DB::table('users')->where('id', $payeurId)->first();
-        $svc    = app(OneSignalService::class);
+        $svc    = app(PushNotifier::class);
 
         // 1) Confirmation au payeur.
         $svc->notifyOne(

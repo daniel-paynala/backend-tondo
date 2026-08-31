@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Contracts\PushNotifier;
+use App\Services\FcmService;
 use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use App\Services\WhatsApp\MetaSenderService;
 use App\Services\WhatsApp\TwilioSenderService;
@@ -40,6 +42,11 @@ class AppServiceProvider extends ServiceProvider
                 ? $app->make(MetaSenderService::class)
                 : $app->make(TwilioSenderService::class);
         });
+
+        // Notifications push : le contrat PushNotifier est résolu vers FCM
+        // (migration OneSignal → FCM/APNs en direct). Les appelants type-hintent
+        // l'interface et n'ont pas à connaître le fournisseur.
+        $this->app->bind(PushNotifier::class, FcmService::class);
     }
 
     /**

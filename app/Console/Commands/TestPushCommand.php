@@ -3,25 +3,28 @@
 namespace App\Console\Commands;
 
 use App\Models\TondoUser;
-use App\Services\OneSignalService;
+use App\Services\FcmService;
 use Illuminate\Console\Command;
 
 /**
- * Diagnostic OneSignal : envoie un push de test à un utilisateur et affiche la
- * réponse BRUTE d'OneSignal (statut HTTP + corps).
+ * Diagnostic FCM : envoie un push de test aux appareils d'un utilisateur et
+ * affiche la réponse BRUTE de FCM (statut HTTP + corps) pour chaque token.
  *
- * Sert à comprendre pourquoi un push « n'arrive pas » :
- *   – 401 / 403                → clé API invalide/dépréciée (régénérer `os_v2_app_…`).
- *   – 200 + recipients = 0     → l'external_id (UUID user) n'est pas abonné :
- *                                le device n'a pas appelé `OneSignal.login()`,
- *                                ou l'utilisateur a refusé les notifications.
- *   – 200 + errors.invalid_aliases → même cause (alias inconnu d'OneSignal).
- *   – 200 + recipients ≥ 1     → OneSignal a bien pris en charge : si rien ne
- *                                s'affiche, c'est côté device (permission, focus…).
+ * Interprétation :
+ *   – « non configuré »        → FCM_PROJECT_ID / FCM_CREDENTIALS_PATH absents,
+ *                                ou fichier de compte de service introuvable.
+ *   – « auth = false »         → le compte de service ne permet pas d'obtenir un
+ *                                access token (clé privée / droits invalides).
+ *   – 0 token                  → cet utilisateur n'a AUCUN appareil enregistré :
+ *                                l'app n'a pas (encore) envoyé son token FCM
+ *                                après connexion, ou notifications refusées.
+ *   – 200                      → FCM a accepté : si rien ne s'affiche, c'est côté
+ *                                device (permission, focus, Ne pas déranger).
+ *   – 404 (UNREGISTERED)       → token mort (app désinstallée) — purgé auto.
  *
  * Usage :
  *   php artisan tonji:test-push <uuid|numero>
- *   php artisan tonji:test-push 077730634 --titre="Test" --corps="Coucou"
+ *   php artisan tonji:test-push 077050946 --titre="Test" --corps="Coucou"
  */
 class TestPushCommand extends Command
 {
@@ -30,18 +33,18 @@ class TestPushCommand extends Command
                             {--titre=Test Tonji : notification}
                             {--corps=Si tu vois ceci, les notifications fonctionnent.}';
 
-    protected $description = 'Envoie un push OneSignal de test et affiche la réponse brute (diagnostic).';
+    protected $description = 'Envoie un push FCM de test et affiche la réponse brute (diagnostic).';
 
-    public function handle(OneSignalService $onesignal): int
+    public function handle(FcmService $fcm): int
     {
         // 1) Config présente ?
-        if (! $onesignal->estConfigure()) {
-            $this->error('OneSignal non configuré : ONESIGNAL_APP_ID / ONESIGNAL_REST_API_KEY manquent dans le .env.');
+        if (! $fcm->estConfigure()) {
+            $this->error('FCM non configuré : FCM_PROJECT_ID / FCM_CREDENTIALS_PATH manquants, ou fichier de compte de service introuvable.');
 
             return self::FAILURE;
         }
 
-        // 2) Résolution de la cible → external_id (= UUID du user).
+        // 2) Résolution de la cible → user.
         $cible = (string) $this->argument('cible');
         $user  = $this->resoudreUser($cible);
 
@@ -52,45 +55,40 @@ class TestPushCommand extends Command
         }
 
         $this->line("Cible : <info>{$user->prenom} {$user->nom}</info> · numéro {$user->numero}");
-        $this->line("external_id envoyé à OneSignal : <info>{$user->id}</info>");
+        $this->line("user_id : <info>{$user->id}</info>");
         $this->newLine();
 
-        // 3) Envoi + affichage de la réponse brute.
-        $res = $onesignal->envoyerBrut(
-            [$user->id],
-            (string) $this->option('titre'),
-            (string) $this->option('corps'),
-            ['type' => 'test_push'],
-        );
+        // 3) Envoi + affichage de la réponse brute par token.
+        $res = $fcm->envoyerBrutUser($user->id, (string) $this->option('titre'), (string) $this->option('corps'));
 
-        if (isset($res['error'])) {
-            $this->error("Exception réseau : {$res['error']}");
+        if (($res['auth'] ?? true) === false) {
+            $this->error('→ Authentification FCM échouée : le compte de service ne permet pas d\'obtenir un access token (clé privée / droits).');
 
             return self::FAILURE;
         }
 
-        $status = $res['status'] ?? 0;
-        $json   = is_array($res['json'] ?? null) ? $res['json'] : [];
-        $recipients = $json['recipients'] ?? null;
-        $errors     = $json['errors'] ?? null;
+        $nbTokens = $res['tokens'] ?? 0;
+        if ($nbTokens === 0) {
+            $this->warn('→ 0 appareil enregistré pour cet utilisateur.');
+            $this->warn('  Côté app : après connexion, POST /api/mobile/devices doit envoyer le token FCM + la permission notifications doit être accordée.');
 
-        $this->line("HTTP status : <info>{$status}</info>");
-        $this->line('Réponse     : ' . ($res['body'] ?? '(vide)'));
-        $this->newLine();
+            return self::SUCCESS;
+        }
 
-        // 4) Interprétation lisible.
-        if ($status === 401 || $status === 403) {
-            $this->error('→ Clé API rejetée. Régénère une clé « os_v2_app_… » (dashboard OneSignal > Keys & IDs) et mets à jour ONESIGNAL_REST_API_KEY.');
-        } elseif ($status >= 400) {
-            $this->error('→ Payload/app_id rejeté par OneSignal (voir le corps ci-dessus).');
-        } elseif ($recipients === 0 || ! empty($errors)) {
-            $this->warn('→ 0 destinataire réel : cet utilisateur n\'a AUCUN device abonné.');
-            $this->warn('  Vérifie côté app : OneSignal.login(userId) appelé au démarrage + permission notifications accordée.');
-        } elseif ($recipients !== null && $recipients >= 1) {
-            $this->info("→ OK : OneSignal a pris en charge le push ({$recipients} destinataire·s).");
-            $this->line('  Si rien ne s\'affiche : c\'est côté device (permission système, app au premier plan, Ne pas déranger…).');
-        } else {
-            $this->line('→ Réponse inattendue — inspecte le corps brut ci-dessus.');
+        foreach ($res['resultats'] ?? [] as $r) {
+            $status = $r['status'] ?? 0;
+            $this->line("Token {$r['token']} ({$r['plateforme']}) → HTTP <info>{$status}</info>");
+            $this->line('  ' . ($r['body'] ?? '(vide)'));
+
+            if ($status >= 200 && $status < 300) {
+                $this->info('  → OK : FCM a pris en charge le push.');
+            } elseif ($status === 401 || $status === 403) {
+                $this->error('  → Access token refusé (droits du compte de service).');
+            } elseif ($status === 404) {
+                $this->warn('  → Token mort (app désinstallée) — purgé automatiquement.');
+            } else {
+                $this->error('  → Échec (voir le corps ci-dessus).');
+            }
         }
 
         return self::SUCCESS;

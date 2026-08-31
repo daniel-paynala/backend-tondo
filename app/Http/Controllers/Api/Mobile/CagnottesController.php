@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Services\AirtelFeesCalculator;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use App\Services\TondoConfigService;
 use App\Services\TontineService;
 use Carbon\Carbon;
@@ -597,7 +597,7 @@ class CagnottesController extends Controller
 
         // Notifie le membre ajouté (uniquement les comptes full avec device enregistré).
         if ($utilisateur && ($utilisateur->compte_type ?? 'full') === 'full') {
-            app(OneSignalService::class)->notifyOne(
+            app(PushNotifier::class)->notifyOne(
                 userId:  $utilisateur->id,
                 titleFr: 'Vous avez été ajouté à une tontine',
                 bodyFr:  "Vous participez maintenant à « {$cagnotte->titre} ».",
@@ -660,7 +660,7 @@ class CagnottesController extends Controller
             ->select('users.id as user_id', project_table('participants').'.ordre_passage')
             ->get();
 
-        $notifSvc = app(OneSignalService::class);
+        $notifSvc = app(PushNotifier::class);
 
         // Notifie tous les membres du démarrage.
         $tousLesIds = $participants->pluck('user_id')->filter()->values()->all();
@@ -867,7 +867,7 @@ class CagnottesController extends Controller
         $cagnotte->increment('nombre_inscrits');
 
         // Notifie le gérant.
-        app(OneSignalService::class)->notifyOne(
+        app(PushNotifier::class)->notifyOne(
             userId:  $cagnotte->user_id,
             titleFr: 'Nouveau membre',
             bodyFr:  "{$user->prenom} {$user->nom} a rejoint « {$cagnotte->titre} ».",
@@ -1119,7 +1119,7 @@ class CagnottesController extends Controller
             return response()->json(['message' => 'Aucun membre en attente de paiement.']);
         }
 
-        app(OneSignalService::class)->notify(
+        app(PushNotifier::class)->notify(
             userIds: $participantsEnAttente,
             titleFr: 'Rappel de cotisation',
             bodyFr:  "Votre cotisation pour « {$cagnotte->titre} » est en attente.",

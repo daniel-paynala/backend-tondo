@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -119,7 +119,7 @@ class CagnottesController extends Controller
         };
 
         try {
-            app(OneSignalService::class)->notifyOne((string) $c->user_id, $titre, $corps, [
+            app(PushNotifier::class)->notifyOne((string) $c->user_id, $titre, $corps, [
                 'type'      => 'moderation_cagnotte',
                 'reference' => $c->reference,
                 'statut'    => $statut,

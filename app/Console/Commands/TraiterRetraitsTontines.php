@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Mail\DisbursementFailedMail;
 use App\Mail\RetraitImpossibleMail;
 use App\Models\TondoCagnotte;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use App\Services\PaynalaPaymentService;
 use App\Services\TontineService;
 use Illuminate\Console\Command;
@@ -25,7 +25,7 @@ use Illuminate\Support\Str;
  *  – Si cotisations incomplètes → mail au gérant + admins, pas de retrait.
  *  – Si Paynala KO → mail admins, AUCUNE restauration automatique du solde.
  *  – Après succès → statut_paiement de tous les membres remis à en_attente.
- *  – Notification OneSignal au bénéficiaire + aux autres membres.
+ *  – Notification push au bénéficiaire + aux autres membres.
  */
 class TraiterRetraitsTontines extends Command
 {
@@ -39,13 +39,13 @@ class TraiterRetraitsTontines extends Command
      * du cycle courant correspond à aujourd'hui et que tous les membres ont cotisé.
      *
      * @param  PaynalaPaymentService $paynala       Service de décaissement Mobile Money.
-     * @param  OneSignalService      $notif          Service de notifications push.
+     * @param  PushNotifier      $notif          Service de notifications push.
      * @param  TontineService        $tontineService Calcule les dates de cycle.
      * @return int                                   Code de retour (self::SUCCESS).
      */
     public function handle(
         PaynalaPaymentService $paynala,
-        OneSignalService      $notif,
+        PushNotifier      $notif,
         TontineService        $tontineService,
     ): int {
         $isDryRun = (bool) $this->option('dry-run');

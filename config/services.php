@@ -86,16 +86,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | OneSignal — Push notifications mobile
+    | FCM — Push notifications mobile (Firebase Cloud Messaging)
     |--------------------------------------------------------------------------
     |
-    | App ID   : onglet "Keys & IDs" du dashboard OneSignal.
-    | REST Key : REST API Key (à ne pas confondre avec le User Auth Key).
+    | Remplace OneSignal (migration 2026-08 : le plan gratuit OneSignal plafonne
+    | le push mobile à 1 000 MAU au 01/10/2026). FCM/APNs en direct = gratuit à
+    | l'échelle. Identifiants générés dans la console Firebase.
     |
     */
-    'onesignal' => [
-        'app_id'       => env('ONESIGNAL_APP_ID'),
-        'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+    // Notifications push : FCM/APNs en direct (remplace OneSignal).
+    // - project_id  : id du projet Firebase.
+    // - credentials : chemin du JSON de compte de service (généré côté Firebase :
+    //   Project settings → Service accounts → Generate new private key).
+    'fcm' => [
+        'project_id'  => env('FCM_PROJECT_ID'),
+        'credentials' => env('FCM_CREDENTIALS_PATH', storage_path('app/fcm/service-account.json')),
     ],
 
     'wirepick' => [

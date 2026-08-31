@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
 use App\Models\TondoOrganisationDocument;
-use App\Services\OneSignalService;
+use App\Contracts\PushNotifier;
 use App\Services\SupabaseStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -253,7 +253,7 @@ class AssociationController extends Controller
         // au même titre que de l'approbation / du refus / de la suspension.
         // Best-effort — n'interrompt jamais la soumission si la notif échoue.
         try {
-            app(OneSignalService::class)->notifyOne(
+            app(PushNotifier::class)->notifyOne(
                 (string) $org->user_id,
                 'Dossier reçu',
                 "Le dossier de « {$org->nom} » a bien été reçu. Il est en cours de vérification par l'équipe Tonji.",
