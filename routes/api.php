@@ -122,6 +122,7 @@ Route::prefix('admin')->group(function () {
         Route::post('/organisations/{id}/approuver',            [AdminOrganisationsController::class, 'approuver']);
         Route::post('/organisations/{id}/rejeter',              [AdminOrganisationsController::class, 'rejeter']);
         Route::post('/organisations/{id}/suspendre',            [AdminOrganisationsController::class, 'suspendre']);
+        Route::delete('/organisations/{id}',                    [AdminOrganisationsController::class, 'supprimer']);
 
         // Transactions
         Route::get('/transactions', [TransactionsController::class, 'index']);

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
 use App\Contracts\PushNotifier;
+use App\Services\SupabaseStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -38,6 +39,40 @@ class OrganisationsController extends Controller
     public function suspendre(Request $request, string $id): JsonResponse
     {
         return $this->decision($request, $id, 'suspendu');
+    }
+
+    /**
+     * DELETE /api/admin/organisations/{id}
+     *
+     * Suppression DÉFINITIVE d'un dossier, à la seule initiative de l'admin
+     * (un refus, lui, ne supprime rien : il passe juste le statut à 'rejete').
+     * On supprime d'abord les pièces du bucket Supabase (non couvertes par le
+     * ON DELETE CASCADE, qui ne vaut que pour les lignes en base), puis la ligne
+     * organisation — le CASCADE se charge des lignes documents.
+     */
+    public function supprimer(Request $request, string $id): JsonResponse
+    {
+        $org = TondoOrganisation::find($id);
+        if (! $org) {
+            return response()->json(['message' => 'Association introuvable.'], 404);
+        }
+
+        // Purge des fichiers dans le bucket privé (best-effort, fichier par fichier).
+        $storage = app(SupabaseStorageService::class);
+        foreach ($org->documents()->get() as $doc) {
+            if ($doc->chemin) {
+                try {
+                    $storage->delete($doc->chemin);
+                } catch (\Throwable) {
+                    // best-effort : on ne bloque pas la suppression du dossier
+                }
+            }
+        }
+
+        // Supprime l'organisation → les lignes documents suivent (FK ON DELETE CASCADE).
+        $org->delete();
+
+        return response()->json(['message' => 'Dossier supprimé.']);
     }
 
     /**
