@@ -6,6 +6,7 @@ use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
 use App\Console\Commands\TraiterReversementsAutoCagnottes;
 use App\Console\Commands\VerifierPaiementsEnAttenteCommand;
+use App\Console\Commands\ReconcilierPayinsCommand;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -60,6 +61,16 @@ Schedule::command(TontineRappelsCommand::class)
  */
 Schedule::command(VerifierPaiementsEnAttenteCommand::class)
     ->everyFiveSeconds()
+    ->withoutOverlapping();
+
+/*
+ * Réconciliation des payin restés 'initie' (confirmations Airtel TARDIVES non
+ * captées par le polling app ou par le timeout 3 min du cron WhatsApp) —
+ * toutes les 5 min. Crédite les paiements réellement confirmés côté agrégateur.
+ * Idempotent (claim atomique + index unique trans_id).
+ */
+Schedule::command(ReconcilierPayinsCommand::class)
+    ->everyFiveMinutes()
     ->withoutOverlapping();
 
 /*
