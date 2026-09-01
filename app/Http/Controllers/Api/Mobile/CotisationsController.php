@@ -59,7 +59,9 @@ class CotisationsController extends Controller
                 ->first();
             return (int) ($org?->plafond_fcfa ?? ($config['plafond_cagnotte_association'] ?? 10000000));
         }
-        return (int) ($config['plafond_cagnotte_particulier'] ?? 2500000);
+
+        // Particulier : override personnalisé du gérant (fixé par un admin), sinon global.
+        return (int) ($gerant?->plafond_personnalise ?? ($config['plafond_cagnotte_particulier'] ?? 2500000));
     }
 
     /**

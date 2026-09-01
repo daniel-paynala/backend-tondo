@@ -303,7 +303,8 @@ class CagnottesController extends Controller
             return (int) ($orgPlafond ?? ($config['plafond_cagnotte_association'] ?? 10000000));
         }
 
-        return (int) ($config['plafond_cagnotte_particulier'] ?? 2500000);
+        // Particulier : override personnalisé du compte (fixé par un admin), sinon global.
+        return (int) ($user->plafond_personnalise ?? ($config['plafond_cagnotte_particulier'] ?? 2500000));
     }
 
     /**
