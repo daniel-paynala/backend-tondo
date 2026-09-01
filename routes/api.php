@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
 use App\Http\Controllers\Api\Admin\UsersController;
 use App\Http\Controllers\Api\Admin\OrganisationsController as AdminOrganisationsController;
+use App\Http\Controllers\Api\Admin\PlafondDemandesController as AdminPlafondDemandesController;
 use App\Http\Controllers\Api\Admin\PlafondsController as AdminPlafondsController;
 use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
@@ -19,6 +20,7 @@ use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversements
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\Mobile\AssociationController as MobileAssociationController;
 use App\Http\Controllers\Api\Mobile\DeviceTokensController as MobileDeviceTokensController;
+use App\Http\Controllers\Api\Mobile\PlafondController as MobilePlafondController;
 use App\Http\Controllers\Api\Admin\CagnottesController as AdminCagnottesController;
 use App\Http\Controllers\Api\Public\CagnottesController as PublicCagnottesController;
 use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookController;
@@ -124,6 +126,10 @@ Route::prefix('admin')->group(function () {
         Route::post('/organisations/{id}/suspendre',            [AdminOrganisationsController::class, 'suspendre']);
         Route::delete('/organisations/{id}',                    [AdminOrganisationsController::class, 'supprimer']);
 
+        // Déblocages de plafond (justificatif) — décisions super_admin
+        Route::post('/plafond-demandes/{id}/approuver', [AdminPlafondDemandesController::class, 'approuver']);
+        Route::post('/plafond-demandes/{id}/rejeter',   [AdminPlafondDemandesController::class, 'rejeter']);
+
         // Transactions
         Route::get('/transactions', [TransactionsController::class, 'index']);
         Route::get('/transactions/payin', [TransactionsController::class, 'payin']);
@@ -202,6 +208,10 @@ Route::prefix('mobile')->group(function () {
         // Jeton push (FCM) de l'appareil courant — (dés)enregistrement à la (dé)connexion
         Route::post('/devices',   [MobileDeviceTokensController::class, 'store']);
         Route::delete('/devices', [MobileDeviceTokensController::class, 'destroy']);
+
+        // Plafond de collecte : statut + demande de déblocage (justificatif, asso)
+        Route::get('/plafond/statut',   [MobilePlafondController::class, 'statut']);
+        Route::post('/plafond/demande', [MobilePlafondController::class, 'demande']);
 
         // Associations — dossier (nom, description, statut) + pièces requises
         Route::get('/association',                       [MobileAssociationController::class, 'show']);
