@@ -81,4 +81,37 @@ class UsersController extends Controller
         $user = TondoUser::where('project_id', $projectId)->findOrFail($id);
         return response()->json($user);
     }
+
+    /**
+     * PATCH /api/admin/users/{id}/plafond — { plafond: int|null }
+     *
+     * Fixe (ou réinitialise avec null) le plafond de collecte PERSONNALISÉ d'un
+     * compte (override du plafond global du type de compte). Réservé super_admin.
+     */
+    public function setPlafond(Request $request, string $id): JsonResponse
+    {
+        abort_unless(
+            $request->user()->role === 'super_admin',
+            403,
+            'Action réservée aux super admins.',
+        );
+
+        $data = $request->validate([
+            'plafond' => ['nullable', 'integer', 'min:1000', 'max:100000000000'],
+        ]);
+
+        $projectId = $request->user()->project_id;
+        $user = TondoUser::where('project_id', $projectId)->find($id);
+        if (! $user) {
+            return response()->json(['message' => 'Utilisateur introuvable.'], 404);
+        }
+
+        $user->plafond_personnalise = $data['plafond'] ?? null;
+        $user->save();
+
+        return response()->json([
+            'message' => 'Plafond personnalisé mis à jour.',
+            'plafond' => $user->plafond_personnalise,
+        ]);
+    }
 }

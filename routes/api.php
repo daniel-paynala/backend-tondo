@@ -101,6 +101,7 @@ Route::prefix('admin')->group(function () {
         // Utilisateurs Tondo (mobile end-users)
         Route::get('/users', [UsersController::class, 'index']);
         Route::get('/users/{id}', [UsersController::class, 'show']);
+        Route::patch('/users/{id}/plafond', [UsersController::class, 'setPlafond']);
 
         // Administrateurs (CRUD, restrictions super_admin côté controller)
         Route::get('/admins', [AdminsController::class, 'index']);
