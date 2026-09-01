@@ -50,6 +50,35 @@ class CotisationsController extends Controller
      * Association → plafond de l'organisation (défaut = plafond association config).
      * Particulier (ou type inconnu) → plafond particulier config.
      */
+    /**
+     * Garde de collecte : renvoie un message de blocage, ou null si la
+     * cotisation est autorisée.
+     *  – Cagnotte PUBLIQUE : doit être `approuvee` par la modération (une
+     *    publique en attente/rejetée/suspendue ne collecte pas, même via lien).
+     *  – Association gérante : son dossier doit être `approuve` (bloque
+     *    en_attente / rejete / suspendu → la suspension coupe la collecte).
+     *  – Particulier / cagnotte privée : jamais bloqué ici.
+     */
+    private function collecteBloquee(mixed $cagnotte): ?string
+    {
+        if ($cagnotte->visibilite === 'public' && $cagnotte->statut_validation !== 'approuvee') {
+            return 'Cette cagnotte publique est en cours de validation.';
+        }
+
+        $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
+        if ($gerant && $gerant->type_compte === 'association') {
+            $statut = \App\Models\TondoOrganisation::query()
+                ->where('project_id', $cagnotte->project_id)
+                ->where('user_id', $gerant->id)
+                ->value('statut');
+            if ($statut !== 'approuve') {
+                return 'Collecte indisponible : l\'association n\'est pas active.';
+            }
+        }
+
+        return null;
+    }
+
     private function plafondCagnotte(mixed $cagnotte, array $config): int
     {
         $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
@@ -124,6 +153,13 @@ class CotisationsController extends Controller
             throw ValidationException::withMessages([
                 'cagnotte_reference' => 'Cagnotte clôturée — cotisation impossible.',
             ]);
+        }
+
+        // Garde de collecte (sécurité) : cagnotte publique VALIDÉE par la
+        // modération + association gérante APPROUVÉE (bloque une asso en attente,
+        // rejetée ou suspendue). Ne dépend pas du gate client.
+        if ($raison = $this->collecteBloquee($cagnotte)) {
+            throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
         }
 
         // ── Plafond total de collecte (selon le type de cagnotte) ────────────

@@ -187,6 +187,13 @@ class CotisationService
             ];
         }
 
+        // Garde de collecte (sécurité) : cagnotte publique validée par la
+        // modération + association gérante approuvée (bloque en attente / rejetée
+        // / suspendue).
+        if ($raison = $this->collecteBloquee($cagnotte)) {
+            return ['statut' => 'erreur', 'message' => $raison];
+        }
+
         // Calcul de la pénalité (tontine uniquement, si paiement en retard)
         $penalite = 0;
         if ($cagnotte->type === 'tontine_periodique') {
@@ -249,6 +256,33 @@ class CotisationService
      * Association → plafond de l'organisation (défaut = plafond association config) ;
      * particulier (ou type inconnu) → plafond particulier config.
      */
+    /**
+     * Garde de collecte : renvoie un message de blocage, ou null si autorisé.
+     *  – Cagnotte PUBLIQUE : doit être `approuvee` (modération).
+     *  – Association gérante : dossier `approuve` requis (bloque en_attente /
+     *    rejete / suspendu → la suspension coupe la collecte).
+     *  – Particulier / cagnotte privée : jamais bloqué ici.
+     */
+    private function collecteBloquee(TondoCagnotte $cagnotte): ?string
+    {
+        if ($cagnotte->visibilite === 'public' && $cagnotte->statut_validation !== 'approuvee') {
+            return 'Cette cagnotte publique est en cours de validation.';
+        }
+
+        $gerant = TondoUser::find($cagnotte->user_id);
+        if ($gerant && $gerant->type_compte === 'association') {
+            $statut = \App\Models\TondoOrganisation::query()
+                ->where('project_id', $cagnotte->project_id)
+                ->where('user_id', $gerant->id)
+                ->value('statut');
+            if ($statut !== 'approuve') {
+                return 'Collecte indisponible : l\'association n\'est pas active.';
+            }
+        }
+
+        return null;
+    }
+
     private function plafondCagnotte(TondoCagnotte $cagnotte, array $config): int
     {
         $gerant = TondoUser::find($cagnotte->user_id);

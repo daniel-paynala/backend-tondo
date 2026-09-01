@@ -141,6 +141,20 @@ class CagnottesController extends Controller
 
         $user = $request->user();
 
+        // Sécurité : une association ne peut créer une cagnotte que si son dossier
+        // est APPROUVÉ (le gate client ne suffit pas comme garde côté serveur).
+        if ($user->type_compte === 'association') {
+            $orgStatut = TondoOrganisation::query()
+                ->where('project_id', $user->project_id)
+                ->where('user_id', $user->id)
+                ->value('statut');
+            if ($orgStatut !== 'approuve') {
+                throw ValidationException::withMessages([
+                    'type_compte' => 'Votre association doit être validée avant de créer une cagnotte.',
+                ]);
+            }
+        }
+
         // Si le créateur n'a pas fourni de numéro de retrait, on prend son propre numéro.
         $numeroRetrait = $base['numero_retrait'] ?? $user->numero;
 
