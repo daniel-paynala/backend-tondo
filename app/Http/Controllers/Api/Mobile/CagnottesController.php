@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
+use App\Models\TondoOrganisation;
 use App\Services\AirtelFeesCalculator;
 use App\Contracts\PushNotifier;
 use App\Services\TondoConfigService;
@@ -161,6 +162,11 @@ class CagnottesController extends Controller
         $calc         = new AirtelFeesCalculator($airtelConfig);
         $commission   = (float) $airtelConfig['commission_paynala'];
 
+        // Plafond TOTAL de collecte piloté par la config + le type de compte
+        // (particulier ≈ 2,5 M / association ≈ 10 M, ajustable en base). Borne le
+        // montant cible d'une cagnotte ouverte à la création.
+        $plafondCagnotte = $this->plafondCreation($user, $airtelConfig);
+
         if ($type === 'tontine_periodique') {
             $extra = $request->validate([
                 // CASH BACK net livré au bénéficiaire à chaque cycle.
@@ -198,7 +204,8 @@ class CagnottesController extends Controller
             $cagnotte->penalite_frequence = $penaliteActive ? ($extra['penalite_frequence'] ?? 'jour') : null;
         } else {
             $extra = $request->validate([
-                'montant_cible'                   => ['nullable', 'integer', 'min:100', 'max:2500000'],
+                // Max = plafond de collecte configuré selon le type de compte.
+                'montant_cible'                   => ['nullable', 'integer', 'min:100', 'max:' . $plafondCagnotte],
                 'montant_min'                     => ['nullable', 'integer', 'min:100'],
                 'date_fin'                        => ['nullable', 'date', 'after:today'],
                 'reversement_auto'                => ['nullable', 'boolean'],
@@ -230,8 +237,11 @@ class CagnottesController extends Controller
         }
 
         // ── Visibilité + modération ─────────────────────────────────────────────
-        // Public réservé aux cagnottes ouvertes ; les tontines restent privées.
-        $visibilite = ($type === 'cagnotte_ouverte')
+        // Public réservé aux cagnottes ouvertes créées par une ASSOCIATION
+        // (validée) : seules les assos peuvent lancer une collecte publique
+        // (cadre légal). Tontines et particuliers restent toujours privés.
+        $peutPublier = $type === 'cagnotte_ouverte' && $user->type_compte === 'association';
+        $visibilite = $peutPublier
             ? ($base['visibilite'] ?? 'prive')
             : 'prive';
         $cagnotte->visibilite = $visibilite;
@@ -274,6 +284,26 @@ class CagnottesController extends Controller
         return response()->json([
             'cagnotte' => $this->serialize($cagnotte),
         ], 201);
+    }
+
+    /**
+     * Plafond TOTAL de collecte autorisé pour une cagnotte, selon le type de
+     * compte : pour une association, le plafond propre de l'organisation
+     * (défaut 10 M, ajustable) ; sinon le plafond particulier configuré (2,5 M).
+     * Sert de borne au montant cible à la création.
+     */
+    private function plafondCreation($user, array $config): int
+    {
+        if ($user->type_compte === 'association') {
+            $orgPlafond = TondoOrganisation::query()
+                ->where('project_id', $user->project_id)
+                ->where('user_id', $user->id)
+                ->value('plafond_fcfa');
+
+            return (int) ($orgPlafond ?? ($config['plafond_cagnotte_association'] ?? 10000000));
+        }
+
+        return (int) ($config['plafond_cagnotte_particulier'] ?? 2500000);
     }
 
     /**
