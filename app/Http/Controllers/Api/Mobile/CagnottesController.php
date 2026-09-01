@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Models\TondoOrganisation;
 use App\Services\AirtelFeesCalculator;
+use App\Support\PlafondResolver;
 use App\Contracts\PushNotifier;
 use App\Services\TondoConfigService;
 use App\Services\TontineService;
@@ -308,17 +309,22 @@ class CagnottesController extends Controller
      */
     private function plafondCreation($user, array $config): int
     {
+        // Lecture DB de l'override d'orga (le cas échéant) — la décision est
+        // déléguée à PlafondResolver (logique pure testée).
+        $orgPlafond = null;
         if ($user->type_compte === 'association') {
             $orgPlafond = TondoOrganisation::query()
                 ->where('project_id', $user->project_id)
                 ->where('user_id', $user->id)
                 ->value('plafond_fcfa');
-
-            return (int) ($orgPlafond ?? ($config['plafond_cagnotte_association'] ?? 10000000));
         }
 
-        // Particulier : override personnalisé du compte (fixé par un admin), sinon global.
-        return (int) ($user->plafond_personnalise ?? ($config['plafond_cagnotte_particulier'] ?? 2500000));
+        return PlafondResolver::resoudre(
+            $user->type_compte,
+            $orgPlafond !== null ? (int) $orgPlafond : null,
+            $user->plafond_personnalise !== null ? (int) $user->plafond_personnalise : null,
+            $config,
+        );
     }
 
     /**

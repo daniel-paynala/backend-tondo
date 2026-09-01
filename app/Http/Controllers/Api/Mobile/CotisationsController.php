@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
+use App\Support\CollecteGuard;
+use App\Support\FraisCalculator;
+use App\Support\PlafondResolver;
 use App\Contracts\PushNotifier;
 use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
@@ -61,22 +64,23 @@ class CotisationsController extends Controller
      */
     private function collecteBloquee(mixed $cagnotte): ?string
     {
-        if ($cagnotte->visibilite === 'public' && $cagnotte->statut_validation !== 'approuvee') {
-            return 'Cette cagnotte publique est en cours de validation.';
-        }
-
+        // Lecture DB du gérant + statut d'orga — la décision est déléguée à
+        // CollecteGuard (logique pure testée).
         $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
+        $orgStatut = null;
         if ($gerant && $gerant->type_compte === 'association') {
-            $statut = \App\Models\TondoOrganisation::query()
+            $orgStatut = \App\Models\TondoOrganisation::query()
                 ->where('project_id', $cagnotte->project_id)
                 ->where('user_id', $gerant->id)
                 ->value('statut');
-            if ($statut !== 'approuve') {
-                return 'Collecte indisponible : l\'association n\'est pas active.';
-            }
         }
 
-        return null;
+        return CollecteGuard::bloquee(
+            $cagnotte->visibilite,
+            $cagnotte->statut_validation,
+            $gerant?->type_compte,
+            $orgStatut,
+        );
     }
 
     private function plafondCagnotte(mixed $cagnotte, array $config): int
@@ -86,11 +90,20 @@ class CotisationsController extends Controller
             $org = \App\Models\TondoOrganisation::query()
                 ->where('user_id', $gerant->id)
                 ->first();
-            return (int) ($org?->plafond_fcfa ?? ($config['plafond_cagnotte_association'] ?? 10000000));
+            return PlafondResolver::resoudre(
+                'association',
+                $org?->plafond_fcfa !== null ? (int) $org->plafond_fcfa : null,
+                null,
+                $config,
+            );
         }
 
-        // Particulier : override personnalisé du gérant (fixé par un admin), sinon global.
-        return (int) ($gerant?->plafond_personnalise ?? ($config['plafond_cagnotte_particulier'] ?? 2500000));
+        return PlafondResolver::resoudre(
+            $gerant?->type_compte,
+            null,
+            $gerant?->plafond_personnalise !== null ? (int) $gerant->plafond_personnalise : null,
+            $config,
+        );
     }
 
     /**
@@ -105,7 +118,7 @@ class CotisationsController extends Controller
         $gerant         = \App\Models\TondoUser::find($cagnotte->user_id);
         $typeUser       = ($gerant && $gerant->type_compte === 'association') ? 'association' : 'particulier';
 
-        return (float) ($matrice[$typeCotisation][$typeUser] ?? 0);
+        return FraisCalculator::tauxRetrait($matrice, $typeCotisation, $typeUser);
     }
 
     /**
@@ -218,11 +231,11 @@ class CotisationsController extends Controller
         // Frais de retrait CONFIGURABLES (matrice cotisation × user ; 0 par défaut) —
         // à la charge du cotisant quand > 0. Commission Paynala toujours appliquée.
         $fraisRetraitRate = $this->fraisRetraitRate($cagnotte, $config);
-        $totalAEnvoyer    = (int) round($montantNet * (1 + $fraisRetraitRate));
+        $totalAEnvoyer    = FraisCalculator::totalAEnvoyer($montantNet, $fraisRetraitRate);
 
         if ($isAirtel) {
             $commission  = (float) $config['commission_paynala'];  // $config déjà chargé (plafond)
-            $montantBrut = (int) ceil($totalAEnvoyer * (1 + $commission));
+            $montantBrut = FraisCalculator::montantBrut($totalAEnvoyer, $commission);
         } else {
             $commission  = $this->commissionPaynala($user->project_id);
             $montantBrut = (int) round($totalAEnvoyer * (1 + $commission));

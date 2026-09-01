@@ -4,6 +4,9 @@ namespace App\Services\WhatsApp;
 
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
+use App\Support\CollecteGuard;
+use App\Support\FraisCalculator;
+use App\Support\PlafondResolver;
 use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
 use App\Services\TondoConfigService;
@@ -217,12 +220,12 @@ class CotisationService
 
         // Frais de retrait CONFIGURABLES (matrice cotisation × user ; 0 par défaut).
         $fraisRetraitRate = $this->fraisRetraitRate($cagnotte, $config);
-        $totalAEnvoyer    = (int) round($montant * (1 + $fraisRetraitRate));
+        $totalAEnvoyer    = FraisCalculator::totalAEnvoyer($montant, $fraisRetraitRate);
 
         // Calcul des frais selon l'opérateur (commission Paynala + frais de retrait éventuel)
         if ($isAirtel) {
             $commission  = (float) $config['commission_paynala'];  // $config déjà chargé (plafond)
-            $montantBrut = (int) ceil($totalAEnvoyer * (1 + $commission));
+            $montantBrut = FraisCalculator::montantBrut($totalAEnvoyer, $commission);
         } else {
             $commission  = (float) ($config['commission_paynala'] ?? 0.02);
             $montantBrut = (int) round($totalAEnvoyer * (1 + $commission));
@@ -265,22 +268,21 @@ class CotisationService
      */
     private function collecteBloquee(TondoCagnotte $cagnotte): ?string
     {
-        if ($cagnotte->visibilite === 'public' && $cagnotte->statut_validation !== 'approuvee') {
-            return 'Cette cagnotte publique est en cours de validation.';
-        }
-
         $gerant = TondoUser::find($cagnotte->user_id);
+        $orgStatut = null;
         if ($gerant && $gerant->type_compte === 'association') {
-            $statut = \App\Models\TondoOrganisation::query()
+            $orgStatut = \App\Models\TondoOrganisation::query()
                 ->where('project_id', $cagnotte->project_id)
                 ->where('user_id', $gerant->id)
                 ->value('statut');
-            if ($statut !== 'approuve') {
-                return 'Collecte indisponible : l\'association n\'est pas active.';
-            }
         }
 
-        return null;
+        return CollecteGuard::bloquee(
+            $cagnotte->visibilite,
+            $cagnotte->statut_validation,
+            $gerant?->type_compte,
+            $orgStatut,
+        );
     }
 
     private function plafondCagnotte(TondoCagnotte $cagnotte, array $config): int
@@ -290,11 +292,20 @@ class CotisationService
             $org = \App\Models\TondoOrganisation::query()
                 ->where('user_id', $gerant->id)
                 ->first();
-            return (int) ($org?->plafond_fcfa ?? ($config['plafond_cagnotte_association'] ?? 10000000));
+            return PlafondResolver::resoudre(
+                'association',
+                $org?->plafond_fcfa !== null ? (int) $org->plafond_fcfa : null,
+                null,
+                $config,
+            );
         }
 
-        // Particulier : override personnalisé du gérant (fixé par un admin), sinon global.
-        return (int) ($gerant?->plafond_personnalise ?? ($config['plafond_cagnotte_particulier'] ?? 2500000));
+        return PlafondResolver::resoudre(
+            $gerant?->type_compte,
+            null,
+            $gerant?->plafond_personnalise !== null ? (int) $gerant->plafond_personnalise : null,
+            $config,
+        );
     }
 
     /**
@@ -308,7 +319,7 @@ class CotisationService
         $gerant         = TondoUser::find($cagnotte->user_id);
         $typeUser       = ($gerant && $gerant->type_compte === 'association') ? 'association' : 'particulier';
 
-        return (float) ($matrice[$typeCotisation][$typeUser] ?? 0);
+        return FraisCalculator::tauxRetrait($matrice, $typeCotisation, $typeUser);
     }
 
     // ── Vérifier le statut d'une transaction ─────────────────────────────────

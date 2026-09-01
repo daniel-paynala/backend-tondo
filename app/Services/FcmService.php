@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Contracts\PushNotifier;
 use App\Models\Project;
 use App\Models\TondoDeviceToken;
+use App\Support\FcmSupport;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -156,7 +157,7 @@ class FcmService implements PushNotifier
 
         // FCM exige des `data` en chaînes de caractères uniquement.
         if (! empty($data)) {
-            $message['data'] = $this->stringifier($data);
+            $message['data'] = FcmSupport::stringifier($data);
         }
 
         try {
@@ -181,25 +182,10 @@ class FcmService implements PushNotifier
      */
     private function tokenInvalide(array $res): bool
     {
-        if (($res['status'] ?? 0) === 404) {
-            return true;
-        }
-
-        $json = is_array($res['json'] ?? null) ? $res['json'] : [];
-        $code = $json['error']['status'] ?? null;
-
-        return in_array($code, ['NOT_FOUND', 'UNREGISTERED'], true);
-    }
-
-    /** Convertit toutes les valeurs de `data` en chaînes (contrainte FCM). */
-    private function stringifier(array $data): array
-    {
-        $out = [];
-        foreach ($data as $cle => $valeur) {
-            $out[(string) $cle] = is_scalar($valeur) ? (string) $valeur : (string) json_encode($valeur);
-        }
-
-        return $out;
+        return FcmSupport::tokenInvalide(
+            (int) ($res['status'] ?? 0),
+            is_array($res['json'] ?? null) ? $res['json'] : null,
+        );
     }
 
     /**
@@ -285,9 +271,9 @@ class FcmService implements PushNotifier
         return $json;
     }
 
-    /** Encodage base64url (sans padding) pour le JWT. */
+    /** Encodage base64url (sans padding) pour le JWT — délégué à FcmSupport. */
     private function base64url(string $bin): string
     {
-        return rtrim(strtr(base64_encode($bin), '+/', '-_'), '=');
+        return FcmSupport::base64url($bin);
     }
 }
