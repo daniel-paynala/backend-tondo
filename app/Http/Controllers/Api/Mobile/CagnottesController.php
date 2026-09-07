@@ -408,6 +408,8 @@ class CagnottesController extends Controller
                 // Colonne réelle participant_id → propriété $h->participant_id.
                 project_table('paiements').'.participant_id',
                 project_table('paiements').'.montant',
+                // Commentaire libre du cotisant (peut être NULL).
+                project_table('paiements').'.commentaire',
                 project_table('paiements').'.date',
                 DB::raw('CONCAT('.project_table('participants').".prenom, ' ', ".project_table('participants').".nom) as participant_nom")
             );
@@ -422,6 +424,10 @@ class CagnottesController extends Controller
             'participant_id'  => $h->participant_id,
             'participant_nom' => $h->participant_nom,
             'montant'    => $h->montant,
+            // Visibilité : la requête est déjà filtrée plus haut — le gérant voit
+            // tout l'historique, un cotisant uniquement ses propres lignes. Le
+            // commentaire hérite donc de cette règle et n'est jamais public.
+            'commentaire' => $h->commentaire,
             'date'       => $h->date,
         ]);
 

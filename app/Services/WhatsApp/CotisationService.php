@@ -699,6 +699,9 @@ class CotisationService
                     'participant_id' => $participant->id,
                     'user_id'        => $payin->user_id,
                     'canal'          => $payin->canal ?? 'bot',
+                    // Commentaire saisi par le cotisant à l'initiation (app/web).
+                    // Le bot ne le collecte pas : reste NULL dans ce cas.
+                    'commentaire'    => $payin->commentaire ?? null,
                     'trans_id'       => $payin->trans_id,
                     'montant'        => $netAmount,
                     'date'           => now(),

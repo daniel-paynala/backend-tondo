@@ -144,12 +144,19 @@ class CotisationsController extends Controller
             // Canal d'origine (app par défaut ; 'web' pour tondo-web qui tape le
             // même endpoint). Le bot et l'USSD passent par d'autres entrées.
             'canal'              => ['nullable', 'in:app,web'],
+            // Commentaire libre du cotisant (facultatif) : préciser une
+            // particularité du don, ou signaler qu'il cotise pour quelqu'un
+            // d'autre. Purement descriptif, jamais utilisé dans un calcul.
+            'commentaire'        => ['nullable', 'string', 'max:140'],
         ]);
 
         $user = $request->user();
 
         // Canal traçable de la cotisation (défaut 'app' si le client ne l'envoie pas).
         $canal = $data['canal'] ?? 'app';
+
+        // Commentaire normalisé : une saisie vide vaut « pas de commentaire ».
+        $commentaire = trim((string) ($data['commentaire'] ?? '')) ?: null;
 
         $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
             ->where('reference', $data['cagnotte_reference'])
@@ -256,6 +263,7 @@ class CotisationsController extends Controller
                 montantBrut: $montantTotal,
                 penalite: $penalite,
                 canal: $canal,
+                commentaire: $commentaire,
             );
         }
 
@@ -268,6 +276,7 @@ class CotisationsController extends Controller
             montantBrut: $montantTotal,
             penalite: $penalite,
             canal: $canal,
+            commentaire: $commentaire,
         );
     }
 
@@ -356,6 +365,8 @@ class CotisationsController extends Controller
                         'participant_id' => $participant?->id,
                         'user_id'        => $payin->user_id,
                         'canal'          => $payin->canal ?? 'app',
+                        // Commentaire saisi à l'initiation, porté par le payin.
+                        'commentaire'    => $payin->commentaire ?? null,
                         'trans_id'       => $payin->trans_id,
                         'montant'        => $netAmount,
                         'date'           => now(),
@@ -421,6 +432,7 @@ class CotisationsController extends Controller
         int    $montantBrut,
         int    $penalite = 0,
         string $canal = 'app',
+        ?string $commentaire = null,
     ): JsonResponse {
         // request_id alphanumérique uniquement (contrainte API Paynala — pas de tirets).
         $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
@@ -446,7 +458,8 @@ class CotisationsController extends Controller
         try {
             DB::transaction(function () use (
                 $user, $cagnotte, $numeroPayeurE164,
-                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite, $canal
+                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite, $canal,
+                $commentaire
             ) {
                 // 1) Membre (placeholder en_attente).
                 $participant = DB::table(project_table('participants'))
@@ -496,6 +509,9 @@ class CotisationsController extends Controller
                     'operateur_id'  => $paymentData['paymentId'] ?? null,
                     'numero_tel'    => $numeroPayeurE164,
                     'canal'            => $canal,
+                    // Recopié sur la ligne `paiements` à la confirmation Airtel
+                    // (status() ou réconciliation) : sans ça il serait perdu.
+                    'commentaire'      => $commentaire,
                     'montant'          => $montantBrut,
                     'montant_net'      => $montantNet,
                     'montant_penalite' => $penalite,
@@ -542,12 +558,14 @@ class CotisationsController extends Controller
         int    $montantBrut,
         int    $penalite = 0,
         string $canal = 'app',
+        ?string $commentaire = null,
     ): JsonResponse {
         $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
 
         try {
             DB::transaction(function () use (
-                $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut, $penalite, $canal
+                $user, $cagnotte, $numeroPayeur, $transId, $montantNet, $montantBrut, $penalite, $canal,
+                $commentaire
             ) {
                 $participant = DB::table(project_table('participants'))
                     ->where('cagnotte_id', $cagnotte->id)
@@ -596,6 +614,7 @@ class CotisationsController extends Controller
                     'participant_id' => $participantId,
                     'user_id'        => $user->id,
                     'canal'          => $canal,
+                    'commentaire'    => $commentaire,
                     'trans_id'       => $transId,
                     'montant'        => $montantNet,
                     'date'           => now(),
@@ -611,6 +630,7 @@ class CotisationsController extends Controller
                     'operateur_id'  => 'MOCK-' . substr($transId, -8),
                     'numero_tel'    => $numeroPayeur,
                     'canal'            => $canal,
+                    'commentaire'      => $commentaire,
                     'montant'          => $montantBrut,
                     'montant_net'      => $montantNet,
                     'montant_penalite' => $penalite,
