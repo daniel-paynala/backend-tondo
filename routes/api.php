@@ -102,6 +102,9 @@ Route::prefix('admin')->group(function () {
         Route::get('/users', [UsersController::class, 'index']);
         Route::get('/users/{id}', [UsersController::class, 'show']);
         Route::patch('/users/{id}/plafond', [UsersController::class, 'setPlafond']);
+        // Suppression (anonymisation) d'un compte — super_admin uniquement,
+        // avec rapatriement préalable des soldes de ses cagnottes.
+        Route::delete('/users/{id}', [UsersController::class, 'destroy']);
 
         // Administrateurs (CRUD, restrictions super_admin côté controller)
         Route::get('/admins', [AdminsController::class, 'index']);

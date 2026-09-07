@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
+use App\Services\ReversementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Supervision des utilisateurs mobiles (TondoUser) par les administrateurs.
@@ -112,6 +115,234 @@ class UsersController extends Controller
         return response()->json([
             'message' => 'Plafond personnalisé mis à jour.',
             'plafond' => $user->plafond_personnalise,
+        ]);
+    }
+
+    /**
+     * DELETE /api/admin/users/{id}
+     *
+     * Supprime le compte d'un utilisateur mobile. **Réservé super_admin.**
+     *
+     * Deux régimes, selon l'empreinte financière du compte :
+     *
+     *  – **Purge** — aucune cagnotte créée, aucun paiement, aucun payin/payout,
+     *    aucune participation ayant donné lieu à un versement : la ligne `users`
+     *    est réellement SUPPRIMÉE, avec ses participations et ses device tokens.
+     *    Rien à conserver, et la base ne se remplit pas de comptes fantômes.
+     *
+     *  – **Anonymisation** — dès qu'il existe une trace comptable. Les paiements
+     *    et payouts référencent `user_id` et l'historique doit être conservé pour
+     *    la comptabilité et la lutte contre la fraude : la ligne reste, ses champs
+     *    identifiants sont neutralisés. C'est ce qu'annonce la page d'aide publique
+     *    (« l'historique des transactions est conservé, dissocié de votre identité »).
+     *
+     * Rapatriement préalable des fonds : si l'utilisateur gère des cagnottes qui
+     * détiennent encore de l'argent, le solde est d'abord reversé sur le numéro
+     * de retrait de chaque cagnotte. **Si un seul reversement échoue, RIEN n'est
+     * anonymisé** et la requête répond 409 : on ne supprime jamais un compte dont
+     * l'argent n'est pas sorti.
+     */
+    public function destroy(Request $request, string $id, ReversementService $reversements): JsonResponse
+    {
+        abort_unless(
+            $request->user()->role === 'super_admin',
+            403,
+            'Action réservée aux super admins.',
+        );
+
+        $admin     = $request->user();
+        $projectId = $admin->project_id;
+
+        $user = TondoUser::where('project_id', $projectId)->find($id);
+        if (! $user) {
+            return response()->json(['message' => 'Utilisateur introuvable.'], 404);
+        }
+
+        // ── 1. Rapatriement des soldes détenus par ses cagnottes ─────────────
+        $aRapatrier = TondoCagnotte::where('project_id', $projectId)
+            ->where('user_id', $user->id)
+            ->where('montant_collecte', '>', 0)
+            ->get();
+
+        $reverses = [];
+        $echecs   = [];
+
+        foreach ($aRapatrier as $cagnotte) {
+            $res = $reversements->reverserSolde(
+                cagnotte:      $cagnotte,
+                source:        'suppression_compte',
+                prefixeIdem:   'TONDO-SUPPR-',
+                prefixeTrans:  'TONDOSUPPR',
+                cloturer:      true,
+            );
+
+            if ($res['ok']) {
+                $reverses[] = [
+                    'cagnotte' => $cagnotte->reference,
+                    'titre'    => $cagnotte->titre,
+                    'montant'  => $res['montant'],
+                    'trans_id' => $res['trans_id'],
+                ];
+            } else {
+                $echecs[] = [
+                    'cagnotte' => $cagnotte->reference,
+                    'titre'    => $cagnotte->titre,
+                    'montant'  => $res['montant'],
+                    'erreur'   => $res['erreur'],
+                ];
+            }
+        }
+
+        // Un seul échec suffit à tout arrêter : le compte reste intact et
+        // identifiable, pour que l'incident puisse être instruit.
+        if ($echecs !== []) {
+            return response()->json([
+                'message'   => 'Suppression interrompue : des fonds n\'ont pas pu être rapatriés.',
+                'reverses'  => $reverses,
+                'echecs'    => $echecs,
+            ], 409);
+        }
+
+        // ── 2. Empreinte financière : purge réelle ou anonymisation ? ────────
+        // Un compte qui n'a jamais rien créé ni payé ne laisse aucune trace
+        // comptable à préserver : le supprimer vraiment évite d'accumuler des
+        // lignes fantômes « Compte supprimé » dans la base.
+        $empreinte = [
+            'cagnottes'    => TondoCagnotte::where('project_id', $projectId)->where('user_id', $user->id)->exists(),
+            'paiements'    => DB::table(project_table('paiements'))->where('user_id', $user->id)->exists(),
+            'payin'        => DB::table(project_table('payin'))->where('user_id', $user->id)->exists(),
+            'payout'       => DB::table(project_table('payout'))->where('user_id', $user->id)->exists(),
+            // Une participation sans le moindre versement ne vaut pas trace
+            // comptable : elle est supprimable avec le compte.
+            'participation_payee' => DB::table(project_table('participants'))
+                ->where('project_id', $projectId)
+                ->where('user_id', $user->id)
+                ->where('montant_paye', '>', 0)
+                ->exists(),
+        ];
+
+        $purgeReelle  = ! in_array(true, $empreinte, true);
+        $ancienNumero = $user->numero;
+
+        if ($purgeReelle) {
+            DB::transaction(function () use ($user, $projectId) {
+                // Aucune ligne de paiement ne pointe vers ces participations :
+                // elles portent le nom et le numéro en clair, on les efface.
+                DB::table(project_table('participants'))
+                    ->where('project_id', $projectId)
+                    ->where('user_id', $user->id)
+                    ->delete();
+
+                DB::table(project_table('device_tokens'))
+                    ->where('user_id', $user->id)
+                    ->delete();
+
+                DB::table('users')->where('id', $user->id)->delete();
+            });
+
+            $this->journaliser($request, $projectId, $user->id, $ancienNumero, 'purge', null, []);
+
+            return response()->json([
+                'message'       => 'Compte supprimé définitivement (aucun historique financier).',
+                'mode'          => 'purge',
+                'reverses'      => [],
+                'total_reverse' => 0,
+            ]);
+        }
+
+        // ── 3. Anonymisation (le compte a un historique à préserver) ─────────
+        // Le numéro est remplacé par un jeton unique : il libère le vrai numéro
+        // pour une réinscription et rend toute connexion OTP impossible, tout en
+        // respectant l'index unique (project_id, numero).
+        $numeroAnonyme = 'SUPPRIME-' . strtoupper(Str::random(12));
+
+        DB::transaction(function () use ($user, $projectId, $numeroAnonyme) {
+            // Clôture ce qu'il gérait encore (soldes déjà à zéro à ce stade).
+            DB::table(project_table('cagnottes'))
+                ->where('project_id', $projectId)
+                ->where('user_id', $user->id)
+                ->whereIn('statut', ['active', 'en_cours'])
+                ->update(['statut' => 'cloturee', 'updated_at' => now()]);
+
+            // Ses lignes de participation gardent le lien comptable mais perdent
+            // l'identité (elles portent nom, prénom et numéro en clair).
+            DB::table(project_table('participants'))
+                ->where('project_id', $projectId)
+                ->where('user_id', $user->id)
+                ->update([
+                    'nom'                   => 'supprimé',
+                    'prenom'                => 'Compte',
+                    'numero_masque'         => '—',
+                    'numero_retrait_masque' => null,
+                ]);
+
+            // Plus aucune notification ne doit partir vers ses appareils.
+            DB::table(project_table('device_tokens'))
+                ->where('user_id', $user->id)
+                ->delete();
+
+            // Le profil lui-même. `nom`, `prenom` et `date_naissance` sont NOT NULL :
+            // on les remplace par des valeurs neutres plutôt que de les vider.
+            DB::table('users')->where('id', $user->id)->update([
+                'prenom'         => 'Compte',
+                'nom'            => 'supprimé',
+                'numero'         => $numeroAnonyme,
+                'date_naissance' => '1900-01-01',
+                'sexe'           => null,
+                'adresse'        => null,
+                'email'          => null,
+                'kyc_valide'     => false,
+                'updated_at'     => now(),
+            ]);
+        });
+
+        // ── 4. Journal d'audit ───────────────────────────────────────────────
+        $this->journaliser($request, $projectId, $user->id, $ancienNumero, 'anonymisation', $numeroAnonyme, $reverses);
+
+        return response()->json([
+            'message'       => 'Compte anonymisé (historique financier conservé).',
+            'mode'          => 'anonymisation',
+            'reverses'      => $reverses,
+            'total_reverse' => array_sum(array_column($reverses, 'montant')),
+        ]);
+    }
+
+    /**
+     * Trace la suppression dans le journal d'audit.
+     *
+     * @param  string      $mode           'purge' (ligne supprimée) | 'anonymisation'.
+     * @param  ?string     $numeroAnonyme  Jeton de remplacement, null en mode purge.
+     * @param  array<int, array<string, mixed>> $reverses Cagnottes rapatriées.
+     */
+    private function journaliser(
+        Request $request,
+        string  $projectId,
+        string  $userId,
+        string  $ancienNumero,
+        string  $mode,
+        ?string $numeroAnonyme,
+        array   $reverses,
+    ): void {
+        $admin = $request->user();
+
+        DB::table(project_table('logs'))->insert([
+            'id'              => (string) Str::uuid(),
+            'project_id'      => $projectId,
+            'acteur_admin_id' => $admin->id,
+            'acteur_libelle'  => trim(($admin->prenom ?? '') . ' ' . ($admin->nom ?? '')) ?: 'Admin',
+            'acteur_role'     => $admin->role,
+            'action'          => 'suppression_compte',
+            'cible'           => 'Utilisateur ' . $ancienNumero,
+            'niveau'          => 'warning',
+            'metadonnees'     => json_encode([
+                'user_id'             => $userId,
+                'mode'                => $mode,
+                'numero_anonyme'      => $numeroAnonyme,
+                'cagnottes_reversees' => $reverses,
+                'total_reverse'       => array_sum(array_column($reverses, 'montant')),
+            ]),
+            'date'            => now(),
+            'created_at'      => now(),
         ]);
     }
 }
