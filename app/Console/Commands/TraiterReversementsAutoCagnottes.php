@@ -5,13 +5,12 @@ namespace App\Console\Commands;
 use App\Mail\DisbursementFailedMail;
 use App\Models\TondoCagnotte;
 use App\Contracts\PushNotifier;
-use App\Services\PaynalaPaymentService;
+use App\Services\ReversementService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 
 /**
  * Déclenche les reversements automatiques des cotisations ouvertes.
@@ -50,8 +49,8 @@ class TraiterReversementsAutoCagnottes extends Command
      * @return int                            Code de retour (self::SUCCESS).
      */
     public function handle(
-        PaynalaPaymentService $paynala,
-        PushNotifier      $notif,
+        ReversementService $reversements,
+        PushNotifier       $notif,
     ): int {
         $isDryRun = (bool) $this->option('dry-run');
         // Heure locale Gabon pour éviter un décalage de date lié à UTC.
@@ -89,7 +88,7 @@ class TraiterReversementsAutoCagnottes extends Command
                 continue;
             }
 
-            $ok = $this->traiter($cagnotte, $mode, $paynala, $notif);
+            $ok = $this->traiter($cagnotte, $mode, $reversements, $notif);
             if ($ok) {
                 $traites++;
             } else {
@@ -181,143 +180,48 @@ class TraiterReversementsAutoCagnottes extends Command
      * @return bool                            True si le reversement a réussi, false sinon.
      */
     private function traiter(
-        TondoCagnotte         $cagnotte,
-        string                $mode,
-        PaynalaPaymentService $paynala,
-        PushNotifier      $notif,
+        TondoCagnotte      $cagnotte,
+        string             $mode,
+        ReversementService $reversements,
+        PushNotifier       $notif,
     ): bool {
-        // On reverse l'intégralité du solde collecté.
-        $montant    = (int) $cagnotte->montant_collecte;
-        $numeroE164 = $cagnotte->numero_retrait;
-        // Convertir E.164 +241XXXXXXXX → local 0XXXXXXXX pour l'API Airtel.
-        $msisdnLocal = str_starts_with($numeroE164, '+241')
-            ? '0' . substr($numeroE164, 4)
-            : ltrim($numeroE164, '+');
+        $montant = (int) $cagnotte->montant_collecte;
 
-        // Générer les identifiants de la transaction.
-        $nextNum        = DB::table(project_table('payout'))->count() + 1;
-        $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = 'TONDO-AUTO-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
-        $payoutId       = (string) Str::uuid();
-        $transId        = 'TONDOAUTO' . strtoupper(Str::random(9));
-
-        // Résoudre l'user_id du bénéficiaire pour la notification push (optionnel).
-        $beneficiaireUserId = DB::table('users')
-            ->where('numero', $numeroE164)
-            ->value('id');
-
-        // ── Phase 1 : réserver sous row-lock ─────────────────────────────────
-        try {
-            DB::transaction(function () use (
-                $cagnotte, $montant, $payoutId, $transId,
-                $idempotencyKey, $reference, $numeroE164, $beneficiaireUserId, $mode
-            ) {
-                $solde = (int) DB::table(project_table('cagnottes'))
-                    ->where('id', $cagnotte->id)
-                    ->lockForUpdate()
-                    ->value('montant_collecte');
-
-                if ($solde < $montant || $solde <= 0) {
-                    throw new \RuntimeException("Solde insuffisant ou nul : {$solde} FCFA.");
-                }
-
-                DB::table(project_table('payout'))->insert([
-                    'id'            => $payoutId,
-                    'project_id'    => $cagnotte->project_id,
-                    'cagnotte_id'   => $cagnotte->id,
-                    'user_id'       => $beneficiaireUserId,
-                    'trans_id'      => $transId,
-                    'operateur_id'  => null,
-                    'numero_tel'    => $numeroE164,
-                    'montant'       => $montant,
-                    'statut'        => 'initie',
-                    'request'       => json_encode([
-                        'idempotency_key'    => $idempotencyKey,
-                        'reference'          => $reference,
-                        'cagnotte_reference' => $cagnotte->reference,
-                        'montant'            => $montant,
-                        'mode'               => $mode,
-                        'source'             => 'cron_reversement_auto',
-                    ]),
-                    'date_creation' => now(),
-                    'created_at'    => now(),
-                    'updated_at'    => now(),
-                ]);
-
-                DB::table(project_table('cagnottes'))
-                    ->where('id', $cagnotte->id)
-                    ->update([
-                        'montant_collecte' => DB::raw('montant_collecte - ' . $montant),
-                        'updated_at'       => now(),
-                    ]);
-            });
-        } catch (\Throwable $e) {
-            Log::error('[reversements-auto] Échec réservation DB', [
-                'cagnotte' => $cagnotte->reference,
-                'error'    => $e->getMessage(),
-            ]);
-            $this->error("    Échec réservation : {$e->getMessage()}");
-
-            return false;
-        }
-
-        // ── Phase 2 : appel Paynala ───────────────────────────────────────────
-        $disburseType = $paynala->resolveDisburseType(
-            msisdnLocal: $msisdnLocal,
-            msisdnE164:  $numeroE164,
-            userId:      $beneficiaireUserId,
+        // Le décaissement lui-même vit dans ReversementService, partagé avec la
+        // suppression de compte : réservation sous row-lock, appel Paynala, puis
+        // restauration du solde si le refus est explicite. Cette méthode ne garde
+        // que l'habillage propre au cron — sortie console, alerte, notification.
+        //
+        // Modes 'libre' et 'quotidien' : la cagnotte continue de collecter, on ne
+        // la clôture pas. Les autres modes (date limite, montant cible) la ferment.
+        $res = $reversements->reverserSolde(
+            cagnotte:     $cagnotte,
+            source:       'cron_reversement_auto',
+            prefixeIdem:  'TONDO-AUTO-',
+            prefixeTrans: 'TONDOAUTO',
+            cloturer:     ! in_array($mode, ['libre', 'quotidien'], true),
+            trace:        ['mode' => $mode],
         );
 
-        try {
-            $disburseData = $paynala->disburse(
-                idempotencyKey: $idempotencyKey,
-                amount:         $montant,
-                msisdn:         $msisdnLocal,
-                reference:      $reference,
-                type:           $disburseType,
-            );
-        } catch (\RuntimeException $e) {
-            DB::table(project_table('payout'))
-                ->where('id', $payoutId)
-                ->update([
-                    'statut'     => 'echec',
-                    'response'   => json_encode(['error' => $e->getMessage()]),
-                    'updated_at' => now(),
-                ]);
+        if (! $res['ok']) {
+            $this->error("    {$res['erreur']}");
 
-            Log::critical('[reversements-auto] Paynala KO — intervention manuelle requise', [
-                'cagnotte'        => $cagnotte->reference,
-                'payout_id'       => $payoutId,
-                'idempotency_key' => $idempotencyKey,
-                'montant'         => $montant,
-                'error'           => $e->getMessage(),
-            ]);
-
-            $this->error("    Paynala KO : {$e->getMessage()}");
-            $this->envoyerAlertePaynalaKo($cagnotte, $payoutId, $transId, $montant, $numeroE164, $idempotencyKey, $e->getMessage());
+            // Alerte seulement si un payout a réellement été créé : une réservation
+            // qui n'a pas abouti n'a pas d'identifiant à instruire.
+            if ($res['payout_id'] !== null) {
+                $this->envoyerAlertePaynalaKo(
+                    $cagnotte,
+                    $res['payout_id'],
+                    (string) $res['trans_id'],
+                    $res['montant'],
+                    (string) $cagnotte->numero_retrait,
+                    (string) $res['idempotency_key'],
+                    (string) $res['erreur'],
+                );
+            }
 
             return false;
         }
-
-        // ── Phase 3 : confirmer + post-traitement ─────────────────────────────
-        DB::transaction(function () use ($payoutId, $disburseData, $cagnotte, $mode) {
-            DB::table(project_table('payout'))
-                ->where('id', $payoutId)
-                ->update([
-                    'statut'       => 'succes',
-                    'operateur_id' => $disburseData['airtel_money_id'] ?? null,
-                    'response'     => json_encode($disburseData),
-                    'updated_at'   => now(),
-                ]);
-
-            // Mode date ou montant cible → clôturer la cagnotte.
-            // Mode libre / quotidien → la cagnotte reste active.
-            if ($mode !== 'libre' && $mode !== 'quotidien') {
-                DB::table(project_table('cagnottes'))
-                    ->where('id', $cagnotte->id)
-                    ->update(['statut' => 'cloturee', 'updated_at' => now()]);
-            }
-        });
 
         // ── Notification gérant ───────────────────────────────────────────────
         $montantFmt = number_format($montant, 0, ',', ' ');
@@ -336,7 +240,7 @@ class TraiterReversementsAutoCagnottes extends Command
             ],
         );
 
-        $this->info("    ✓ {$montantFmt} FCFA versés → {$msisdnLocal}" . ($mode !== 'libre' ? ' (clôturée)' : ''));
+        $this->info("    ✓ {$montantFmt} FCFA versés → {$cagnotte->numero_retrait}" . ($mode !== 'libre' ? ' (clôturée)' : ''));
 
         return true;
     }
@@ -346,8 +250,11 @@ class TraiterReversementsAutoCagnottes extends Command
     /**
      * Envoie un mail d'alerte critique aux admins quand l'appel Paynala échoue.
      *
-     * IMPORTANT : le solde a déjà été décrémenté en Phase 1. Un admin doit vérifier
-     * manuellement si l'argent a bougé côté Paynala avant toute action corrective.
+     * IMPORTANT : l'état du solde dépend de la nature de l'échec. Refus explicite
+     * de Paynala → le solde a été RESTAURÉ, l'argent n'est pas parti. Timeout ou
+     * réseau → l'issue est inconnue, le solde reste amputé et un admin doit
+     * vérifier côté Paynala avant toute action corrective. Le message d'erreur
+     * transmis ici précise lequel des deux cas s'est produit.
      *
      * @param  TondoCagnotte $cagnotte        Cagnotte concernée.
      * @param  string        $payoutId        UUID de la ligne tondo_payout créée.

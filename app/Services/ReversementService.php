@@ -15,11 +15,9 @@ use Illuminate\Support\Str;
  * compte dont une cagnotte détient encore de l'argent — les fonds sont d'abord
  * renvoyés au numéro de retrait, immuable depuis la création.
  *
- * ⚠️ DUPLICATION ASSUMÉE — {@see \App\Console\Commands\TraiterReversementsAutoCagnottes}
- * implémente la même séquence en trois phases pour le cron quotidien de 18h.
- * Les deux chemins n'ont volontairement pas été fusionnés : unifier le code qui
- * décaisse réellement de l'argent mérite un changement dédié et testé, pas un
- * effet de bord. Toute correction ici doit être reportée là-bas, et inversement.
+ * Point d'entrée UNIQUE du décaissement d'une cagnotte : la suppression de compte
+ * et le cron quotidien de 18h ({@see \App\Console\Commands\TraiterReversementsAutoCagnottes})
+ * passent tous deux par ici. Toute correction profite donc aux deux chemins.
  *
  * Le décaissement Paynala est SYNCHRONE : `disburse()` répond immédiatement.
  * Un seul cas laisse un état intermédiaire — le timeout réseau, où l'issue est
@@ -53,7 +51,9 @@ class ReversementService
      * @param  string $prefixeIdem   Préfixe de la clé d'idempotence Paynala.
      * @param  string $prefixeTrans  Préfixe du trans_id interne.
      * @param  bool   $cloturer      Clôture la cagnotte après un reversement réussi.
-     * @return array{ok: bool, montant: int, payout_id: ?string, trans_id: ?string, erreur: ?string}
+     * @param  array<string, mixed> $trace Champs supplémentaires fusionnés dans
+     *                                     `payout.request` (ex : le mode du cron).
+     * @return array{ok: bool, montant: int, payout_id: ?string, trans_id: ?string, idempotency_key: ?string, erreur: ?string}
      */
     public function reverserSolde(
         TondoCagnotte $cagnotte,
@@ -61,17 +61,19 @@ class ReversementService
         string $prefixeIdem,
         string $prefixeTrans,
         bool   $cloturer = true,
+        array  $trace = [],
     ): array {
         $montant    = (int) $cagnotte->montant_collecte;
         $numeroE164 = $cagnotte->numero_retrait;
 
         if ($montant <= 0) {
-            return ['ok' => true, 'montant' => 0, 'payout_id' => null, 'trans_id' => null, 'erreur' => null];
+            return ['ok' => true, 'montant' => 0, 'payout_id' => null, 'trans_id' => null, 'idempotency_key' => null, 'erreur' => null];
         }
 
         if (! $numeroE164) {
             return [
                 'ok' => false, 'montant' => $montant, 'payout_id' => null, 'trans_id' => null,
+                'idempotency_key' => null,
                 'erreur' => 'Aucun numéro de retrait sur la cagnotte — reversement impossible.',
             ];
         }
@@ -94,7 +96,7 @@ class ReversementService
         try {
             DB::transaction(function () use (
                 $cagnotte, $montant, $payoutId, $transId,
-                $idempotencyKey, $reference, $numeroE164, $beneficiaireUserId, $source
+                $idempotencyKey, $reference, $numeroE164, $beneficiaireUserId, $source, $trace
             ) {
                 $solde = (int) DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
@@ -115,13 +117,13 @@ class ReversementService
                     'numero_tel'    => $numeroE164,
                     'montant'       => $montant,
                     'statut'        => 'initie',
-                    'request'       => json_encode([
+                    'request'       => json_encode(array_merge([
                         'idempotency_key'    => $idempotencyKey,
                         'reference'          => $reference,
                         'cagnotte_reference' => $cagnotte->reference,
                         'montant'            => $montant,
                         'source'             => $source,
-                    ]),
+                    ], $trace)),
                     'date_creation' => now(),
                     'created_at'    => now(),
                     'updated_at'    => now(),
@@ -142,6 +144,7 @@ class ReversementService
 
             return [
                 'ok' => false, 'montant' => $montant, 'payout_id' => null, 'trans_id' => null,
+                'idempotency_key' => $idempotencyKey,
                 'erreur' => 'Réservation impossible : ' . $e->getMessage(),
             ];
         }
@@ -184,6 +187,7 @@ class ReversementService
 
             return [
                 'ok' => false, 'montant' => $montant, 'payout_id' => $payoutId, 'trans_id' => $transId,
+                'idempotency_key' => $idempotencyKey,
                 'erreur' => "Paynala injoignable — l'issue du décaissement de {$montant} FCFA est inconnue, "
                     . 'le solde n\'a pas été restauré. À régulariser avant toute nouvelle tentative.',
             ];
@@ -219,6 +223,7 @@ class ReversementService
 
             return [
                 'ok' => false, 'montant' => $montant, 'payout_id' => $payoutId, 'trans_id' => $transId,
+                'idempotency_key' => $idempotencyKey,
                 'erreur' => 'Décaissement refusé (solde restauré) : ' . $e->getMessage(),
             ];
         }
@@ -243,7 +248,7 @@ class ReversementService
 
         return [
             'ok' => true, 'montant' => $montant, 'payout_id' => $payoutId,
-            'trans_id' => $transId, 'erreur' => null,
+            'trans_id' => $transId, 'idempotency_key' => $idempotencyKey, 'erreur' => null,
         ];
     }
 }
