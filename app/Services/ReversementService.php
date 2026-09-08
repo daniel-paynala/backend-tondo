@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\TondoCagnotte;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -20,8 +21,9 @@ use Illuminate\Support\Str;
  * décaisse réellement de l'argent mérite un changement dédié et testé, pas un
  * effet de bord. Toute correction ici doit être reportée là-bas, et inversement.
  *
- * Le décaissement Paynala est SYNCHRONE : `disburse()` répond immédiatement,
- * il n'y a donc pas d'état intermédiaire à gérer côté appelant.
+ * Le décaissement Paynala est SYNCHRONE : `disburse()` répond immédiatement.
+ * Un seul cas laisse un état intermédiaire — le timeout réseau, où l'issue est
+ * inconnue : le payout reste alors `en_cours` et le solde n'est pas restauré.
  */
 class ReversementService
 {
@@ -37,9 +39,14 @@ class ReversementService
      *  1. Réservation sous row-lock : insère le payout `initie` et décrémente le
      *     solde dans la même transaction — deux appels concurrents ne peuvent pas
      *     reverser deux fois.
-     *  2. Appel Paynala. En cas d'échec, le payout passe `echec` et le solde
-     *     n'est PAS restauré : la ligne reste comme trace d'un décaissement à
-     *     instruire à la main (même politique que le cron).
+     *  2. Appel Paynala, avec deux issues d'échec bien distinctes :
+     *     – **refus explicite** (Paynala a répondu non) : le payout passe `echec`
+     *       et le solde est RESTAURÉ. L'argent n'est pas parti, la cagnotte le
+     *       récupère : le décrément ne tient que si le décaissement est validé.
+     *     – **issue inconnue** (timeout, réseau) : on ne sait PAS si l'argent est
+     *       parti. Recréditer permettrait un second décaissement du même montant,
+     *       donc le solde n'est pas restauré ; le payout reste `en_cours` et
+     *       demande une régularisation manuelle.
      *  3. Confirmation `succes` et clôture de la cagnotte si demandée.
      *
      * @param  string $source        Trace écrite dans `payout.request` (ex : 'suppression_compte').
@@ -154,18 +161,20 @@ class ReversementService
                 reference:      $reference,
                 type:           $disburseType,
             );
-        } catch (\RuntimeException $e) {
+        } catch (ConnectionException $e) {
+            // ISSUE INCONNUE — la requête n'a pas abouti, mais elle a pu être
+            // reçue et traitée côté opérateur. Restaurer le solde ici ouvrirait
+            // la porte à un second décaissement du même montant : on ne touche
+            // à rien et on laisse le payout `en_cours` pour régularisation.
             DB::table(project_table('payout'))
                 ->where('id', $payoutId)
                 ->update([
-                    'statut'     => 'echec',
-                    'response'   => json_encode(['error' => $e->getMessage()]),
+                    'statut'     => 'en_cours',
+                    'response'   => json_encode(['error' => $e->getMessage(), 'issue' => 'inconnue']),
                     'updated_at' => now(),
                 ]);
 
-            // Solde déjà décrémenté et non restauré : une intervention manuelle
-            // est nécessaire, exactement comme sur le chemin du cron.
-            Log::critical("[{$source}] Paynala KO — intervention manuelle requise", [
+            Log::critical("[{$source}] Paynala injoignable — issue inconnue, régularisation requise", [
                 'cagnotte'        => $cagnotte->reference,
                 'payout_id'       => $payoutId,
                 'idempotency_key' => $idempotencyKey,
@@ -175,7 +184,42 @@ class ReversementService
 
             return [
                 'ok' => false, 'montant' => $montant, 'payout_id' => $payoutId, 'trans_id' => $transId,
-                'erreur' => 'Décaissement refusé : ' . $e->getMessage(),
+                'erreur' => "Paynala injoignable — l'issue du décaissement de {$montant} FCFA est inconnue, "
+                    . 'le solde n\'a pas été restauré. À régulariser avant toute nouvelle tentative.',
+            ];
+        } catch (\RuntimeException $e) {
+            // REFUS EXPLICITE — Paynala a répondu non : l'argent n'est pas parti.
+            // La réservation de la phase 1 est compensée dans la même transaction
+            // que le passage en `echec`, pour que le solde ne reste jamais amputé
+            // d'un montant qui n'a pas quitté la cagnotte.
+            DB::transaction(function () use ($payoutId, $cagnotte, $montant, $e) {
+                DB::table(project_table('payout'))
+                    ->where('id', $payoutId)
+                    ->update([
+                        'statut'     => 'echec',
+                        'response'   => json_encode(['error' => $e->getMessage(), 'solde_restaure' => true]),
+                        'updated_at' => now(),
+                    ]);
+
+                DB::table(project_table('cagnottes'))
+                    ->where('id', $cagnotte->id)
+                    ->update([
+                        'montant_collecte' => DB::raw('montant_collecte + ' . $montant),
+                        'updated_at'       => now(),
+                    ]);
+            });
+
+            Log::warning("[{$source}] Décaissement refusé — solde restauré", [
+                'cagnotte'        => $cagnotte->reference,
+                'payout_id'       => $payoutId,
+                'idempotency_key' => $idempotencyKey,
+                'montant'         => $montant,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return [
+                'ok' => false, 'montant' => $montant, 'payout_id' => $payoutId, 'trans_id' => $transId,
+                'erreur' => 'Décaissement refusé (solde restauré) : ' . $e->getMessage(),
             ];
         }
 
