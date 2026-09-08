@@ -50,18 +50,21 @@ class CguService
      */
     public function construire(array $cfg, string $operateur = 'airtel'): array
     {
-        $commissionPct    = $this->pourcentage((float) ($cfg['commission_paynala'] ?? 0));
-        $plafondEnvoi     = $this->fcfa((int) ($cfg['plafond_par_envoi'] ?? 0));
+        $plafondEnvoi       = $this->fcfa((int) ($cfg['plafond_par_envoi'] ?? 0));
         $plafondParticulier = $this->fcfa((int) ($cfg['plafond_cagnotte_particulier'] ?? 0));
         $plafondAssociation = $this->fcfa((int) ($cfg['plafond_cagnotte_association'] ?? 0));
 
+        $resume = $this->resume($plafondEnvoi);
+        $blocs  = $this->blocs($cfg, $plafondEnvoi, $plafondParticulier, $plafondAssociation);
+
         return [
-            // Change dès qu'un chiffre change : sert à détecter côté client qu'un
-            // utilisateur a accepté une version antérieure.
-            'version'   => $this->version($cfg),
+            // Empreinte du texte RENDU, pas de la config : une reformulation la
+            // fait changer, et un réglage qui n'apparaît nulle part ne la fait
+            // PAS changer — on ne demande pas de réaccepter pour rien.
+            'version'   => $this->version($resume, $blocs),
             'operateur' => $operateur,
-            'resume'    => $this->resume($cfg, $plafondEnvoi),
-            'blocs'     => $this->blocs($cfg, $commissionPct, $plafondEnvoi, $plafondParticulier, $plafondAssociation),
+            'resume'    => $resume,
+            'blocs'     => $blocs,
         ];
     }
 
@@ -70,7 +73,7 @@ class CguService
      *
      * @return list<string>
      */
-    private function resume(array $cfg, string $plafondEnvoi): array
+    private function resume(string $plafondEnvoi): array
     {
         return [
             'Le montant collecté est automatiquement reversé sur le numéro de retrait indiqué.',
@@ -88,7 +91,6 @@ class CguService
      */
     private function blocs(
         array  $cfg,
-        string $commissionPct,
         string $plafondEnvoi,
         string $plafondParticulier,
         string $plafondAssociation,
@@ -96,7 +98,7 @@ class CguService
         return [
             [
                 'titre' => 'Modèle économique',
-                'corps' => $this->modeleEconomique($cfg, $commissionPct),
+                'corps' => $this->modeleEconomique($cfg),
             ],
             [
                 'titre' => 'Plafonds',
@@ -122,14 +124,19 @@ class CguService
     /**
      * Phrase du modèle économique — le cœur du problème que ce service résout.
      *
+     * Le TAUX de commission n'est volontairement pas cité : la RÈGLE 4-bis
+     * interdit d'exposer le détail du calcul des frais. Le texte dit qui les
+     * supporte, pas combien ils valent.
+     *
      * La mention des frais de retrait n'apparaît QUE s'ils sont effectivement
      * répercutés sur le cotisant quelque part dans la matrice. À 0 partout, le
      * texte dit qu'ils sont à la charge du bénéficiaire, ce qui est le cas.
      */
-    private function modeleEconomique(array $cfg, string $commissionPct): string
+    private function modeleEconomique(array $cfg): string
     {
-        $phrase = "Tonji prélève une commission de {$commissionPct} sur chaque cotisation, "
-            . 'à la charge du cotisant. ';
+        $phrase = 'Tonji prélève une commission sur chaque cotisation, à la charge du cotisant. '
+            . 'Elle est appliquée au moment du paiement et le montant exact vous est indiqué '
+            . 'avant validation. ';
 
         if ($this->fraisRetraitRepercutes($cfg)) {
             $phrase .= 'Les frais de retrait de l\'opérateur sont également répercutés sur le '
@@ -159,21 +166,19 @@ class CguService
     }
 
     /**
-     * Empreinte des valeurs qui apparaissent dans le texte.
+     * Empreinte du texte effectivement affiché.
      *
-     * Deux configs identiques donnent la même version ; changer un plafond ou la
-     * commission la fait changer, et le client peut détecter qu'un utilisateur a
-     * accepté des conditions antérieures.
+     * Hacher le TEXTE plutôt que la config a deux conséquences voulues : une
+     * reformulation fait changer la version — les conditions ont bien changé
+     * pour l'utilisateur —, et un réglage qui n'apparaît nulle part, comme le
+     * taux de commission, ne la fait pas changer.
+     *
+     * @param  list<string> $resume
+     * @param  list<array{titre: string, corps: string}> $blocs
      */
-    private function version(array $cfg): string
+    private function version(array $resume, array $blocs): string
     {
-        return substr(md5(json_encode([
-            $cfg['commission_paynala']           ?? null,
-            $cfg['plafond_par_envoi']            ?? null,
-            $cfg['plafond_cagnotte_particulier'] ?? null,
-            $cfg['plafond_cagnotte_association'] ?? null,
-            $cfg['frais_retrait']                ?? null,
-        ])), 0, 12);
+        return substr(md5(json_encode([$resume, $blocs], JSON_UNESCAPED_UNICODE)), 0, 12);
     }
 
     /** 0.02 → « 2 % ». Deux décimales au plus, sans zéros inutiles. */

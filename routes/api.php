@@ -201,6 +201,8 @@ Route::prefix('mobile')->group(function () {
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
         // CGU rendues depuis la config opérateur (chiffres interpolés côté serveur).
         Route::get('/config/cgu',   [MobileConfigController::class, 'cgu']);
+        // Acceptation des CGU : la version envoyée doit être celle en vigueur.
+        Route::post('/config/cgu/accepter', [MobileConfigController::class, 'accepterCgu']);
 
         // Signalement d'une cagnotte (notifie les admins abonnés par e-mail)
         Route::post('/signalements', [\App\Http\Controllers\Api\Mobile\SignalementsController::class, 'store']);

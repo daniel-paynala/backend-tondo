@@ -116,6 +116,10 @@ class TondoUser extends Authenticatable
             'email'               => $this->email,
             'type_compte'         => $this->type_compte,
             'organisation_statut' => $organisationStatut,
+            // Version des CGU acceptée (null = jamais acceptées). Le client la
+            // compare à celle de GET /config/cgu pour savoir s'il doit les
+            // faire réaccepter.
+            'cgu_version'         => $this->cgu_version,
             'organisation_motif'  => $organisationMotif,
         ];
     }

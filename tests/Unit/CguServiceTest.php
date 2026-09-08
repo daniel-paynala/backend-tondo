@@ -50,17 +50,28 @@ class CguServiceTest extends TestCase
         $this->fail("Bloc « {$titre} » absent des CGU.");
     }
 
-    public function test_la_commission_vient_de_la_config(): void
+    public function test_le_taux_de_commission_n_est_jamais_cite(): void
     {
-        $this->assertStringContainsString(
-            'commission de 2 %',
-            $this->bloc($this->config(), 'Modèle économique'),
-        );
+        // RÈGLE 4-bis : le détail du calcul des frais ne s'expose pas. Le texte
+        // dit qui les supporte, jamais combien ils valent.
+        $corps = $this->bloc($this->config(), 'Modèle économique');
 
-        $this->assertStringContainsString(
-            'commission de 3,5 %',
-            $this->bloc($this->config(['commission_paynala' => 0.035]), 'Modèle économique'),
-        );
+        $this->assertStringContainsString('commission sur chaque cotisation', $corps);
+        $this->assertStringNotContainsString('2 %', $corps);
+        $this->assertStringNotContainsString('3,5 %', $this->bloc(
+            $this->config(['commission_paynala' => 0.035]),
+            'Modèle économique',
+        ));
+    }
+
+    public function test_un_reglage_invisible_ne_change_pas_la_version(): void
+    {
+        // La commission n'apparaît plus dans le texte : la faire varier ne doit
+        // pas forcer les utilisateurs à réaccepter des conditions identiques.
+        $avant = $this->service()->construire($this->config())['version'];
+        $apres = $this->service()->construire($this->config(['commission_paynala' => 0.05]))['version'];
+
+        $this->assertSame($avant, $apres);
     }
 
     public function test_matrice_a_zero_les_frais_de_retrait_ne_sont_pas_repercutes(): void
@@ -93,10 +104,10 @@ class CguServiceTest extends TestCase
         $this->assertStringContainsString('10 000 000 FCFA', $corps);
     }
 
-    public function test_la_version_change_avec_les_chiffres(): void
+    public function test_la_version_change_avec_un_chiffre_affiche(): void
     {
         $avant = $this->service()->construire($this->config())['version'];
-        $apres = $this->service()->construire($this->config(['commission_paynala' => 0.03]))['version'];
+        $apres = $this->service()->construire($this->config(['plafond_par_envoi' => 750000]))['version'];
 
         $this->assertNotSame($avant, $apres);
     }

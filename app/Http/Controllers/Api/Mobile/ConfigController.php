@@ -65,4 +65,47 @@ class ConfigController extends Controller
             pays:      $request->query('pays', 'GA'),
         ));
     }
+
+    /**
+     * POST /api/mobile/config/cgu/accepter — { version, operateur?, pays? }
+     *
+     * Enregistre l'acceptation des CGU par l'utilisateur courant.
+     *
+     * La version envoyée est comparée à celle que le serveur produit MAINTENANT :
+     * accepter une version périmée est refusé. Sans ce contrôle, un client resté
+     * ouvert pendant un changement de plafond enregistrerait une acceptation qui
+     * ne correspond à aucun texte en vigueur.
+     */
+    public function accepterCgu(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'version'   => ['required', 'string', 'max:32'],
+            'operateur' => ['nullable', 'string', 'max:32'],
+            'pays'      => ['nullable', 'string', 'max:8'],
+        ]);
+
+        $user    = $request->user();
+        $courant = $this->cgu->pour(
+            projectId: $user->project_id,
+            operateur: $data['operateur'] ?? 'airtel',
+            pays:      $data['pays'] ?? 'GA',
+        );
+
+        if ($data['version'] !== $courant['version']) {
+            return response()->json([
+                'message'         => 'Ces conditions ont changé. Relisez-les avant d\'accepter.',
+                'version_courante' => $courant['version'],
+            ], 409);
+        }
+
+        $user->cgu_version     = $courant['version'];
+        $user->cgu_acceptee_at = now();
+        $user->save();
+
+        return response()->json([
+            'message'         => 'Conditions acceptées.',
+            'cgu_version'     => $user->cgu_version,
+            'cgu_acceptee_at' => $user->cgu_acceptee_at,
+        ]);
+    }
 }
