@@ -199,6 +199,8 @@ Route::prefix('mobile')->group(function () {
 
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
+        // CGU rendues depuis la config opérateur (chiffres interpolés côté serveur).
+        Route::get('/config/cgu',   [MobileConfigController::class, 'cgu']);
 
         // Signalement d'une cagnotte (notifie les admins abonnés par e-mail)
         Route::post('/signalements', [\App\Http\Controllers\Api\Mobile\SignalementsController::class, 'store']);
