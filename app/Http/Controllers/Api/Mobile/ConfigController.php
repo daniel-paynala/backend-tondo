@@ -60,7 +60,10 @@ class ConfigController extends Controller
     public function cgu(Request $request): JsonResponse
     {
         return response()->json($this->cgu->pour(
-            projectId: $request->user()->project_id,
+            // Route PUBLIQUE : les conditions se lisent avant d'avoir un compte,
+            // à l'inscription. On prend le projet de l'utilisateur s'il est
+            // connecté, sinon le projet Tondo par défaut.
+            projectId: $request->user()?->project_id ?? \App\Models\Project::tondoId(),
             operateur: $request->query('operateur', 'airtel'),
             pays:      $request->query('pays', 'GA'),
         ));

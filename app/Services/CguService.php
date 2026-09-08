@@ -113,6 +113,13 @@ class CguService
                     . 'collecte. Cette règle protège tous les membres contre la fraude.',
             ],
             [
+                'titre' => 'Cagnottes publiques',
+                'corps' => 'Une collecte est privée par défaut : seuls les membres invités y '
+                    . 'participent. Une collecte publique, ouverte à tous, est réservée aux '
+                    . 'associations dont le dossier a été validé, et passe en modération avant '
+                    . "d'être publiée.",
+            ],
+            [
                 'titre' => 'Différends entre membres',
                 'corps' => "Tonji facilite la collecte mais n'arbitre pas les conflits entre cotisants "
                     . 'et bénéficiaires, sauf cas manifestement clair (ex : usurpation d\'identité). '

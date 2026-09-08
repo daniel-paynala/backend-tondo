@@ -186,6 +186,11 @@ Route::prefix('mobile')->group(function () {
     Route::get('/auth/kyc-check',    [MobileAuthController::class, 'kycCheck'])->middleware('throttle:kyc-check');
 
     // Protégé par token Sanctum (guard mobile)
+    // CGU rendues depuis la config opérateur — PUBLIQUE : elles se lisent à
+    // l'inscription, avant d'avoir un compte. L'acceptation, elle, est
+    // authentifiée (POST /config/cgu/accepter, dans le groupe ci-dessous).
+    Route::get('/config/cgu', [MobileConfigController::class, 'cgu']);
+
     Route::middleware('auth:mobile')->group(function () {
         // Auth / session
         Route::get('/auth/me',     [MobileAuthController::class, 'me']);
@@ -199,8 +204,6 @@ Route::prefix('mobile')->group(function () {
 
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
-        // CGU rendues depuis la config opérateur (chiffres interpolés côté serveur).
-        Route::get('/config/cgu',   [MobileConfigController::class, 'cgu']);
         // Acceptation des CGU : la version envoyée doit être celle en vigueur.
         Route::post('/config/cgu/accepter', [MobileConfigController::class, 'accepterCgu']);
 
