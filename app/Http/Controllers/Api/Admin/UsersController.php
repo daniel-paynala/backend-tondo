@@ -158,7 +158,30 @@ class UsersController extends Controller
             return response()->json(['message' => 'Utilisateur introuvable.'], 404);
         }
 
-        // ── 1. Rapatriement des soldes détenus par ses cagnottes ─────────────
+        // ── 1. Aucun décaissement en souffrance ──────────────────────────────
+        // Un payout resté 'initie', 'en_cours' ou 'echec' signifie que le solde
+        // d'une cagnotte a été décrémenté sans que l'argent soit sorti. On refuse
+        // alors d'aller plus loin : relancer un rapatriement empilerait un second
+        // décaissement sur un premier non résolu, et une seconde tentative de
+        // suppression trouverait un solde à 0, croirait n'avoir rien à rapatrier
+        // et supprimerait le compte en laissant les fonds en l'air.
+        $enSouffrance = DB::table(project_table('payout'))
+            ->whereIn('cagnotte_id', function ($q) use ($projectId, $user) {
+                $q->select('id')
+                    ->from(project_table('cagnottes'))
+                    ->where('project_id', $projectId)
+                    ->where('user_id', $user->id);
+            })
+            ->whereIn('statut', ['initie', 'en_cours', 'echec'])
+            ->count();
+
+        if ($enSouffrance > 0) {
+            return response()->json([
+                'message' => "Suppression impossible : {$enSouffrance} reversement(s) non abouti(s) sur ses cagnottes. Régularisez-les avant de supprimer le compte.",
+            ], 409);
+        }
+
+        // ── 2. Rapatriement des soldes détenus par ses cagnottes ─────────────
         $aRapatrier = TondoCagnotte::where('project_id', $projectId)
             ->where('user_id', $user->id)
             ->where('montant_collecte', '>', 0)
@@ -203,7 +226,7 @@ class UsersController extends Controller
             ], 409);
         }
 
-        // ── 2. Empreinte financière : purge réelle ou anonymisation ? ────────
+        // ── 3. Empreinte financière : purge réelle ou anonymisation ? ────────
         // Un compte qui n'a jamais rien créé ni payé ne laisse aucune trace
         // comptable à préserver : le supprimer vraiment évite d'accumuler des
         // lignes fantômes « Compte supprimé » dans la base.
@@ -218,6 +241,19 @@ class UsersController extends Controller
                 ->where('project_id', $projectId)
                 ->where('user_id', $user->id)
                 ->where('montant_paye', '>', 0)
+                ->exists(),
+            // GARDE CRITIQUE : `paiements.participant_id` est NOT NULL et
+            // ON DELETE CASCADE. Supprimer une participation référencée par un
+            // paiement DÉTRUIRAIT silencieusement la ligne de paiement. Le test
+            // sur `montant_paye` ci-dessus n'est qu'un indice indirect ; celui-ci
+            // est exact et interdit la purge dans ce cas.
+            'paiement_sur_participation' => DB::table(project_table('paiements'))
+                ->whereIn('participant_id', function ($q) use ($projectId, $user) {
+                    $q->select('id')
+                        ->from(project_table('participants'))
+                        ->where('project_id', $projectId)
+                        ->where('user_id', $user->id);
+                })
                 ->exists(),
         ];
 
@@ -250,7 +286,7 @@ class UsersController extends Controller
             ]);
         }
 
-        // ── 3. Anonymisation (le compte a un historique à préserver) ─────────
+        // ── 4. Anonymisation (le compte a un historique à préserver) ─────────
         // Le numéro est remplacé par un jeton unique : il libère le vrai numéro
         // pour une réinscription et rend toute connexion OTP impossible, tout en
         // respectant l'index unique (project_id, numero).
@@ -296,7 +332,7 @@ class UsersController extends Controller
             ]);
         });
 
-        // ── 4. Journal d'audit ───────────────────────────────────────────────
+        // ── 5. Journal d'audit ───────────────────────────────────────────────
         $this->journaliser($request, $projectId, $user->id, $ancienNumero, 'anonymisation', $numeroAnonyme, $reverses);
 
         return response()->json([
