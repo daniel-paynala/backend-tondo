@@ -159,12 +159,20 @@ class UsersController extends Controller
         }
 
         // ── 1. Aucun décaissement en souffrance ──────────────────────────────
-        // Un payout resté 'initie', 'en_cours' ou 'echec' signifie que le solde
-        // d'une cagnotte a été décrémenté sans que l'argent soit sorti. On refuse
-        // alors d'aller plus loin : relancer un rapatriement empilerait un second
-        // décaissement sur un premier non résolu, et une seconde tentative de
-        // suppression trouverait un solde à 0, croirait n'avoir rien à rapatrier
-        // et supprimerait le compte en laissant les fonds en l'air.
+        // Un décaissement non résolu signifie que le solde d'une cagnotte a été
+        // décrémenté sans que l'argent soit sorti. On refuse alors d'aller plus
+        // loin : relancer un rapatriement empilerait un second décaissement sur
+        // un premier non résolu, et une seconde tentative de suppression
+        // trouverait un solde à 0, croirait n'avoir rien à rapatrier et
+        // supprimerait le compte en laissant les fonds en l'air.
+        //
+        // « Non résolu » exclut volontairement les échecs compensés : depuis que
+        // ReversementService restaure le solde sur refus explicite, un payout
+        // 'echec' portant `solde_restaure` est une situation CLOSE — l'argent est
+        // revenu dans la cagnotte. Bloquer dessus interdirait à jamais la
+        // suppression d'un compte ayant connu un seul refus, même ancien. Les
+        // 'echec' sans ce marqueur, eux, datent d'avant la compensation et
+        // restent de vrais fonds en l'air.
         $enSouffrance = DB::table(project_table('payout'))
             ->whereIn('cagnotte_id', function ($q) use ($projectId, $user) {
                 $q->select('id')
@@ -172,7 +180,10 @@ class UsersController extends Controller
                     ->where('project_id', $projectId)
                     ->where('user_id', $user->id);
             })
-            ->whereIn('statut', ['initie', 'en_cours', 'echec'])
+            ->where(function ($q) {
+                $q->whereIn('statut', ['initie', 'en_cours'])
+                    ->orWhereRaw("statut = 'echec' AND COALESCE((response->>'solde_restaure')::boolean, false) = false");
+            })
             ->count();
 
         if ($enSouffrance > 0) {
