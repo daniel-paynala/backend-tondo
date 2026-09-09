@@ -4,11 +4,7 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
-use App\Models\TondoOrganisationDocument;
-use App\Contracts\PushNotifier;
-use App\Services\SupabaseStorageService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -107,7 +103,11 @@ class AssociationController extends Controller
             $org->id = (string) Str::uuid();
             $org->project_id = $user->project_id;
             $org->user_id = $user->id;
-            $org->statut = 'en_attente';
+            // Approuvée d'emblée : le KYC Airtel fait foi. Un compte associatif
+            // existe chez l'opérateur, qui a déjà instruit l'identité — Paynala
+            // ne redemande plus de pièces (décision du 2026-09-09). Le seul
+            // dossier encore étudié est la demande de dépassement des 10 M.
+            $org->statut = 'approuve';
         }
 
         // Création comme mise à jour : on ne touche qu'au nom + description.
@@ -119,158 +119,6 @@ class AssociationController extends Controller
             ['organisation' => $this->serializeOrganisation($org)],
             $creation ? 201 : 200
         );
-    }
-
-    /**
-     * POST /api/mobile/association/documents  (multipart/form-data)
-     * Body : { type_piece, fichier }
-     *
-     * Dépose (ou remplace) une pièce. Le fichier va sur le disque privé.
-     */
-    public function uploadDocument(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'type_piece' => ['required', 'in:' . implode(',', self::TYPES_PIECES)],
-            'fichier'    => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:8192'], // 8 Mo
-        ]);
-
-        $user = $request->user();
-        $org = $this->organisationDuUser($user);
-        if (! $org) {
-            return response()->json([
-                'message' => 'Renseignez d\'abord le nom de votre association.',
-            ], 422);
-        }
-
-        $fichier   = $request->file('fichier');
-        $extension = strtolower($fichier->getClientOriginalExtension() ?: $fichier->extension());
-
-        // Chemin déterministe dans le bucket privé (1 fichier par type et par orga).
-        $cheminNouveau = "associations/{$org->id}/{$data['type_piece']}.{$extension}";
-
-        // Pièce existante de ce type ? On remplace l'objet + la ligne.
-        $doc = TondoOrganisationDocument::query()
-            ->where('organisation_id', $org->id)
-            ->where('type_piece', $data['type_piece'])
-            ->first();
-
-        $storage = app(SupabaseStorageService::class);
-
-        // Téléverse (upsert) sur Supabase Storage — bucket privé, aucun fichier
-        // sur le disque du serveur applicatif.
-        $storage->upload(
-            $cheminNouveau,
-            (string) file_get_contents($fichier->getRealPath()),
-            $fichier->getClientMimeType()
-        );
-
-        // Supprime l'ancien objet si le chemin diffère (extension changée).
-        if ($doc && $doc->chemin && $doc->chemin !== $cheminNouveau) {
-            $storage->delete($doc->chemin);
-        }
-
-        if (! $doc) {
-            $doc = new TondoOrganisationDocument();
-            $doc->id = (string) Str::uuid();
-            $doc->project_id = $org->project_id;
-            $doc->organisation_id = $org->id;
-            $doc->type_piece = $data['type_piece'];
-        }
-
-        $doc->chemin        = $cheminNouveau;
-        $doc->nom_fichier   = $fichier->getClientOriginalName();
-        $doc->mime          = $fichier->getClientMimeType();
-        $doc->taille_octets = $fichier->getSize();
-        $doc->statut        = 'depose'; // (re)dépôt → repasse en attente de validation
-        $doc->motif_rejet   = null;
-        $doc->save();
-
-        return response()->json(['document' => $this->serializeDocument($doc)], 201);
-    }
-
-    /**
-     * GET /api/mobile/association/documents/{typePiece}
-     *
-     * Stream le fichier d'une pièce — uniquement pour l'organisation du compte
-     * courant (pièces sensibles).
-     */
-    public function showDocument(Request $request, string $typePiece): RedirectResponse|JsonResponse
-    {
-        $org = $this->organisationDuUser($request->user());
-        if (! $org) {
-            return response()->json(['message' => 'Aucune association.'], 404);
-        }
-
-        $doc = TondoOrganisationDocument::query()
-            ->where('organisation_id', $org->id)
-            ->where('type_piece', $typePiece)
-            ->first();
-
-        if (! $doc) {
-            return response()->json(['message' => 'Pièce introuvable.'], 404);
-        }
-
-        // Redirige vers une URL signée temporaire du bucket privé Supabase.
-        $url = app(SupabaseStorageService::class)->signedUrl($doc->chemin);
-        return redirect()->away($url);
-    }
-
-    /**
-     * POST /api/mobile/association/soumettre
-     *
-     * Vérifie que le dossier est complet (nom + 5 pièces) et le (re)soumet à la
-     * modération (statut 'en_attente'). 422 + liste des pièces manquantes sinon.
-     */
-    public function soumettre(Request $request): JsonResponse
-    {
-        $org = $this->organisationDuUser($request->user());
-        if (! $org) {
-            return response()->json([
-                'message' => 'Renseignez d\'abord le nom de votre association.',
-            ], 422);
-        }
-
-        // Pièces déjà déposées → ce qui manque parmi les 5 requises.
-        $deposees = TondoOrganisationDocument::query()
-            ->where('organisation_id', $org->id)
-            ->pluck('type_piece')
-            ->all();
-        $manquantes = array_values(array_diff(self::TYPES_PIECES, $deposees));
-
-        if (! empty($manquantes)) {
-            return response()->json([
-                'message'    => 'Dossier incomplet : il manque des pièces.',
-                'manquantes' => $manquantes,
-            ], 422);
-        }
-
-        // Complet → (re)mise en file de modération.
-        $org->statut = 'en_attente';
-        $org->motif_rejet = null;
-        $org->save();
-
-        // Accusé de réception : le représentant est notifié de la soumission,
-        // au même titre que de l'approbation / du refus / de la suspension.
-        // Best-effort — n'interrompt jamais la soumission si la notif échoue.
-        try {
-            app(PushNotifier::class)->notifyOne(
-                (string) $org->user_id,
-                'Dossier reçu',
-                "Le dossier de « {$org->nom} » a bien été reçu. Il est en cours de vérification par l'équipe Tonji.",
-                [
-                    'type'            => 'moderation_association',
-                    'organisation_id' => $org->id,
-                    'statut'          => 'en_attente',
-                ],
-            );
-        } catch (\Throwable) {
-            // best-effort
-        }
-
-        return response()->json([
-            'message'      => 'Dossier soumis. Il sera vérifié par l\'équipe Tonji.',
-            'organisation' => $this->serializeOrganisation($org),
-        ]);
     }
 
     // ── Helpers privés ──────────────────────────────────────────────────────
@@ -287,7 +135,13 @@ class AssociationController extends Controller
     }
 
     /**
-     * Sérialise une organisation + ses pièces pour l'app.
+     * Sérialise une organisation pour l'app.
+     *
+     * Plus de liste de pièces : le dossier documentaire a été supprimé
+     * (2026-09-09), le KYC Airtel faisant foi sur l'identité de l'association.
+     * La table `tonji_organisation_documents` est conservée mais n'est plus
+     * ni écrite ni lue — elle resservira si des pièces sont redemandées pour
+     * les demandes de dépassement des 10 M.
      */
     private function serializeOrganisation(TondoOrganisation $org): array
     {
@@ -299,25 +153,6 @@ class AssociationController extends Controller
             'motif_rejet'    => $org->motif_rejet,
             'plafond_fcfa'   => $org->plafond_fcfa,
             'numero_retrait' => $org->numero_retrait,
-            'documents'      => $org->documents()
-                ->get()
-                ->map(fn ($d) => $this->serializeDocument($d))
-                ->values(),
-        ];
-    }
-
-    /**
-     * Sérialise une pièce (sans exposer le chemin de stockage privé).
-     */
-    private function serializeDocument(TondoOrganisationDocument $doc): array
-    {
-        return [
-            'type_piece'    => $doc->type_piece,
-            'nom_fichier'   => $doc->nom_fichier,
-            'mime'          => $doc->mime,
-            'taille_octets' => $doc->taille_octets,
-            'statut'        => $doc->statut,
-            'motif_rejet'   => $doc->motif_rejet,
         ];
     }
 }

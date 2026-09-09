@@ -227,9 +227,6 @@ Route::prefix('mobile')->group(function () {
         // Associations — dossier (nom, description, statut) + pièces requises
         Route::get('/association',                       [MobileAssociationController::class, 'show']);
         Route::post('/association',                      [MobileAssociationController::class, 'store']);
-        Route::post('/association/soumettre',            [MobileAssociationController::class, 'soumettre']);
-        Route::post('/association/documents',            [MobileAssociationController::class, 'uploadDocument']);
-        Route::get('/association/documents/{typePiece}', [MobileAssociationController::class, 'showDocument']);
 
         // Cagnottes (gérant)
         Route::get('/cagnottes/generate-reference',           [MobileCagnottesController::class, 'generateReference']);
