@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
+use App\Services\PaynalaPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
 
 /**
@@ -42,6 +44,11 @@ class AssociationController extends Controller
      *
      * Persiste le choix de l'aiguillage. Renvoie le user sérialisé (avec
      * `type_compte` + `organisation_statut`) pour rafraîchir le gate côté app.
+     *
+     * Le choix est CONFRONTÉ au KYC Airtel : le grade du numéro dit déjà s'il
+     * s'agit d'un compte particulier ou d'un compte association. L'app affiche
+     * quand même les deux options — c'est voulu, à visée pédagogique — mais un
+     * choix contraire est refusé ici, avec le motif.
      */
     public function definirTypeCompte(Request $request): JsonResponse
     {
@@ -49,8 +56,48 @@ class AssociationController extends Controller
             'type_compte' => ['required', 'in:particulier,association'],
         ]);
 
-        $user = $request->user();
-        $user->type_compte = $data['type_compte'];
+        $user   = $request->user();
+        $choisi = $data['type_compte'];
+
+        // Numéro local 0XXXXXXXX : c'est sous cette forme que le KYC a été mis
+        // en cache à l'inscription, quelques instants plus tôt.
+        $msisdn = str_starts_with((string) $user->numero, '+241')
+            ? '0' . substr((string) $user->numero, 4)
+            : ltrim((string) $user->numero, '+');
+
+        $kyc = app(PaynalaPaymentService::class)->checkKycData($msisdn);
+
+        // Service indisponible : on refuse plutôt que d'enregistrer un type
+        // qu'on ne peut pas vérifier. L'inscription elle-même est déjà soumise
+        // à la même règle, le cache est donc normalement chaud.
+        if ($kyc === null) {
+            throw ValidationException::withMessages([
+                'type_compte' => 'La vérification Airtel Money est temporairement indisponible. '
+                    . 'Réessayez dans quelques minutes.',
+            ]);
+        }
+
+        $attendu = $kyc['type_compte'] ?? null;
+
+        if ($attendu === null) {
+            throw ValidationException::withMessages([
+                'type_compte' => 'Profil non reconnu : ce numéro n\'est ni un compte particulier '
+                    . 'ni un compte association chez Airtel.',
+            ]);
+        }
+
+        if ($attendu !== $choisi) {
+            throw ValidationException::withMessages([
+                'type_compte' => $attendu === 'association'
+                    ? 'Ce numéro est enregistré comme compte association chez Airtel. '
+                        . 'Choisissez « Association » pour continuer.'
+                    : 'Ce numéro est enregistré comme compte particulier chez Airtel. '
+                        . 'Pour créer un compte association, utilisez le numéro Airtel Money '
+                        . 'de votre association.',
+            ]);
+        }
+
+        $user->type_compte = $choisi;
         $user->save();
 
         return response()->json(['user' => $user->toApiArray()]);

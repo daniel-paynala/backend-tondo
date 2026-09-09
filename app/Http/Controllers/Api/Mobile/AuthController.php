@@ -358,6 +358,9 @@ class AuthController extends Controller
                 'nom'         => config('services.otp.test_nom', 'REVIEW'),
                 'prenom'      => config('services.otp.test_prenom', 'Test'),
                 'type_client' => 'particulier',
+                // Le numéro de revue ne passe pas par le KYC : on l'annonce
+                // particulier pour que l'aiguillage se comporte normalement.
+                'type_compte' => 'particulier',
                 'message'     => 'Compte Airtel Money vérifié.',
             ]);
         }
@@ -451,6 +454,22 @@ class AuthController extends Controller
             ]);
         }
 
+        // Grade Airtel hors des profils connus → blocage. On préfère refuser une
+        // inscription qu'attribuer par défaut un type de compte : le type pilote
+        // les plafonds et l'accès aux cagnottes publiques, un mauvais rattachement
+        // se paierait plus tard.
+        if (($kycData['type_compte'] ?? null) === null) {
+            return response()->json([
+                'user_exists' => false,
+                'operateur'   => 'airtel',
+                'kyc_ok'      => false,
+                'bloque'      => true,
+                'message'     => 'Profil non reconnu. Ce numéro Airtel Money n\'est ni un compte '
+                    . 'particulier ni un compte association. Contactez Airtel ou écrivez-nous à '
+                    . 'contact@tonji.ga.',
+            ]);
+        }
+
         // KYC réussi → nom et prénom pour auto-complétion du formulaire
         return response()->json([
             'user_exists' => false,
@@ -460,6 +479,9 @@ class AuthController extends Controller
             'nom'         => $kycData['nom']        ?? '',
             'prenom'      => $kycData['prenom']      ?? '',
             'type_client' => $kycData['type_client'] ?? 'particulier',
+            // Type de compte déduit du grade : l'app affichera quand même le
+            // choix, mais un choix contraire sera refusé côté serveur.
+            'type_compte' => $kycData['type_compte'],
             'message'     => 'Compte Airtel Money vérifié.',
         ]);
     }

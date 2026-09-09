@@ -15,6 +15,39 @@ use Illuminate\Support\Facades\Log;
  */
 class PaynalaPaymentService
 {
+    /**
+     * Grades Airtel correspondant à un compte de PARTICULIER.
+     *
+     * À ne pas confondre avec {@see resolveDisburseType} et `type_client`, qui
+     * décident du routage B2C/B2B chez Paynala : un compte d'association a bien
+     * `type_client = entreprise` (routage B2B) tout en étant, pour Tonji, un
+     * compte de type `association`. Deux notions distinctes sur le même grade.
+     */
+    private const GRADES_PARTICULIER = ['SUBS', 'TEMP'];
+
+    /** Grades Airtel correspondant à un compte d'ASSOCIATION (Daniel, 2026-09-09). */
+    private const GRADES_ASSOCIATION = ['MERCHVIP', 'HMERA'];
+
+    /**
+     * Type de compte Tonji déduit du grade Airtel.
+     *
+     * Retourne `null` pour tout grade hors des deux listes : le profil n'est pas
+     * reconnu et l'inscription doit être bloquée, plutôt que rattachée par
+     * défaut à l'une des deux catégories.
+     */
+    public static function typeCompteDepuisGrade(?string $grade): ?string
+    {
+        if ($grade === null || $grade === '') {
+            return null;
+        }
+
+        if (in_array($grade, self::GRADES_PARTICULIER, true)) {
+            return 'particulier';
+        }
+
+        return in_array($grade, self::GRADES_ASSOCIATION, true) ? 'association' : null;
+    }
+
     private string $baseUrl;
     private string $clientId;
     private string $clientSecret;
@@ -178,7 +211,11 @@ class PaynalaPaymentService
      *
      * Format de retour :
      *   ['ok' => true, 'nom' => 'DOVI AKON', 'prenom' => 'Daniel',
-     *    'grade' => 'SUBS', 'type_client' => 'particulier']
+     *    'grade' => 'SUBS', 'type_client' => 'particulier',
+     *    'type_compte' => 'particulier']
+     *
+     * `type_compte` vaut null si le grade n'est reconnu ni comme particulier ni
+     * comme association — l'appelant doit alors bloquer.
      *
      * Retourne null si le service est indisponible (timeout, erreur réseau).
      * Retourne ['ok' => false] si le numéro n'a pas de compte Airtel Money.
@@ -187,7 +224,7 @@ class PaynalaPaymentService
      * de rappeler l'API lors du verify-otp.
      *
      * @param  string $msisdn  Numéro local Gabon format 0XXXXXXXX ou E.164.
-     * @return array{ok:bool,nom?:string,prenom?:string,grade?:string,type_client?:string}|null
+     * @return array{ok:bool,nom?:string,prenom?:string,grade?:string,type_client?:string,type_compte?:?string}|null
      */
     public function checkKycData(string $msisdn): ?array
     {
@@ -203,6 +240,7 @@ class PaynalaPaymentService
                 'nom'         => $cached['nom']   ?? '',
                 'prenom'      => $cached['prenom'] ?? '',
                 'grade'       => $cached['grade']  ?? '',
+                'type_compte' => self::typeCompteDepuisGrade($cached['grade'] ?? null),
                 'type_client' => Cache::get($typeClientKey, 'particulier'),
             ];
         }
@@ -226,7 +264,11 @@ class PaynalaPaymentService
                 Cache::put($nomKey,        ['nom' => $nom, 'prenom' => $prenom, 'grade' => $grade], now()->addHours(24));
                 Cache::put($typeClientKey, $typeClient,                            now()->addHours(24));
 
-                return compact('nom', 'prenom', 'grade', 'typeClient') + ['ok' => true, 'type_client' => $typeClient];
+                return compact('nom', 'prenom', 'grade', 'typeClient') + [
+                    'ok'          => true,
+                    'type_client' => $typeClient,
+                    'type_compte' => self::typeCompteDepuisGrade($grade),
+                ];
             }
 
             // Numéro sans compte Airtel Money
