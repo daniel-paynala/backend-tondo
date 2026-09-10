@@ -252,10 +252,42 @@ class CagnottesController extends Controller
         }
 
         // ── Visibilité + modération ─────────────────────────────────────────────
-        // Public réservé aux cagnottes ouvertes créées par une ASSOCIATION
-        // (validée) : seules les assos peuvent lancer une collecte publique
-        // (cadre légal). Tontines et particuliers restent toujours privés.
-        $peutPublier = $type === 'cagnotte_ouverte' && $user->type_compte === 'association';
+        // Public réservé aux cagnottes ouvertes créées par une ASSOCIATION dont
+        // l'organisation est ACTIVE : seules les assos peuvent lancer une
+        // collecte publique (cadre légal). Tontines et particuliers restent
+        // toujours privés.
+        //
+        // Le statut de l'organisation compte : une association suspendue ne doit
+        // pas pouvoir alimenter la file de modération. La collecte lui serait de
+        // toute façon refusée ensuite par CollecteGuard, mais autant ne pas créer
+        // une cagnotte qu'un modérateur pourrait approuver par inadvertance.
+        $estAssociation = $user->type_compte === 'association';
+        $orgStatut = $estAssociation
+            ? \App\Models\TondoOrganisation::query()
+                ->where('project_id', $user->project_id)
+                ->where('user_id', $user->id)
+                ->value('statut')
+            : null;
+
+        $peutPublier = $type === 'cagnotte_ouverte'
+            && $estAssociation
+            && $orgStatut === 'approuve';
+
+        // Refus EXPLICITE plutôt que rétrogradation silencieuse : la coercition
+        // laissait l'utilisateur croire sa cagnotte publique alors qu'elle
+        // n'apparaîtrait nulle part. Les deux clients conditionnent déjà l'envoi
+        // de 'public' au type de compte, ce cas ne survient donc pas en usage
+        // normal — il signale un client modifié ou une association suspendue.
+        if (($base['visibilite'] ?? 'prive') === 'public' && ! $peutPublier) {
+            throw ValidationException::withMessages([
+                'visibilite' => $type !== 'cagnotte_ouverte'
+                    ? 'Une tontine ne peut pas être publique.'
+                    : ($estAssociation
+                        ? 'Votre association n\'est pas active : vous ne pouvez pas lancer de collecte publique.'
+                        : 'Les collectes publiques sont réservées aux associations.'),
+            ]);
+        }
+
         $visibilite = $peutPublier
             ? ($base['visibilite'] ?? 'prive')
             : 'prive';
