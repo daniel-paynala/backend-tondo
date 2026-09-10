@@ -80,6 +80,8 @@ class CotisationsController extends Controller
             $cagnotte->statut_validation,
             $gerant?->type_compte,
             $orgStatut,
+            $cagnotte->type,
+            $cagnotte->date_fin ? (string) $cagnotte->date_fin : null,
         );
     }
 
