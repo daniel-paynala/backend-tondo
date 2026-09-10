@@ -30,7 +30,7 @@ class CagnottesController extends Controller
     }
 
     /**
-     * GET /api/public/cagnottes?limit=&offset=&tri=recentes|objectif
+     * GET /api/public/cagnottes?limit=&offset=&tri=recentes|objectif&q=
      * Liste paginée des cagnottes publiques (page Explorer).
      */
     public function index(Request $request): JsonResponse
@@ -40,6 +40,19 @@ class CagnottesController extends Controller
         $tri    = $request->string('tri')->toString();
 
         $q = $this->baseQuery();
+
+        // Recherche plein-texte simple sur le titre et l'histoire de la collecte.
+        // Insensible à la casse (ilike) : le public tape rarement les majuscules
+        // d'un nom d'association.
+        $recherche = trim($request->string('q')->toString());
+        if ($recherche !== '') {
+            $motif = '%' . $recherche . '%';
+            $q->where(function ($sub) use ($motif) {
+                $sub->where('titre', 'ilike', $motif)
+                    ->orWhere('description', 'ilike', $motif);
+            });
+        }
+
         if ($tri === 'objectif') {
             // Les plus proches d'atteindre leur objectif d'abord (Postgres).
             $q->orderByRaw('CASE WHEN montant_cible IS NULL OR montant_cible = 0 THEN 1 ELSE 0 END')

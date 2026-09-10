@@ -130,6 +130,17 @@ class CagnottesController extends Controller
             ]);
         }
 
+        // Les comptes association n'ont pas accès aux tontines : une tontine est
+        // un tour de cotisation entre personnes, sans objet pour une structure
+        // qui collecte auprès du public. Décision du 2026-09-10, susceptible
+        // d'être rouverte plus tard.
+        if ($type === 'tontine_periodique' && $request->user()->type_compte === 'association') {
+            throw ValidationException::withMessages([
+                'type' => 'Les tontines ne sont pas disponibles pour les comptes association. '
+                    . 'Créez une cagnotte pour collecter.',
+            ]);
+        }
+
         $base = $request->validate([
             'titre'          => ['required', 'string', 'max:120'],
             'numero_retrait' => ['nullable', 'string', 'regex:/^\+?\d{8,15}$/'],
