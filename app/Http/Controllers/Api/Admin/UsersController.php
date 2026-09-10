@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
 use App\Services\ReversementService;
+use App\Support\SuppressionCompte;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -268,7 +269,8 @@ class UsersController extends Controller
                 ->exists(),
         ];
 
-        $purgeReelle  = ! in_array(true, $empreinte, true);
+        // La décision elle-même vit dans SuppressionCompte, testable sans base.
+        $purgeReelle  = SuppressionCompte::doitPurger($empreinte);
         $ancienNumero = $user->numero;
 
         if ($purgeReelle) {
