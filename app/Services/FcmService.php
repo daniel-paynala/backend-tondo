@@ -40,11 +40,24 @@ class FcmService implements PushNotifier
 
     public function __construct()
     {
-        $this->projectId       = (string) config('services.fcm.project_id', '');
         $this->credentialsPath = (string) config('services.fcm.credentials', '');
+        $this->projectId       = (string) config('services.fcm.project_id', '');
+
+        // Repli sur le `project_id` du compte de service. FCM_PROJECT_ID
+        // dupliquait une valeur déjà présente dans le fichier de credentials :
+        // l'oublier suffisait à désactiver TOUS les push en silence, puisque
+        // estConfigure() renvoyait false sans qu'aucune erreur ne remonte.
+        if ($this->projectId === '') {
+            $this->projectId = (string) ($this->credentials()['project_id'] ?? '');
+        }
     }
 
-    /** True si le projet + le fichier de compte de service sont présents. */
+    /**
+     * True si le compte de service est présent et exploitable.
+     *
+     * Le `project_id` vient de FCM_PROJECT_ID, ou à défaut du fichier de
+     * compte de service lui-même.
+     */
     public function estConfigure(): bool
     {
         return $this->projectId !== '' && $this->credentialsPath !== '' && is_file($this->credentialsPath);
