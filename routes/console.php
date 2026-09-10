@@ -4,6 +4,7 @@ use App\Console\Commands\CleanReceiptsCommand;
 use App\Console\Commands\ResumeQuotidienCommand;
 use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
+use App\Console\Commands\AgregerEvenementsCommand;
 use App\Console\Commands\TraiterReversementsAutoCagnottes;
 use App\Console\Commands\VerifierPaiementsEnAttenteCommand;
 use App\Console\Commands\ReconcilierPayinsCommand;
@@ -90,6 +91,20 @@ Schedule::command(CleanReceiptsCommand::class)
  */
 Schedule::command(ResumeQuotidienCommand::class)
     ->dailyAt('20:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
+/*
+ * Agrégation de la télémétrie produit — 02h, heure creuse.
+ *
+ * Recalcule une fenêtre de 3 jours plutôt que la seule veille : l'app
+ * bufferise et peut être hors ligne, donc des événements d'hier arrivent
+ * aujourd'hui. L'écriture étant un UPSERT, repasser est sans effet de bord.
+ * Purge dans la foulée les lignes brutes de plus de 90 jours.
+ */
+Schedule::command(AgregerEvenementsCommand::class)
+    ->dailyAt('02:00')
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();
