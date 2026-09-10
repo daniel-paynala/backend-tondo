@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversements
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\Mobile\AssociationController as MobileAssociationController;
 use App\Http\Controllers\Api\Mobile\DeviceTokensController as MobileDeviceTokensController;
+use App\Http\Controllers\Api\Mobile\EvenementsController as MobileEvenementsController;
 use App\Http\Controllers\Api\Mobile\PlafondController as MobilePlafondController;
 use App\Http\Controllers\Api\Admin\CagnottesController as AdminCagnottesController;
 use App\Http\Controllers\Api\Public\CagnottesController as PublicCagnottesController;
@@ -219,6 +220,9 @@ Route::prefix('mobile')->group(function () {
         // Jeton push (FCM) de l'appareil courant — (dés)enregistrement à la (dé)connexion
         Route::post('/devices',   [MobileDeviceTokensController::class, 'store']);
         Route::delete('/devices', [MobileDeviceTokensController::class, 'destroy']);
+
+        // Télémétrie produit — envoyée par lots, jamais un appel par tap.
+        Route::post('/evenements', [MobileEvenementsController::class, 'store']);
 
         // Plafond de collecte : statut + demande de déblocage (justificatif, asso)
         Route::get('/plafond/statut',   [MobilePlafondController::class, 'statut']);
