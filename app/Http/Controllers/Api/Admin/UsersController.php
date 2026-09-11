@@ -189,7 +189,7 @@ class UsersController extends Controller
 
         if ($enSouffrance > 0) {
             return response()->json([
-                'message' => "Suppression impossible : {$enSouffrance} reversement(s) non abouti(s) sur ses cagnottes. Régularisez-les avant de supprimer le compte.",
+                'message' => "Suppression impossible : {$enSouffrance} transfert(s) non abouti(s) sur ses cagnottes. Régularisez-les avant de supprimer le compte.",
             ], 409);
         }
 

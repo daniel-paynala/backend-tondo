@@ -1501,7 +1501,7 @@ class BotService
         return <<<TXT
         {$salut}
 
-        Le montant collecté sera reversé sur votre numéro Mobile Money.
+        Le montant collecté sera transféré sur votre numéro Mobile Money.
         Voulez-vous utiliser un *autre numéro* pour le retrait ?
 
         _(tapez le numéro alternatif au format *0XXXXXXXX*, ou *0* pour utiliser le même)_
@@ -2085,7 +2085,7 @@ class BotService
         Que souhaitez-vous faire ?
 
         1️⃣  *Historique* des transactions
-        2️⃣  *Initier* un reversement
+        2️⃣  *Initier* un transfert
         3️⃣  *Fermer* la cagnotte
         4️⃣  Retour à la liste
 
@@ -2126,7 +2126,7 @@ class BotService
                 ⚠️ *Fermer la cagnotte ?*
 
                 La cagnotte *{$cagnotte->titre}* sera clôturée définitivement.
-                Solde : *0 FCFA* — aucun reversement nécessaire.
+                Solde : *0 FCFA* — aucun transfert nécessaire.
 
                 1️⃣  Oui, fermer définitivement
                 2️⃣  Non, annuler
@@ -2146,14 +2146,14 @@ class BotService
             return <<<TXT
             🔒 *Fermer la cagnotte*
 
-            Il reste *{$soldeFmt} FCFA* à reverser.
+            Il reste *{$soldeFmt} FCFA* à transférer.
             Numéro de retrait enregistré : *{$masque}*
 
-            1️⃣  Reverser vers ce numéro et fermer
+            1️⃣  Transférer vers ce numéro et fermer
             2️⃣  Changer le numéro de destination
             3️⃣  Annuler
 
-            _La cagnotte sera clôturée après confirmation du reversement._
+            _La cagnotte sera clôturée après confirmation du transfert._
             TXT;
         }
 
@@ -2168,7 +2168,7 @@ class BotService
                 Aucune transaction confirmée pour le moment.
 
                 1️⃣  *Historique* des transactions
-                2️⃣  *Initier* un reversement
+                2️⃣  *Initier* un transfert
                 3️⃣  *Fermer* la cagnotte
                 4️⃣  Retour à la liste
                 TXT;
@@ -2216,14 +2216,14 @@ class BotService
             $collecte = (int) $cagnotte->montant_collecte;
 
             if ($collecte <= 0) {
-                return $this->erreurEtMenu($numero, "❌ Solde nul — aucun reversement possible.");
+                return $this->erreurEtMenu($numero, "❌ Solde nul — aucun transfert possible.");
             }
 
             $collecteFmt = number_format($collecte, 0, ',', ' ');
             $this->session->set($numero, 'gerer.revers.dest', $data);
 
             return <<<TXT
-            💸 *Initier un reversement*
+            💸 *Initier un transfert*
             Solde disponible : *{$collecteFmt} FCFA*
 
             Vers quel numéro ?
@@ -2718,7 +2718,7 @@ class BotService
         return <<<TXT
         Bénéficiaire : *{$masque}*
 
-        Quel *montant* souhaitez-vous reverser ? (en FCFA)
+        Quel *montant* souhaitez-vous transférer ? (en FCFA)
         _(min 100 — ne peut pas dépasser le solde disponible)_
 
         #️⃣ _pour revenir en arrière_
@@ -2767,7 +2767,7 @@ class BotService
         return <<<TXT
         🔐 *Confirmation requise*
 
-        Reversement de *{$montantFmt} FCFA* vers *{$masque}*
+        Transfert de *{$montantFmt} FCFA* vers *{$masque}*
 
         Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
@@ -2827,7 +2827,7 @@ class BotService
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
 
         return <<<TXT
-        ✅ *Reversement effectué !*
+        ✅ *Transfert effectué !*
 
         Montant : *{$montantFmt} FCFA*
         Bénéficiaire : *{$masque}*
@@ -2897,7 +2897,7 @@ class BotService
             return <<<TXT
             🔐 *Confirmation requise*
 
-            Fermeture + reversement de *{$soldeFmt} FCFA* vers *{$masque}*
+            Fermeture + transfert de *{$soldeFmt} FCFA* vers *{$masque}*
 
             Un code a été envoyé au *{$gerantNum}*.{$hint}
             Entrez le code à 6 chiffres pour valider :
@@ -2955,7 +2955,7 @@ class BotService
         return <<<TXT
         🔐 *Confirmation requise*
 
-        Fermeture + reversement de *{$soldeFmt} FCFA* vers *{$masque}*
+        Fermeture + transfert de *{$soldeFmt} FCFA* vers *{$masque}*
 
         Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
@@ -3055,7 +3055,7 @@ class BotService
         Que souhaitez-vous faire ?
 
         1️⃣  *Historique* des transactions
-        2️⃣  *Initier* un reversement
+        2️⃣  *Initier* un transfert
         3️⃣  *Fermer* la cagnotte
         4️⃣  Retour à la liste
 

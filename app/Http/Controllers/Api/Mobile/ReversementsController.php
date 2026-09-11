@@ -69,19 +69,19 @@ class ReversementsController extends Controller
 
         if ($cagnotte->user_id !== $user->id) {
             return response()->json([
-                'message' => 'Seul le créateur peut effectuer un reversement.',
+                'message' => 'Seul le créateur peut effectuer un transfert.',
             ], 403);
         }
 
         if ($cagnotte->type !== 'cagnotte_ouverte') {
             return response()->json([
-                'message' => 'Le reversement est disponible uniquement pour les cagnottes ouvertes.',
+                'message' => 'Le transfert est disponible uniquement pour les cagnottes ouvertes.',
             ], 422);
         }
 
         if (! in_array($cagnotte->statut, ['active', 'en_cours'])) {
             throw ValidationException::withMessages([
-                'cagnotte_reference' => 'Cagnotte clôturée — reversement impossible.',
+                'cagnotte_reference' => 'Cagnotte clôturée — transfert impossible.',
             ]);
         }
 
@@ -252,8 +252,8 @@ class ReversementsController extends Controller
                 app(\App\Services\Mail\AdminNotifier::class)->notifier(
                     $cagnotte->project_id,
                     'problemes',
-                    'Échec de reversement — action requise',
-                    'Échec de reversement',
+                    'Échec de transfert — action requise',
+                    'Échec de transfert',
                     $corps,
                     'Ouvrir la réconciliation',
                     rtrim((string) config('services.admin_dashboard_url'), '/').'/reconciliation',

@@ -74,7 +74,7 @@ class ReversementService
             return [
                 'ok' => false, 'montant' => $montant, 'payout_id' => null, 'trans_id' => null,
                 'idempotency_key' => null,
-                'erreur' => 'Aucun numéro de retrait sur la cagnotte — reversement impossible.',
+                'erreur' => 'Aucun numéro de retrait sur la cagnotte — transfert impossible.',
             ];
         }
 

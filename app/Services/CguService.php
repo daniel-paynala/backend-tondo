@@ -76,7 +76,7 @@ class CguService
     private function resume(string $plafondEnvoi): array
     {
         return [
-            'Le montant collecté est automatiquement reversé sur le numéro de retrait indiqué.',
+            'Le montant collecté est automatiquement transféré sur le numéro de retrait indiqué.',
             'Ce numéro ne peut plus être modifié après la création de la collecte.',
             'Les frais sont appliqués au moment du paiement et sont à la charge du cotisant.',
             "Chaque paiement est plafonné à {$plafondEnvoi}.",

@@ -1,7 +1,7 @@
 ALERTE TONDO — ÉCHEC DISBURSEMENT — INTERVENTION MANUELLE REQUISE
 ==================================================================
 
-Un reversement Paynala a échoué APRÈS que le solde de la cagnotte a été
+Un transfert Paynala a échoué APRÈS que le solde de la cagnotte a été
 débité. Le fonds est "réservé" mais le transfert opérateur n'est pas confirmé.
 
 NE PAS agir automatiquement. Vérifier manuellement dans Paynala si la

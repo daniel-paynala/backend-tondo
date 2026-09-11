@@ -882,7 +882,7 @@ class CagnottesController extends Controller
 
         if ((int) $cagnotte->montant_collecte > 0) {
             return response()->json([
-                'message' => 'Des fonds restent dans la cotisation. Effectuez le reversement intégral avant de fermer.',
+                'message' => 'Des fonds restent dans la cotisation. Effectuez le transfert intégral avant de fermer.',
             ], 422);
         }
 

@@ -226,12 +226,12 @@ class TraiterReversementsAutoCagnottes extends Command
         // ── Notification gérant ───────────────────────────────────────────────
         $montantFmt = number_format($montant, 0, ',', ' ');
         $corps = in_array($mode, ['libre', 'quotidien'])
-            ? "{$montantFmt} FCFA reversés sur « {$cagnotte->titre} »."
-            : "{$montantFmt} FCFA reversés — cotisation « {$cagnotte->titre} » clôturée.";
+            ? "{$montantFmt} FCFA transférés sur « {$cagnotte->titre} »."
+            : "{$montantFmt} FCFA transférés — cotisation « {$cagnotte->titre} » clôturée.";
 
         $notif->notifyOne(
             userId:  $cagnotte->user_id,
-            titleFr: 'Reversement automatique effectué',
+            titleFr: 'Transfert automatique effectué',
             bodyFr:  $corps,
             data:    [
                 'type'       => 'reversement_auto',

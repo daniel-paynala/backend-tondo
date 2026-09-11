@@ -118,7 +118,7 @@ class VerificationNumeroRetrait
                 'ok'        => false,
                 'titulaire' => null,
                 'message'   => "⚠️ Ce numéro n'a pas de compte Airtel Money actif.\n"
-                    . "Le reversement ne pourrait pas aboutir, et ce numéro ne sera "
+                    . "Le transfert ne pourrait pas aboutir, et ce numéro ne sera "
                     . "plus modifiable après la création.\n\nIndique un autre numéro.",
             ];
         }

@@ -193,7 +193,7 @@ class BotUiMenus
                 'titre'  => 'Cette cagnotte',
                 'lignes' => [
                     ['id' => '1', 'titre' => 'Historique', 'desc' => 'Qui a payé, combien'],
-                    ['id' => '2', 'titre' => 'Reversement', 'desc' => 'Envoyer à un bénéficiaire'],
+                    ['id' => '2', 'titre' => 'Transfert', 'desc' => 'Envoyer à un bénéficiaire'],
                     ['id' => '3', 'titre' => 'Fermer la cagnotte'],
                     ['id' => '4', 'titre' => '◀️ Retour à la liste'],
                 ],
