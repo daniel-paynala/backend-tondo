@@ -1,0 +1,27 @@
+# Backoffice Next.js, servi par `next start` derrière nginx.
+[Unit]
+Description=Tonji — backoffice Admin (environnement de test)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/var/www/Admin
+
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# Écoute locale uniquement : l'exposition passe par nginx, jamais en direct.
+Environment=HOSTNAME=127.0.0.1
+
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tonji-admin
+
+[Install]
+WantedBy=multi-user.target
