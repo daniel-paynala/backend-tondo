@@ -7,6 +7,7 @@ use App\Models\TondoPaiementEnAttente;
 use App\Models\TondoUser;
 use App\Services\ReceiptService;
 use App\Services\OtpService;
+use App\Services\VerificationNumeroRetrait;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -1305,13 +1306,22 @@ class BotService
         // Compte déjà complet (nom + prénom renseignés) → on va direct au récap,
         // pas besoin de KYC ni d'OTP : l'utilisateur est déjà connu.
         if ($user && trim($user->nom) !== '' && trim($user->prenom) !== '') {
+            // Vérification du numéro de retrait, même quand le compte est connu :
+            // un compte Tonji complet ne garantit pas un compte Airtel Money
+            // actif aujourd'hui. La session n'avance pas si la vérification
+            // échoue — l'utilisateur ressaisit un numéro.
+            $kyc = $this->verifierNumeroRetraitKyc($numeroSaisi);
+            if (! $kyc['ok']) {
+                return $kyc['message'];
+            }
+
             $merged = array_merge($data, [
                 'user_id'        => $user->id,
                 'numero_payeur'  => $numeroSaisi,
                 'numero_retrait' => $numeroSaisi,
             ]);
             $this->session->set($numero, 'creer.recap', $merged);
-            return $this->construireRecap($merged, $numeroSaisi);
+            return $this->construireRecap($merged, $numeroSaisi, $kyc['titulaire']);
         }
 
         // Sinon (inconnu OU compte light sans identité) : on NE demande plus le
@@ -1469,7 +1479,13 @@ class BotService
         ]);
         $this->session->set($numero, 'creer.recap', $merged);
 
-        return $this->construireRecap($merged, $numeroRetrait);
+        // Le KYC de ce numéro vient d'être fait pour créer le compte : l'appel
+        // retombe sur le cache et ne sert ici qu'à récupérer le titulaire.
+        // On n'interrompt pas ce parcours en cas d'échec — le compte est déjà
+        // créé, et le récapitulatif s'affiche alors sans la ligne du titulaire.
+        $kyc = $this->verifierNumeroRetraitKyc($numeroRetrait);
+
+        return $this->construireRecap($merged, $numeroRetrait, $kyc['titulaire']);
     }
 
     /**
@@ -1502,6 +1518,16 @@ class BotService
      * @param  string $texte   Numéro alternatif ou "0"
      * @return string
      */
+    /**
+     * Pas dédié à la saisie d'un numéro de retrait différent de celui du créateur.
+     *
+     * ⚠️ Aujourd'hui INATTEIGNABLE : aucun chemin ne place la session dans
+     * l'état `creer.numero_retrait`. Les deux parcours texte (compte complet et
+     * après OTP) fixent le numéro de retrait au numéro du créateur et sautent
+     * directement au récapitulatif. Seul le parcours Flow permet d'en indiquer
+     * un autre. La méthode est maintenue à jour — vérification comprise — pour
+     * que le pas soit correct le jour où on le branche.
+     */
     private function handleCreerNumeroRetrait(string $numero, string $texte): string
     {
         $data = $this->session->data($numero);
@@ -1515,11 +1541,16 @@ class BotService
             }
         }
 
+        $kyc = $this->verifierNumeroRetraitKyc($numeroRetrait);
+        if (! $kyc['ok']) {
+            return $kyc['message'];
+        }
+
         $this->session->set($numero, 'creer.recap', array_merge($data, [
             'numero_retrait' => $numeroRetrait,
         ]));
 
-        return $this->construireRecap($data, $numeroRetrait);
+        return $this->construireRecap($data, $numeroRetrait, $kyc['titulaire']);
     }
 
     // ── 3.3 Récap + CGU ──────────────────────────────────────────────────────
@@ -1533,9 +1564,19 @@ class BotService
      * @param  string $numeroRetrait  Numéro sur lequel sera versé le montant collecté
      * @return string
      */
-    private function construireRecap(array $data, string $numeroRetrait): string
-    {
+    private function construireRecap(
+        array $data,
+        string $numeroRetrait,
+        ?string $titulaire = null,
+    ): string {
         $masque = $this->maskPhoneNum($numeroRetrait);
+
+        // Le titulaire s'affiche AU-DESSUS du numéro : c'est lui qu'on relit,
+        // le numéro n'étant qu'une suite de chiffres masqués où une erreur ne
+        // se voit pas. Il vient de l'opérateur, d'où la mention de la source.
+        $ligneTitulaire = $titulaire !== null
+            ? "Titulaire : *{$titulaire}* ✅\n"
+            : '';
 
         if ($data['type'] === 'tontine_periodique') {
             $montant    = number_format((int) $data['montant_par_cycle'], 0, ',', ' ');
@@ -1557,7 +1598,7 @@ class BotService
             Membres : *{$data['nombre_participants']}*
             Montant/cycle : *{$montant} FCFA*
             Fréquence : *{$freq}*
-            Numéro de retrait : *{$masque}*
+            {$ligneTitulaire}Numéro de retrait : *{$masque}*
             TXT;
         } else {
             $cible    = isset($data['montant_cible']) && (int) $data['montant_cible'] > 0
@@ -1572,11 +1613,31 @@ class BotService
             Nom : *{$data['titre']}*
             Montant cible : *{$cible}*
             Date limite : *{$dateFin}*
-            Numéro de retrait : *{$masque}*
+            {$ligneTitulaire}Numéro de retrait : *{$masque}*
             TXT;
         }
 
         return $lignes . "\n\n" . $this->cguTexte();
+    }
+
+    /**
+     * Vérifie le numéro de retrait — délègue au service partagé par les canaux.
+     *
+     * Le bot était le SEUL canal à ne rien vérifier : il se contentait de
+     * normaliser le format. Or le numéro devient immuable à la création
+     * (RÈGLE 3), et un numéro sans compte Airtel Money s'y gravait
+     * définitivement, le reversement échouant des semaines plus tard.
+     *
+     * L'appel est quasi gratuit : le KYC est mis en cache 24 h et le numéro du
+     * créateur vient le plus souvent d'être vérifié à l'inscription.
+     *
+     * @param  string $e164  Numéro au format +241XXXXXXXX.
+     * @return array{ok:bool, titulaire:?string, message:string}
+     */
+    private function verifierNumeroRetraitKyc(string $e164): array
+    {
+        return app(VerificationNumeroRetrait::class)
+            ->pourWhatsApp($e164, $this->tondoProjectId());
     }
 
     /**
@@ -1617,9 +1678,17 @@ class BotService
         }
 
         if ($texte !== '1') {
-            // Toute autre saisie → réafficher le récap avec invitation à confirmer
-            $data = $this->session->data($numero);
-            return $this->construireRecap($data, $data['numero_retrait'] ?? '') .
+            // Toute autre saisie → réafficher le récap avec invitation à confirmer.
+            // Le titulaire doit y figurer aussi : c'est souvent à la deuxième
+            // lecture qu'on remarque un numéro qui n'est pas le bon. L'appel
+            // retombe sur le cache KYC, il ne coûte rien.
+            $data          = $this->session->data($numero);
+            $numeroRetrait = $data['numero_retrait'] ?? '';
+            $titulaire     = $numeroRetrait !== ''
+                ? $this->verifierNumeroRetraitKyc($numeroRetrait)['titulaire']
+                : null;
+
+            return $this->construireRecap($data, $numeroRetrait, $titulaire) .
                 "\n\n⚠️ Tapez *1* pour confirmer ou *0* pour annuler.";
         }
 

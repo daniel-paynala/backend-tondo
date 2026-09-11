@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Services\PaynalaPaymentService;
 use App\Services\TondoConfigService;
+use App\Services\VerificationNumeroRetrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -117,9 +118,21 @@ class ProfilController extends Controller
      * Body : { numero: '077XXXXXX' } — 9 chiffres format local.
      *
      * Détecte l'opérateur et vérifie le compte Mobile Money si Airtel.
-     * Réponse : { operateur, kyc_ok, message }
+     * Réponse : { operateur, kyc_ok, titulaire, message }
      *   operateur : 'airtel' | 'moov' | 'inconnu'
      *   kyc_ok    : true (Airtel vérifié) | false (pas de compte) | null (indispo/Moov)
+     *   titulaire : nom du titulaire du compte Airtel, null hors cas vérifié
+     *
+     * Le titulaire est la raison d'être de cet appel autant que le booléen : le
+     * numéro de retrait devient IMMUABLE à la création (RÈGLE 3), et une
+     * inversion de deux chiffres donne rarement une erreur — elle donne un
+     * autre numéro, valide, appartenant à quelqu'un d'autre. Afficher le nom
+     * est la seule chose qui permette à l'utilisateur de s'en apercevoir avant
+     * qu'il ne soit trop tard.
+     *
+     * ⚠️ Conséquence assumée : cette route devient un annuaire inversé, un
+     * numéro donnant le nom de son titulaire Airtel. D'où la limitation de
+     * débit posée sur elle (`throttle:kyc-check`) — elle n'en avait aucune.
      */
     public function verifierNumeroRetrait(Request $request): JsonResponse
     {
@@ -127,38 +140,30 @@ class ProfilController extends Controller
             'numero' => ['required', 'string', 'regex:/^0\d{8}$/'],
         ]);
 
-        $user   = $request->user();
-        $msisdn = $data['numero'];
-        $e164   = '+241' . substr($msisdn, 1);
+        // Les faits viennent du service partagé par les canaux ; seule leur
+        // formulation appartient à l'API. C'est ce qui garantit qu'un numéro
+        // refusé ici l'est aussi sur WhatsApp, et pour la même raison.
+        $faits = app(VerificationNumeroRetrait::class)
+            ->verifier($data['numero'], $request->user()->project_id);
 
-        $opInfo       = app(TondoConfigService::class)->detectOperateur($e164, $user->project_id);
-        $operateurSlug = strtolower($opInfo['operateur'] ?? 'inconnu');
-
-        if ($operateurSlug === 'airtel') {
-            $kycOk = app(PaynalaPaymentService::class)->checkKyc($msisdn);
-            return response()->json([
-                'operateur' => 'airtel',
-                'kyc_ok'    => $kycOk,
-                'message'   => match($kycOk) {
-                    true  => 'Compte Airtel Money vérifié.',
-                    false => 'Ce numéro ne possède pas de compte Airtel Money actif.',
-                    null  => 'Vérification indisponible pour l\'instant.',
-                },
-            ]);
-        }
-
-        if ($operateurSlug === 'moov') {
-            return response()->json([
-                'operateur' => 'moov',
-                'kyc_ok'    => null,
-                'message'   => 'Assurez-vous d\'avoir un compte Moov Money actif sur ce numéro.',
-            ]);
-        }
+        $message = match (true) {
+            $faits['operateur'] === 'moov'
+                => 'Assurez-vous d\'avoir un compte Moov Money actif sur ce numéro.',
+            $faits['operateur'] !== 'airtel'
+                => 'Opérateur non reconnu.',
+            $faits['kycOk'] === true
+                => 'Compte Airtel Money vérifié.',
+            $faits['kycOk'] === false
+                => 'Ce numéro ne possède pas de compte Airtel Money actif.',
+            default
+                => 'Vérification indisponible pour l\'instant.',
+        };
 
         return response()->json([
-            'operateur' => $operateurSlug,
-            'kyc_ok'    => null,
-            'message'   => 'Opérateur non reconnu.',
+            'operateur' => $faits['operateur'],
+            'kyc_ok'    => $faits['kycOk'],
+            'titulaire' => $faits['titulaire'],
+            'message'   => $message,
         ]);
     }
 

@@ -99,6 +99,21 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Vérification du numéro de retrait. Limitée par UTILISATEUR, et non
+        // par numéro interrogé : la route renvoie le nom du titulaire Airtel,
+        // donc la menace est l'énumération — or un énumérateur change de numéro
+        // à chaque appel, et une limite indexée sur le numéro ne se déclencherait
+        // jamais. Trente par heure couvrent largement l'usage réel (on vérifie
+        // un numéro de retrait, on se corrige une ou deux fois) sans laisser
+        // moissonner un annuaire.
+        RateLimiter::for('kyc-numero', function (Request $request) {
+            $cle = $request->user()?->id ?? $request->ip();
+            return [
+                Limit::perHour(30)->by("kycnum:user:{$cle}"),
+                Limit::perMinute(8)->by("kycnum:user:{$cle}"),
+            ];
+        });
+
         // Login admin : par e-mail + IP (anti brute-force mot de passe).
         RateLimiter::for('admin-login', function (Request $request) {
             $email = strtolower(trim((string) $request->input('email')));

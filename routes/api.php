@@ -201,7 +201,9 @@ Route::prefix('mobile')->group(function () {
         Route::get('/profil',              [MobileProfilController::class, 'show']);
         Route::patch('/profil',            [MobileProfilController::class, 'update']);
         Route::post('/profil/kyc-recheck',        [MobileProfilController::class, 'recheckKyc']);
-        Route::post('/kyc/verifier-numero',        [MobileProfilController::class, 'verifierNumeroRetrait']);
+        // Limitée en débit depuis qu'elle renvoie le nom du titulaire : sans cela,
+        // elle constituerait un annuaire inversé des comptes Airtel Money.
+        Route::post('/kyc/verifier-numero',        [MobileProfilController::class, 'verifierNumeroRetrait'])->middleware('throttle:kyc-numero');
 
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);

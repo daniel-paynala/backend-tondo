@@ -3,6 +3,7 @@
 namespace App\Services\WhatsApp;
 
 use App\Models\TondoUser;
+use App\Services\VerificationNumeroRetrait;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -23,6 +24,7 @@ class FlowCagnotteHandler
     public function __construct(
         private CreerCagnotteService $creerSvc,
         private SessionService $session,
+        private VerificationNumeroRetrait $verifNumero,
     ) {}
 
     /**
@@ -47,6 +49,17 @@ class FlowCagnotteHandler
         if (! $numeroRetrait) {
             $this->session->reset($from);
             return "⚠️ Numéro de retrait invalide. Reprends en tapant *3*.";
+        }
+
+        // ── Vérification du compte Mobile Money ────────────────────────────────
+        // C'est ici que la vérification compte le plus : le formulaire Flow est
+        // le seul chemin WhatsApp où le numéro de retrait peut différer de celui
+        // du créateur, donc le seul où une faute de frappe grave le numéro de
+        // quelqu'un d'autre — et il devient immuable à la création (RÈGLE 3).
+        $kyc = $this->verifNumero->pourWhatsApp($numeroRetrait, $this->projectId());
+        if (! $kyc['ok']) {
+            $this->session->reset($from);
+            return $kyc['message'] . "\n\nReprends en tapant *3*.";
         }
 
         // ── Objectif (optionnel) : accepté seulement entre 100 et 2 500 000 ────
