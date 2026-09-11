@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AdminsController;
+use App\Http\Controllers\Api\Admin\AgentsController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
@@ -162,6 +163,17 @@ Route::prefix('admin')->group(function () {
         Route::patch('/config/{operateur}/{pays}',          [AdminConfigController::class, 'update']);
         Route::post('/config/{operateur}/{pays}/toggle',    [AdminConfigController::class, 'toggle']);
         Route::delete('/config/{operateur}/{pays}',         [AdminConfigController::class, 'destroy']);
+
+        // ── Agents de retrait en espèces ──────────────────────────────────
+        // Un agent remet des BILLETS : habiliter un tiers à distribuer de
+        // l'argent liquide n'est pas de la gestion courante. Toutes les
+        // écritures sont réservées aux super admins et journalisées ; la
+        // lecture reste ouverte aux autres rôles pour le support.
+        Route::get('/agents',                 [AgentsController::class, 'index']);
+        Route::post('/agents',                [AgentsController::class, 'store']);        // super_admin
+        Route::patch('/agents/{id}',          [AgentsController::class, 'update']);       // super_admin
+        Route::post('/agents/{id}/statut',    [AgentsController::class, 'statut']);       // super_admin
+        Route::post('/agents/{id}/cle',       [AgentsController::class, 'rotationCle']);  // super_admin
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);
