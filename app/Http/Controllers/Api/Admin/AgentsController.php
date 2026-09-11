@@ -95,6 +95,12 @@ class AgentsController extends Controller
         $cle = TypesAgent::genererCleApi($code);
 
         $agent = new TondoAgent();
+        // id généré en PHP pour récupérer la valeur immédiatement : le DEFAULT
+        // gen_random_uuid() de la colonne crée bien la ligne, mais Eloquent ne
+        // relit pas la valeur produite quand la clé n'est pas auto-incrémentée.
+        // Sans cela, la réponse renvoie un id nul — le client ne peut plus
+        // adresser l'agent, et le journal d'audit perd sa référence.
+        $agent->id = (string) Str::uuid();
         $agent->fill([
             'project_id'           => $projectId,
             'code'                 => $code,
