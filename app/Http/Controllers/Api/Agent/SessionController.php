@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Agent;
 
+use App\Http\Controllers\Api\Agent\Concerns\ValideEnFrancais;
 use App\Http\Controllers\Controller;
 use App\Models\TondoAgent;
 use App\Services\RetraitEspecesService;
@@ -20,6 +21,8 @@ use Illuminate\Support\Facades\Log;
  */
 class SessionController extends Controller
 {
+    use ValideEnFrancais;
+
     public function __construct(private RetraitEspecesService $retraits) {}
 
     /**
@@ -31,7 +34,7 @@ class SessionController extends Controller
     {
         $partenaire = $request->attributes->get('partenaire');
 
-        $data = $request->validate([
+        $data = $this->valider($request, [
             'identifiant' => ['required', 'string', 'max:20'],
             'pin'         => ['required', 'string', 'max:10'],
         ]);
@@ -97,7 +100,7 @@ class SessionController extends Controller
         /** @var TondoAgent $agent */
         $agent = $request->user('agent');
 
-        $data = $request->validate([
+        $data = $this->valider($request, [
             'pin_actuel'  => ['required', 'string', 'max:10'],
             'nouveau_pin' => ['required', 'string', 'max:10'],
         ]);

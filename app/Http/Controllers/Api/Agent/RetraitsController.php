@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Agent;
 
 use App\Exceptions\RetraitImpossible;
+use App\Http\Controllers\Api\Agent\Concerns\ValideEnFrancais;
 use App\Http\Controllers\Controller;
 use App\Models\TondoAgent;
 use App\Models\TondoCagnotte;
@@ -23,6 +24,8 @@ use Illuminate\Support\Facades\DB;
  */
 class RetraitsController extends Controller
 {
+    use ValideEnFrancais;
+
     public function __construct(private RetraitEspecesService $service) {}
 
     /**
@@ -40,7 +43,7 @@ class RetraitsController extends Controller
             ], 400);
         }
 
-        $data = $request->validate([
+        $data = $this->valider($request, [
             'cagnotte' => ['required', 'string', 'regex:/^[0-9]{6}$/'],
             'montant'  => ['required', 'integer', 'min:1'],
         ]);
@@ -63,7 +66,7 @@ class RetraitsController extends Controller
      */
     public function valider(Request $request, string $reference): JsonResponse
     {
-        $data = $request->validate(['code' => ['required', 'string', 'max:10']]);
+        $data = $this->valider($request, ['code' => ['required', 'string', 'max:10']]);
 
         return $this->executer(fn () => response()->json([
             'retrait' => $this->presenter($this->service->valider($request->user('agent'), $reference, $data['code'])),
