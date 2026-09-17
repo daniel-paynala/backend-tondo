@@ -57,5 +57,31 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // API des agents de retrait : chaque refus porte un `code` stable, que
+        // le logiciel du partenaire lit sans analyser le texte — y compris les
+        // erreurs levées par le framework lui-même, qui ne le fourniraient pas
+        // (« Unauthenticated. », « Too Many Attempts. »).
+        $agent = fn (\Illuminate\Http\Request $r) => $r->is('api/agent/*');
+
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $r) use ($agent) {
+            return $agent($r) ? response()->json([
+                'message' => 'Session expirée ou invalide. Reconnectez-vous.',
+                'code'    => 'session_invalide',
+            ], 401) : null;
+        });
+
+        $exceptions->render(function (\Illuminate\Validation\ValidationException $e, \Illuminate\Http\Request $r) use ($agent) {
+            return $agent($r) ? response()->json([
+                'message' => collect($e->errors())->flatten()->first() ?? 'Requête invalide.',
+                'code'    => 'requete_invalide',
+                'erreurs' => $e->errors(),
+            ], 422) : null;
+        });
+
+        $exceptions->render(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e, \Illuminate\Http\Request $r) use ($agent) {
+            return $agent($r) ? response()->json([
+                'message' => 'Trop de requêtes. Réessayez dans un instant.',
+                'code'    => 'trop_de_requetes',
+            ], 429, $e->getHeaders()) : null;
+        });
     })->create();

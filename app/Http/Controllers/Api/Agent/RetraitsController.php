@@ -88,12 +88,9 @@ class RetraitsController extends Controller
     public function show(Request $request, string $reference): JsonResponse
     {
         return $this->executer(function () use ($request, $reference) {
-            $retrait   = $this->service->dossierDeLAgent($request->user('agent'), $reference);
-            $titulaire = $retrait->statut === 'en_attente_code'
-                ? $this->service->titulaire(TondoCagnotte::find($retrait->cagnotte_id))
-                : null;
+            $retrait = $this->service->dossierDeLAgent($request->user('agent'), $reference);
 
-            return response()->json(['retrait' => $this->presenter($retrait, $titulaire)]);
+            return response()->json(['retrait' => $this->presenter($retrait)]);
         });
     }
 
@@ -168,6 +165,13 @@ class RetraitsController extends Controller
         $cagnotte  = TondoCagnotte::find($r->cagnotte_id);
         $enAttente = $r->statut === 'en_attente_code';
         $valide    = $r->statut === 'valide';
+
+        // Tant que le dossier attend son code, l'agent a besoin du nom pour
+        // contrôler la pièce d'identité — y compris après un code faux ou une
+        // reprise après coupure. Le KYC est en cache : aucun appel réseau.
+        if ($enAttente && $titulaire === null && $cagnotte) {
+            $titulaire = $this->service->titulaire($cagnotte);
+        }
 
         return [
             'reference'        => $r->reference,
