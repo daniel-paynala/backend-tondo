@@ -48,6 +48,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             \App\Http\Middleware\ForceJsonResponse::class,
         ]);
+
+        // Terminaux des agents de retrait : clé du partenaire, puis contrôle de
+        // l'agent à chaque appel.
+        $middleware->alias([
+            'partenaire'         => \App\Http\Middleware\AuthentifiePartenaire::class,
+            'agent.operationnel' => \App\Http\Middleware\AgentOperationnel::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

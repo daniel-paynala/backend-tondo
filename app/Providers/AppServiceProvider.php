@@ -114,6 +114,22 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Connexion d'un agent. Le verrouillage après 5 PIN faux protège UN
+        // agent ; ces limites protègent contre le balayage de MILLIERS
+        // d'identifiants, qui se suivent (ECKTPE001, 002…).
+        RateLimiter::for('agent-connexion', function (Request $request) {
+            return [
+                Limit::perMinute(20)->by('agcx:ip:' . $request->ip()),
+                Limit::perMinute(10)->by('agcx:id:' . strtoupper((string) $request->input('identifiant'))),
+            ];
+        });
+
+        // Opérations d'un agent connecté : large pour un comptoir réel, bas
+        // pour un script.
+        RateLimiter::for('agent-retraits', function (Request $request) {
+            return [Limit::perMinute(60)->by('agret:' . ($request->user('agent')?->id ?? $request->ip()))];
+        });
+
         // Login admin : par e-mail + IP (anti brute-force mot de passe).
         RateLimiter::for('admin-login', function (Request $request) {
             $email = strtolower(trim((string) $request->input('email')));

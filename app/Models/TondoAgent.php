@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
 use Illuminate\Database\Eloquent\Model;
+use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -45,6 +46,9 @@ class TondoAgent extends Model
 {
     use UuidPrimary;
     use HasProjectTable;
+    // Jeton de session émis à la connexion (identifiant + PIN), porté par le
+    // terminal dans l'en-tête Authorization.
+    use HasApiTokens;
 
     /** Table des agents (préfixe résolu : tondo_ / tonji_). */
     protected string $tableSuffix = 'agents';

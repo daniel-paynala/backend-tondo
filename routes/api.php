@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AdminsController;
+use App\Http\Controllers\Api\Agent\RetraitsController as AgentRetraitsController;
+use App\Http\Controllers\Api\Agent\SessionController as AgentSessionController;
 use App\Http\Controllers\Api\Admin\AgentsController;
 use App\Http\Controllers\Api\Admin\PartenairesRetraitController;
 use App\Http\Controllers\Api\Admin\SupportsRetraitController;
@@ -195,6 +197,37 @@ Route::prefix('admin')->group(function () {
         // Diagnostic + correction automatique d'un écart de réconciliation
         Route::post('/cagnottes/{reference}/reconcile/diagnostiquer', [ReconciliationController::class, 'diagnostiquer']);
         Route::post('/cagnottes/{reference}/reconcile/corriger',      [ReconciliationController::class, 'corriger']);
+    });
+});
+
+// ============================================================================
+//  API Agent — préfixe /api/agent/
+//  Terminaux des agents de retrait en espèces (TPE, guichet…), appelés par le
+//  logiciel des PARTENAIRES.
+//
+//  Deux clés, jamais une seule :
+//   1. X-Cle-Partenaire, sur toutes les routes — prouve que l'appel vient du
+//      système du partenaire ;
+//   2. le jeton de session de l'agent, obtenu avec son identifiant et son PIN.
+//  Un PIN volé ne sert donc à rien hors d'un terminal du partenaire.
+// ============================================================================
+Route::prefix('agent')->middleware('partenaire')->group(function () {
+    Route::post('/connexion', [AgentSessionController::class, 'connexion'])->middleware('throttle:agent-connexion');
+
+    Route::middleware('auth:agent')->group(function () {
+        // Seule route ouverte tant que le PIN initial n'est pas changé.
+        Route::post('/pin', [AgentSessionController::class, 'changerPin'])->middleware('agent.operationnel:pin');
+        Route::post('/deconnexion', [AgentSessionController::class, 'deconnexion']);
+
+        Route::middleware(['agent.operationnel', 'throttle:agent-retraits'])->group(function () {
+            Route::get('/moi', [AgentSessionController::class, 'moi']);
+
+            Route::get('/retraits', [AgentRetraitsController::class, 'index']);
+            Route::post('/retraits', [AgentRetraitsController::class, 'store']);
+            Route::get('/retraits/{reference}', [AgentRetraitsController::class, 'show']);
+            Route::post('/retraits/{reference}/valider', [AgentRetraitsController::class, 'valider']);
+            Route::post('/retraits/{reference}/annuler', [AgentRetraitsController::class, 'annuler']);
+        });
     });
 });
 
