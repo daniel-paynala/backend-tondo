@@ -198,7 +198,9 @@ class TraiterReversementsAutoCagnottes extends Command
             cagnotte:     $cagnotte,
             source:       'cron_reversement_auto',
             prefixeIdem:  'TONDO-AUTO-',
-            prefixeTrans: 'TONDOAUTO',
+            // Préfixe de trans_id : désigne l'origine du transfert dans le grand
+            // livre (payout). Les lignes antérieures au 2026-09-17 portent TONDOAUTO.
+            prefixeTrans: 'TONJIAUTO',
             cloturer:     ! in_array($mode, ['libre', 'quotidien'], true),
             trace:        ['mode' => $mode],
         );
