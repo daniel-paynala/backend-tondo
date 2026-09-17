@@ -28,7 +28,7 @@ class AgentOperationnel
         // Le jeton doit appartenir à un agent DU partenaire qui présente sa clé :
         // la clé d'Ecobank ne doit pas servir à piloter un agent d'un autre.
         if (! $agent || ! $partenaire || $agent->partenaire_id !== $partenaire->id) {
-            return response()->json(['message' => 'Session d\'agent invalide pour ce partenaire.'], 401);
+            return response()->json(['message' => 'Session d\'agent invalide pour ce partenaire.', 'code' => 'session_invalide'], 401);
         }
 
         $agent->loadMissing(['partenaire', 'support']);

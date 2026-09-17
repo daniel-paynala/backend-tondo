@@ -30,12 +30,12 @@ class AuthentifiePartenaire
         // aider à distinguer un format correct d'une clé valide.
         $partenaire = $cle !== '' ? TondoPartenaireRetrait::parCleApi($cle) : null;
         if (! $partenaire) {
-            return response()->json(['message' => 'Clé partenaire absente ou invalide.'], 401);
+            return response()->json(['message' => 'Clé partenaire absente ou invalide.', 'code' => 'cle_partenaire_invalide'], 401);
         }
 
         // Un partenaire désactivé coupe tous ses terminaux à l'appel suivant.
         if (! $partenaire->actif) {
-            return response()->json(['message' => 'Partenaire désactivé.'], 403);
+            return response()->json(['message' => 'Partenaire désactivé.', 'code' => 'partenaire_desactive'], 403);
         }
 
         $request->attributes->set('partenaire', $partenaire);
