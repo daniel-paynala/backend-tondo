@@ -34,7 +34,7 @@ class SessionController extends Controller
     {
         $partenaire = $request->attributes->get('partenaire');
 
-        $data = $this->valider($request, [
+        $data = $this->validerSaisie($request, [
             'identifiant' => ['required', 'string', 'max:20'],
             'pin'         => ['required', 'string', 'max:10'],
         ]);
@@ -100,7 +100,7 @@ class SessionController extends Controller
         /** @var TondoAgent $agent */
         $agent = $request->user('agent');
 
-        $data = $this->valider($request, [
+        $data = $this->validerSaisie($request, [
             'pin_actuel'  => ['required', 'string', 'max:10'],
             'nouveau_pin' => ['required', 'string', 'max:10'],
         ]);

@@ -43,7 +43,7 @@ class RetraitsController extends Controller
             ], 400);
         }
 
-        $data = $this->valider($request, [
+        $data = $this->validerSaisie($request, [
             'cagnotte' => ['required', 'string', 'regex:/^[0-9]{6}$/'],
             'montant'  => ['required', 'integer', 'min:1'],
         ]);
@@ -66,7 +66,7 @@ class RetraitsController extends Controller
      */
     public function valider(Request $request, string $reference): JsonResponse
     {
-        $data = $this->valider($request, ['code' => ['required', 'string', 'max:10']]);
+        $data = $this->validerSaisie($request, ['code' => ['required', 'string', 'max:10']]);
 
         return $this->executer(fn () => response()->json([
             'retrait' => $this->presenter($this->service->valider($request->user('agent'), $reference, $data['code'])),

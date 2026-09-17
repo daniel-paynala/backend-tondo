@@ -14,10 +14,15 @@ use Illuminate\Http\Request;
 trait ValideEnFrancais
 {
     /**
+     * Nommée `validerSaisie` et non `valider` : RetraitsController a déjà une
+     * action `valider` (validation d'un retrait), et en PHP la méthode d'une
+     * classe remplace EN SILENCE celle d'un trait du même nom — chaque appel
+     * aboutissait alors dans l'action, avec les mauvais arguments.
+     *
      * @param  array<string, mixed> $regles
      * @return array<string, mixed>
      */
-    protected function valider(Request $request, array $regles): array
+    protected function validerSaisie(Request $request, array $regles): array
     {
         return $request->validate($regles, [
             'required' => 'Le champ :attribute est obligatoire.',
