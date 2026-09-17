@@ -13,6 +13,9 @@
 --   agent de retrait       la PERSONNE qui opère, rattachée à un partenaire ET
 --                          à un support. S'identifie par un identifiant et un
 --                          PIN à 4 chiffres.
+--   retrait en espèces     l'OPÉRATION. Ancre des règles de suppression :
+--                          tant qu'aucun retrait n'est passé par un agent ou un
+--                          support, on peut le supprimer.
 --
 -- Identifiant de l'agent : sigle partenaire + sigle support + numéro sur 3
 -- chiffres minimum — « ECKTPE020 », 20e agent TPE d'Ecobank. Il sert à la
@@ -154,6 +157,28 @@ CREATE TABLE IF NOT EXISTS public.tondo_agents (
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- 4 bis. Retraits en espèces
+-- ─────────────────────────────────────────────────────────────────────────
+-- Créée avant le parcours de retrait lui-même, parce que les règles de
+-- suppression en dépendent : un agent ou un support ne se supprime que si
+-- AUCUN retrait n'est passé par lui. Sans table, « aucun retrait » ne se
+-- vérifierait contre rien — et un contrôle toujours vrai laisserait supprimer
+-- un agent ayant servi, le jour où les retraits existeront.
+--
+-- Réduite pour l'instant à ce qui ne changera pas. Le statut, le code
+-- d'autorisation et la clé d'idempotence s'ajouteront avec le parcours.
+CREATE TABLE IF NOT EXISTS public.tondo_retraits_especes (
+    id            uuid        DEFAULT gen_random_uuid() NOT NULL,
+    project_id    uuid        NOT NULL,
+    agent_id      uuid        NOT NULL,
+    cagnotte_id   uuid        NOT NULL,
+    montant_fcfa  bigint      NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- 5. Clés, contraintes, index
 -- ─────────────────────────────────────────────────────────────────────────
 DO $$
@@ -232,6 +257,30 @@ BEGIN
     ALTER TABLE public.tondo_agents ADD CONSTRAINT tondo_agents_plafonds_check
       CHECK (plafond_operation_fcfa > 0 AND plafond_journalier_fcfa >= plafond_operation_fcfa);
   END IF;
+
+  -- Retraits
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tondo_retraits_especes_pkey') THEN
+    ALTER TABLE public.tondo_retraits_especes ADD CONSTRAINT tondo_retraits_especes_pkey PRIMARY KEY (id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tondo_retraits_especes_project_fk') THEN
+    ALTER TABLE public.tondo_retraits_especes ADD CONSTRAINT tondo_retraits_especes_project_fk
+      FOREIGN KEY (project_id) REFERENCES public.projects(id) ON DELETE RESTRICT;
+  END IF;
+  -- RESTRICT, et non CASCADE : c'est le filet de sécurité derrière le contrôle
+  -- du code. Même si une vérification manquait un jour, la base refuserait de
+  -- supprimer un agent par lequel un retrait est passé.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tondo_retraits_especes_agent_fk') THEN
+    ALTER TABLE public.tondo_retraits_especes ADD CONSTRAINT tondo_retraits_especes_agent_fk
+      FOREIGN KEY (agent_id) REFERENCES public.tondo_agents(id) ON DELETE RESTRICT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tondo_retraits_especes_cagnotte_fk') THEN
+    ALTER TABLE public.tondo_retraits_especes ADD CONSTRAINT tondo_retraits_especes_cagnotte_fk
+      FOREIGN KEY (cagnotte_id) REFERENCES public.tondo_cagnottes(id) ON DELETE RESTRICT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tondo_retraits_especes_montant_check') THEN
+    ALTER TABLE public.tondo_retraits_especes ADD CONSTRAINT tondo_retraits_especes_montant_check
+      CHECK (montant_fcfa > 0);
+  END IF;
 END $$;
 
 -- Sigles uniques dans le projet : deux partenaires « ECK » produiraient les
@@ -258,6 +307,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS tondo_agents_numero_uidx
 CREATE INDEX IF NOT EXISTS tondo_agents_projet_idx
   ON public.tondo_agents (project_id, created_at DESC);
 
+-- « Un retrait est-il passé par cet agent ? » — posée à chaque tentative de
+-- suppression, et plus tard pour le cumul journalier.
+CREATE INDEX IF NOT EXISTS tondo_retraits_especes_agent_idx
+  ON public.tondo_retraits_especes (agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS tondo_retraits_especes_cagnotte_idx
+  ON public.tondo_retraits_especes (cagnotte_id, created_at DESC);
+
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 6. Maintien de updated_at
@@ -277,6 +333,11 @@ CREATE TRIGGER trg_tondo_agents_updated_at
   BEFORE UPDATE ON public.tondo_agents
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_tondo_retraits_especes_updated_at ON public.tondo_retraits_especes;
+CREATE TRIGGER trg_tondo_retraits_especes_updated_at
+  BEFORE UPDATE ON public.tondo_retraits_especes
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 7. Cloisonnement et droits
@@ -285,6 +346,7 @@ ALTER TABLE public.tondo_supports_retrait    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tondo_partenaires_retrait ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tondo_agents_compteurs    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tondo_agents              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tondo_retraits_especes    ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "tondo_supports_retrait_same_project" ON public.tondo_supports_retrait;
 CREATE POLICY "tondo_supports_retrait_same_project" ON public.tondo_supports_retrait
@@ -306,6 +368,11 @@ CREATE POLICY "tondo_agents_same_project" ON public.tondo_agents
   FOR ALL USING (project_id = public.current_project_id())
   WITH CHECK (project_id = public.current_project_id());
 
+DROP POLICY IF EXISTS "tondo_retraits_especes_same_project" ON public.tondo_retraits_especes;
+CREATE POLICY "tondo_retraits_especes_same_project" ON public.tondo_retraits_especes
+  FOR ALL USING (project_id = public.current_project_id())
+  WITH CHECK (project_id = public.current_project_id());
+
 -- service_role uniquement. AUCUN droit pour `authenticated` : ces tables
 -- portent des empreintes de PIN et de clés d'API, qu'aucune application
 -- cliente ne doit pouvoir lire, même filtrées par RLS.
@@ -313,3 +380,4 @@ GRANT ALL ON public.tondo_supports_retrait    TO service_role;
 GRANT ALL ON public.tondo_partenaires_retrait TO service_role;
 GRANT ALL ON public.tondo_agents_compteurs    TO service_role;
 GRANT ALL ON public.tondo_agents              TO service_role;
+GRANT ALL ON public.tondo_retraits_especes    TO service_role;

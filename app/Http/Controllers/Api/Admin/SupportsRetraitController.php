@@ -7,17 +7,22 @@ use App\Http\Controllers\Controller;
 use App\Models\TondoAgent;
 use App\Models\TondoSupportRetrait;
 use App\Support\RetraitAgents;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
  * Paramètres — supports de retrait (TPE, guichet, boutique, USSD…).
  *
- * Deux règles tiennent à l'identifiant des agents, qui encode le sigle :
- *  – le sigle ne se modifie plus dès qu'un agent l'utilise ;
- *  – un support utilisé ne se supprime pas, il se désactive.
+ * Deux règles :
+ *  – le sigle ne se modifie plus dès qu'un agent l'utilise : il est dans
+ *    leurs identifiants ;
+ *  – le support se supprime tant qu'AUCUN retrait n'est passé par lui, ses
+ *    agents avec. Au-delà, il porte un historique d'espèces remises et se
+ *    désactive au lieu de disparaître.
  */
 class SupportsRetraitController extends Controller
 {
@@ -31,8 +36,10 @@ class SupportsRetraitController extends Controller
             ->orderBy('libelle')
             ->get();
 
+        $retraits = $this->nombresRetraits($supports->pluck('id')->all());
+
         return response()->json([
-            'supports' => $supports->map(fn (TondoSupportRetrait $s) => $this->presenter($s)),
+            'supports' => $supports->map(fn (TondoSupportRetrait $s) => $this->presenter($s, $retraits[$s->id] ?? 0)),
         ]);
     }
 
@@ -98,7 +105,13 @@ class SupportsRetraitController extends Controller
         return response()->json(['support' => $this->presenter($support)]);
     }
 
-    /** DELETE /api/admin/supports-retrait/{id} */
+    /**
+     * DELETE /api/admin/supports-retrait/{id}
+     *
+     * Possible tant qu'aucun retrait n'est passé par le support. Ses agents
+     * sont supprimés avec lui : n'ayant jamais servi, ils ne portent aucun
+     * historique à préserver.
+     */
     public function destroy(Request $request, string $id): JsonResponse
     {
         $this->exigerSuperAdmin($request);
@@ -109,23 +122,36 @@ class SupportsRetraitController extends Controller
             return response()->json(['message' => 'Support introuvable.'], 404);
         }
 
-        // Un support utilisé reste en base : ses agents, leurs identifiants et
-        // leur historique y sont rattachés. La clé étrangère refuserait de
-        // toute façon ; on le dit avant, en clair.
-        if ($support->agents_count > 0) {
-            return response()->json([
-                'message' => "Suppression impossible : {$support->agents_count} agent(s) utilisent ce support. Désactivez-le plutôt.",
-            ], 409);
+        $refus = "Suppression impossible : des retraits sont passés par le support « {$support->libelle} ». Désactivez-le plutôt.";
+
+        if (($this->nombresRetraits([$support->id])[$support->id] ?? 0) > 0) {
+            return response()->json(['message' => $refus], 409);
         }
 
-        $support->delete();
+        $identifiants = TondoAgent::where('support_id', $support->id)->orderBy('identifiant')->pluck('identifiant')->all();
 
+        try {
+            DB::transaction(function () use ($support) {
+                // Agents d'abord : la clé étrangère agents → supports est en
+                // RESTRICT. Les compteurs partent en cascade avec le support.
+                TondoAgent::where('support_id', $support->id)->delete();
+                $support->delete();
+            });
+        } catch (QueryException $e) {
+            // Un retrait enregistré entre le contrôle et la suppression : la clé
+            // étrangère retraits → agents refuse, et la transaction est annulée.
+            return response()->json(['message' => $refus], 409);
+        }
+
+        // Les identifiants supprimés sont conservés au journal : ce sont eux
+        // qu'on retrouverait dans une conversation avec un partenaire.
         $this->journaliser($request, 'support_retrait_supprime', "Support {$support->sigle}", 'warning', [
-            'support_id' => $support->id,
-            'libelle'    => $support->libelle,
+            'support_id'        => $support->id,
+            'libelle'           => $support->libelle,
+            'agents_supprimes'  => $identifiants,
         ]);
 
-        return response()->json(['supprime' => true]);
+        return response()->json(['supprime' => true, 'agents_supprimes' => count($identifiants)]);
     }
 
     // ── Interne ─────────────────────────────────────────────────────────────
@@ -159,9 +185,33 @@ class SupportsRetraitController extends Controller
         ];
     }
 
-    /** @return array<string, mixed> */
-    private function presenter(TondoSupportRetrait $s): array
+    /**
+     * Nombre de retraits passés par les agents de chacun des supports donnés.
+     *
+     * @param  array<int, string> $supportIds
+     * @return array<string, int>  support_id => nombre de retraits
+     */
+    private function nombresRetraits(array $supportIds): array
     {
+        if ($supportIds === []) {
+            return [];
+        }
+
+        return DB::table(project_table('retraits_especes') . ' as r')
+            ->join(project_table('agents') . ' as a', 'a.id', '=', 'r.agent_id')
+            ->whereIn('a.support_id', $supportIds)
+            ->selectRaw('a.support_id, count(*) as n')
+            ->groupBy('a.support_id')
+            ->pluck('n', 'support_id')
+            ->map(fn ($n) => (int) $n)
+            ->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function presenter(TondoSupportRetrait $s, ?int $nbRetraits = null): array
+    {
+        $nbRetraits ??= $this->nombresRetraits([$s->id])[$s->id] ?? 0;
+
         return [
             'id'             => $s->id,
             'libelle'        => $s->libelle,
@@ -172,6 +222,9 @@ class SupportsRetraitController extends Controller
             'nb_agents'      => (int) ($s->agents_count ?? 0),
             // Indique à l'interface si le sigle est encore modifiable.
             'sigle_fige'     => (int) ($s->agents_count ?? 0) > 0,
+            'nb_retraits'    => $nbRetraits,
+            // Supprimable tant qu'aucune espèce n'a été remise par ce canal.
+            'supprimable'    => $nbRetraits === 0,
             'created_at'     => $s->created_at?->toIso8601String(),
         ];
     }

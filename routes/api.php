@@ -187,6 +187,7 @@ Route::prefix('admin')->group(function () {
         Route::patch('/agents/{id}',                   [AgentsController::class, 'update']);                // super_admin
         Route::post('/agents/{id}/statut',             [AgentsController::class, 'statut']);                // super_admin
         Route::post('/agents/{id}/pin',                [AgentsController::class, 'reinitialiserPin']);      // super_admin
+        Route::delete('/agents/{id}',                  [AgentsController::class, 'destroy']);               // super_admin
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);

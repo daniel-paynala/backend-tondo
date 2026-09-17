@@ -76,6 +76,32 @@ class TondoAgent extends Model
         return $this->belongsTo(TondoSupportRetrait::class, 'support_id');
     }
 
+    /**
+     * Nombre de retraits passés par chacun des agents donnés.
+     *
+     * Une seule requête pour toute une liste — la page des agents en affiche
+     * plusieurs centaines. Les agents sans retrait n'apparaissent pas dans le
+     * résultat : lire avec `?? 0`.
+     *
+     * @param  iterable<string> $agentIds
+     * @return array<string, int>  agent_id => nombre de retraits
+     */
+    public static function nombresRetraits(iterable $agentIds): array
+    {
+        $ids = collect($agentIds)->values()->all();
+        if ($ids === []) {
+            return [];
+        }
+
+        return \Illuminate\Support\Facades\DB::table(project_table('retraits_especes'))
+            ->whereIn('agent_id', $ids)
+            ->selectRaw('agent_id, count(*) as n')
+            ->groupBy('agent_id')
+            ->pluck('n', 'agent_id')
+            ->map(fn ($n) => (int) $n)
+            ->all();
+    }
+
     public function estVerrouille(): bool
     {
         return $this->pin_verrouille_at !== null;

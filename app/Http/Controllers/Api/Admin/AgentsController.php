@@ -9,6 +9,7 @@ use App\Models\TondoPartenaireRetrait;
 use App\Models\TondoSupportRetrait;
 use App\Support\RetraitAgents;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -57,9 +58,11 @@ class AgentsController extends Controller
                 ->orWhere('ville', 'ilike', $motif));
         }
 
+        $agents  = $requete->orderByDesc('created_at')->limit(500)->get();
+        $retraits = TondoAgent::nombresRetraits($agents->pluck('id'));
+
         return response()->json([
-            'agents' => $requete->orderByDesc('created_at')->limit(500)->get()
-                ->map(fn (TondoAgent $a) => $this->presenter($a)),
+            'agents' => $agents->map(fn (TondoAgent $a) => $this->presenter($a, $retraits[$a->id] ?? 0)),
         ]);
     }
 
@@ -290,6 +293,46 @@ class AgentsController extends Controller
         ]);
     }
 
+    /**
+     * DELETE /api/admin/agents/{id}
+     *
+     * Possible tant qu'AUCUN retrait n'est passé par l'agent. Au-delà, il porte
+     * un historique d'espèces remises — des montants, des cagnottes débitées,
+     * de quoi instruire un litige — et se suspend au lieu de disparaître.
+     */
+    public function destroy(Request $request, string $id): JsonResponse
+    {
+        $this->exigerSuperAdmin($request);
+
+        $agent = $this->trouver($request, $id);
+        if (! $agent) {
+            return response()->json(['message' => 'Agent introuvable.'], 404);
+        }
+
+        $refus = "Suppression impossible : des retraits sont passés par {$agent->identifiant}. Suspendez-le plutôt.";
+
+        if ((TondoAgent::nombresRetraits([$agent->id])[$agent->id] ?? 0) > 0) {
+            return response()->json(['message' => $refus], 409);
+        }
+
+        try {
+            $agent->delete();
+        } catch (QueryException $e) {
+            // Un retrait enregistré entre le contrôle et la suppression : la clé
+            // étrangère RESTRICT refuse, et c'est exactement ce qu'on veut.
+            return response()->json(['message' => $refus], 409);
+        }
+
+        $this->journaliser($request, 'agent_supprime', "Agent {$agent->identifiant}", 'warning', [
+            'agent_id'      => $agent->id,
+            'identifiant'   => $agent->identifiant,
+            'partenaire_id' => $agent->partenaire_id,
+            'support_id'    => $agent->support_id,
+        ]);
+
+        return response()->json(['supprime' => true]);
+    }
+
     // ── Interne ─────────────────────────────────────────────────────────────
 
     private function trouver(Request $request, string $id): ?TondoAgent
@@ -329,8 +372,11 @@ class AgentsController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function presenter(TondoAgent $a): array
+    private function presenter(TondoAgent $a, ?int $nbRetraits = null): array
     {
+        // Les écritures unitaires ne passent pas le compte : on le lit ici.
+        $nbRetraits ??= TondoAgent::nombresRetraits([$a->id])[$a->id] ?? 0;
+
         return [
             'id'                      => $a->id,
             'identifiant'             => $a->identifiant,
@@ -356,6 +402,9 @@ class AgentsController extends Controller
             // Ce qui empêche l'agent d'opérer MAINTENANT, toutes causes
             // confondues — statut, verrou, partenaire ou support désactivé.
             'motif_blocage'           => $a->motifBlocage(),
+            'nb_retraits'             => $nbRetraits,
+            // Supprimable tant qu'aucune espèce n'a été remise par cet agent.
+            'supprimable'             => $nbRetraits === 0,
             'derniere_connexion_at'   => $a->derniere_connexion_at?->toIso8601String(),
             'derniere_activite_at'    => $a->derniere_activite_at?->toIso8601String(),
             'created_at'              => $a->created_at?->toIso8601String(),
