@@ -12,6 +12,10 @@
 #
 #      echo 'GITHUB_TOKEN=ghp_…' > ~/.tonji-deploy.env && chmod 600 ~/.tonji-deploy.env
 #
+#  Le même fichier peut fixer la branche suivie (défaut : main) :
+#
+#      echo 'DEPLOY_BRANCHE=tpe' >> ~/.tonji-deploy.env
+#
 #  Les fichiers d'environnement (/var/www/Backend/.env et
 #  /var/www/Admin/.env.local) sont posés à la main eux aussi, une fois pour
 #  toutes : ils portent des secrets et ne doivent pas transiter par git.
@@ -22,11 +26,15 @@ CIBLE="${1:-all}"
 
 REPO_BACKEND="github.com/daniel-paynala/backend-tondo.git"
 REPO_ADMIN="github.com/daniel-paynala/dashboard-tondo.git"
-BRANCHE="main"
-
 [ -f ~/.tonji-deploy.env ] || { echo "✖ ~/.tonji-deploy.env absent (GITHUB_TOKEN)." >&2; exit 1; }
 # shellcheck disable=SC1090
 . ~/.tonji-deploy.env
+
+# Branche suivie par CETTE instance, réglée dans ~/.tonji-deploy.env.
+# Le test peut suivre une branche de travail (ex. `tpe`) pendant que la prod
+# se déploie depuis `main` : c'est ce qui garantit qu'un chantier en cours
+# n'atteint pas la production par un simple déploiement.
+BRANCHE="${DEPLOY_BRANCHE:-main}"
 [ -n "${GITHUB_TOKEN:-}" ] || { echo "✖ GITHUB_TOKEN vide dans ~/.tonji-deploy.env." >&2; exit 1; }
 
 # ── Récupère ou met à jour un dépôt ────────────────────────────────────────
@@ -59,7 +67,7 @@ synchroniser() {
   git -C "$chemin" clean -qfd \
       -e .env -e .env.local -e storage -e node_modules -e vendor -e .next
 
-  echo "  → $(git -C "$chemin" log -1 --format='%h %s')"
+  echo "  → [$BRANCHE] $(git -C "$chemin" log -1 --format='%h %s')"
 }
 
 # ═══ Backend ═══════════════════════════════════════════════════════════════

@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\Admin\AdminsController;
 use App\Http\Controllers\Api\Admin\AgentsController;
+use App\Http\Controllers\Api\Admin\PartenairesRetraitController;
+use App\Http\Controllers\Api\Admin\SupportsRetraitController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
@@ -164,16 +166,27 @@ Route::prefix('admin')->group(function () {
         Route::post('/config/{operateur}/{pays}/toggle',    [AdminConfigController::class, 'toggle']);
         Route::delete('/config/{operateur}/{pays}',         [AdminConfigController::class, 'destroy']);
 
-        // ── Agents de retrait en espèces ──────────────────────────────────
+        // ── Retrait en espèces : supports, partenaires, agents ───────────────
         // Un agent remet des BILLETS : habiliter un tiers à distribuer de
-        // l'argent liquide n'est pas de la gestion courante. Toutes les
-        // écritures sont réservées aux super admins et journalisées ; la
-        // lecture reste ouverte aux autres rôles pour le support.
-        Route::get('/agents',                 [AgentsController::class, 'index']);
-        Route::post('/agents',                [AgentsController::class, 'store']);        // super_admin
-        Route::patch('/agents/{id}',          [AgentsController::class, 'update']);       // super_admin
-        Route::post('/agents/{id}/statut',    [AgentsController::class, 'statut']);       // super_admin
-        Route::post('/agents/{id}/cle',       [AgentsController::class, 'rotationCle']);  // super_admin
+        // l'argent liquide n'est pas de la gestion courante. Écritures
+        // réservées aux super admins et journalisées ; lectures ouvertes aux
+        // autres rôles pour le support.
+        Route::get('/supports-retrait',                [SupportsRetraitController::class, 'index']);
+        Route::post('/supports-retrait',               [SupportsRetraitController::class, 'store']);        // super_admin
+        Route::patch('/supports-retrait/{id}',         [SupportsRetraitController::class, 'update']);       // super_admin
+        Route::delete('/supports-retrait/{id}',        [SupportsRetraitController::class, 'destroy']);      // super_admin
+
+        Route::get('/partenaires-retrait',             [PartenairesRetraitController::class, 'index']);
+        Route::post('/partenaires-retrait',            [PartenairesRetraitController::class, 'store']);     // super_admin
+        Route::patch('/partenaires-retrait/{id}',      [PartenairesRetraitController::class, 'update']);    // super_admin
+        Route::delete('/partenaires-retrait/{id}',     [PartenairesRetraitController::class, 'destroy']);   // super_admin
+        Route::post('/partenaires-retrait/{id}/cle',   [PartenairesRetraitController::class, 'rotationCle']); // super_admin
+
+        Route::get('/agents',                          [AgentsController::class, 'index']);
+        Route::post('/agents',                         [AgentsController::class, 'store']);                 // super_admin
+        Route::patch('/agents/{id}',                   [AgentsController::class, 'update']);                // super_admin
+        Route::post('/agents/{id}/statut',             [AgentsController::class, 'statut']);                // super_admin
+        Route::post('/agents/{id}/pin',                [AgentsController::class, 'reinitialiserPin']);      // super_admin
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);

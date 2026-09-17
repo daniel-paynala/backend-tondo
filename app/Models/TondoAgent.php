@@ -4,42 +4,42 @@ namespace App\Models;
 
 use App\Models\Concerns\HasProjectTable;
 use App\Models\Concerns\UuidPrimary;
-use App\Support\TypesAgent;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Point partenaire habilité à remettre des **espèces** au bénéficiaire d'une
- * cagnotte.
+ * Agent de retrait : la PERSONNE qui remet des espèces au titulaire d'une
+ * cagnotte, pour le compte d'un partenaire et sur un support donné.
  *
- * L'agent avance sa caisse et donne des billets ; il est remboursé par un flux
- * de règlement distinct. Ce n'est donc pas un décaissement Mobile Money de
- * plus : un billet remis à tort ne se conteste pas, là où un virement erroné
- * se rattrape. Tout ce qui suit découle de cette asymétrie.
+ * Un billet remis à tort ne se conteste pas, là où un virement erroné se
+ * rattrape. D'où un compte plus strict que celui d'un utilisateur :
  *
- * `code` est l'identifiant PUBLIC du point — court, affiché au comptoir, lu à
- * voix haute, et repris dans le SMS d'autorisation envoyé au numéro de
- * retrait. Il permet au bénéficiaire de confronter ce qu'il lit sur son
- * téléphone à ce qu'il voit au mur.
+ *  – `identifiant` (« ECKTPE020 ») est figé à la création. Il sert à la
+ *    connexion ET d'identifiant public, repris dans le SMS d'autorisation et
+ *    affiché au comptoir ;
+ *  – le PIN est haché en bcrypt, verrouillé après cinq échecs, et doit être
+ *    changé à la première connexion ;
+ *  – le partenaire et le support ne se modifient pas : l'identifiant les
+ *    encode. Un agent qui en change est un nouvel agent.
  *
- * `cle_api_hash` porte SHA-256 de la clé, jamais la clé. Voir
- * {@see TypesAgent::genererCleApi()} pour la raison du choix de SHA-256 plutôt
- * que d'un hachage salé.
- *
- * @property string      $id
- * @property string      $project_id            Clé de tenant multi-projet.
- * @property string      $code                  Identifiant public, « A-1042 ».
- * @property string      $nom                   Nom commercial affiché.
- * @property string      $type                  'tpe'|'guichet'
- * @property string      $statut                'actif'|'suspendu'
- * @property ?string     $motif_suspension      Raison, pour la traçabilité.
- * @property ?string     $ville
- * @property ?string     $quartier
- * @property ?string     $telephone             Contact exploitant, jamais affiché au bénéficiaire.
- * @property ?string     $cle_api_hash          SHA-256 de la clé d'API.
- * @property ?string     $cle_api_apercu        Quatre derniers caractères, pour reconnaissance.
- * @property ?string     $cle_api_creee_at
- * @property int         $plafond_retrait_fcfa  Plafond par opération, propre à cet agent.
- * @property ?string     $derniere_activite_at
+ * @property string  $id
+ * @property string  $project_id
+ * @property string  $partenaire_id
+ * @property string  $support_id
+ * @property int     $numero                   Rang dans le couple partenaire × support.
+ * @property string  $identifiant              « ECKTPE020 ».
+ * @property string  $nom
+ * @property ?string $telephone
+ * @property ?string $ville
+ * @property ?string $quartier
+ * @property string  $statut                   'actif'|'suspendu'
+ * @property ?string $motif_suspension
+ * @property string  $pin_hash                 bcrypt — jamais le PIN.
+ * @property bool    $pin_doit_changer
+ * @property int     $pin_tentatives_echouees
+ * @property ?\Illuminate\Support\Carbon $pin_verrouille_at
+ * @property int     $plafond_operation_fcfa
+ * @property int     $plafond_journalier_fcfa
  */
 class TondoAgent extends Model
 {
@@ -49,41 +49,62 @@ class TondoAgent extends Model
     /** Table des agents (préfixe résolu : tondo_ / tonji_). */
     protected string $tableSuffix = 'agents';
 
-    /** Toutes les colonnes sont mass-assignables sauf la PK. */
     protected $guarded = ['id'];
 
     protected $casts = [
-        'plafond_retrait_fcfa' => 'integer',
-        'cle_api_creee_at'     => 'datetime',
-        'derniere_activite_at' => 'datetime',
+        'numero'                  => 'integer',
+        'pin_doit_changer'        => 'boolean',
+        'pin_tentatives_echouees' => 'integer',
+        'pin_verrouille_at'       => 'datetime',
+        'pin_modifie_at'          => 'datetime',
+        'plafond_operation_fcfa'  => 'integer',
+        'plafond_journalier_fcfa' => 'integer',
+        'derniere_connexion_at'   => 'datetime',
+        'derniere_activite_at'    => 'datetime',
     ];
 
-    /**
-     * La clé et son empreinte ne doivent JAMAIS sortir du serveur.
-     *
-     * `cle_api_hash` suffit à se faire passer pour l'agent auprès de l'API :
-     * c'est l'empreinte qu'on compare, il n'y a pas de sel à connaître en plus.
-     * La masquer ici évite qu'elle parte dans une réponse JSON par la simple
-     * sérialisation d'un modèle.
-     */
-    protected $hidden = ['cle_api_hash'];
+    /** Même bcrypt, un PIN à 4 chiffres ne doit jamais quitter le serveur. */
+    protected $hidden = ['pin_hash'];
 
-    /**
-     * Vrai si l'agent peut opérer maintenant.
-     *
-     * Un agent sans clé n'est pas « inactif » au sens du statut : il est
-     * simplement inutilisable tant qu'aucune clé ne lui a été émise. Les deux
-     * conditions sont distinctes et doivent le rester — suspendre est une
-     * décision, ne pas avoir de clé est un état d'avancement.
-     */
-    public function estOperationnel(): bool
+    public function partenaire(): BelongsTo
     {
-        return $this->statut === 'actif' && $this->cle_api_hash !== null;
+        return $this->belongsTo(TondoPartenaireRetrait::class, 'partenaire_id');
     }
 
-    /** Retrouve un agent à partir de la clé qu'il présente. */
-    public static function parCleApi(string $cle): ?self
+    public function support(): BelongsTo
     {
-        return static::where('cle_api_hash', TypesAgent::empreinte($cle))->first();
+        return $this->belongsTo(TondoSupportRetrait::class, 'support_id');
+    }
+
+    public function estVerrouille(): bool
+    {
+        return $this->pin_verrouille_at !== null;
+    }
+
+    /**
+     * Raison pour laquelle l'agent ne peut pas opérer maintenant, ou null.
+     *
+     * Quatre conditions indépendantes, vérifiées à chaque connexion plutôt que
+     * propagées par écriture : désactiver un partenaire bloque ses agents
+     * immédiatement, sans réécrire leurs statuts — et les réactiver les
+     * débloque sans risquer de réactiver un agent suspendu pour une autre
+     * raison.
+     */
+    public function motifBlocage(): ?string
+    {
+        if ($this->statut !== 'actif') {
+            return 'Agent suspendu.';
+        }
+        if ($this->estVerrouille()) {
+            return 'PIN verrouillé après trop d\'échecs. Contactez Tonji.';
+        }
+        if ($this->partenaire && ! $this->partenaire->actif) {
+            return 'Partenaire désactivé.';
+        }
+        if ($this->support && ! $this->support->actif) {
+            return 'Support de retrait désactivé.';
+        }
+
+        return null;
     }
 }

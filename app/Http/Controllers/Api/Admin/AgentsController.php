@@ -2,141 +2,168 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
+use App\Http\Controllers\Api\Admin\Concerns\GereRetraitAgents;
 use App\Http\Controllers\Controller;
 use App\Models\TondoAgent;
-use App\Support\TypesAgent;
+use App\Models\TondoPartenaireRetrait;
+use App\Models\TondoSupportRetrait;
+use App\Support\RetraitAgents;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * Administration des agents de retrait en espèces.
+ * Agents de retrait en espèces.
  *
- * Un agent remet des BILLETS. Un virement erroné se conteste ; des espèces
- * remises à tort sont perdues. Toute la gestion est donc plus stricte que
- * celle d'une ressource ordinaire :
+ * Un agent est rattaché à un partenaire ET à un support, et reçoit à sa
+ * création un identifiant qui les encode (« ECKTPE020 ») et un PIN aléatoire.
+ * Ce PIN n'est montré qu'UNE fois, à l'admin qui le transmet ; l'agent le
+ * remplace à sa première connexion.
  *
- *  – **réservée aux super admins** : habiliter un tiers à distribuer de
- *    l'argent liquide n'est pas une opération de gestion courante ;
- *  – **entièrement journalisée** : création, suspension, réémission de clé et
- *    changement de plafond laissent une trace nominative ;
- *  – **la clé n'est montrée qu'une fois** : seule son empreinte est conservée,
- *    rien ne permet de la retrouver ensuite.
+ * Ni le partenaire ni le support ne se modifient ensuite : l'identifiant les
+ * porte, et il figure dans les SMS déjà envoyés. Un agent qui change de
+ * partenaire ou de canal est un nouvel agent.
  */
 class AgentsController extends Controller
 {
-    /** Bornes de tentatives pour tirer un code libre. */
-    private const TENTATIVES_CODE = 12;
+    use GereRetraitAgents;
 
     /**
      * GET /api/admin/agents
      *
-     * Filtres facultatifs : `type`, `statut`, `q` (code, nom ou ville).
+     * Filtres facultatifs : `partenaire_id`, `support_id`, `statut`,
+     * `q` (identifiant, nom ou ville).
      */
     public function index(Request $request): JsonResponse
     {
-        $projectId = $request->user()->project_id;
+        $requete = TondoAgent::with(['partenaire', 'support'])
+            ->where('project_id', $request->user()->project_id);
 
-        $requete = TondoAgent::where('project_id', $projectId);
-
-        if (TypesAgent::typeValide($request->query('type'))) {
-            $requete->where('type', $request->query('type'));
+        foreach (['partenaire_id', 'support_id'] as $filtre) {
+            if (Str::isUuid((string) $request->query($filtre))) {
+                $requete->where($filtre, $request->query($filtre));
+            }
         }
-        if (TypesAgent::statutValide($request->query('statut'))) {
+        if (in_array($request->query('statut'), RetraitAgents::STATUTS, true)) {
             $requete->where('statut', $request->query('statut'));
         }
         if ($terme = trim((string) $request->query('q', ''))) {
             $motif = '%' . $terme . '%';
-            $requete->where(function ($q) use ($motif) {
-                $q->where('code', 'ilike', $motif)
-                  ->orWhere('nom', 'ilike', $motif)
-                  ->orWhere('ville', 'ilike', $motif);
-            });
+            $requete->where(fn ($q) => $q
+                ->where('identifiant', 'ilike', $motif)
+                ->orWhere('nom', 'ilike', $motif)
+                ->orWhere('ville', 'ilike', $motif));
         }
 
         return response()->json([
-            'agents' => $requete->orderByDesc('created_at')->limit(200)->get()
+            'agents' => $requete->orderByDesc('created_at')->limit(500)->get()
                 ->map(fn (TondoAgent $a) => $this->presenter($a)),
         ]);
     }
 
-    /**
-     * POST /api/admin/agents
-     *
-     * Crée l'agent, tire son code public et émet sa première clé.
-     * La clé figure dans CETTE réponse et nulle part ailleurs.
-     */
+    /** POST /api/admin/agents */
     public function store(Request $request): JsonResponse
     {
         $this->exigerSuperAdmin($request);
+        $projectId = $request->user()->project_id;
 
         $data = $request->validate([
-            'nom'                  => ['required', 'string', 'max:120'],
-            'type'                 => ['required', 'string', 'in:' . implode(',', TypesAgent::TYPES)],
-            'ville'                => ['nullable', 'string', 'max:80'],
-            'quartier'             => ['nullable', 'string', 'max:80'],
-            'telephone'            => ['nullable', 'string', 'max:20'],
-            'plafond_retrait_fcfa' => ['nullable', 'integer', 'min:1000', 'max:5000000'],
+            'partenaire_id'           => ['required', 'uuid'],
+            'support_id'              => ['required', 'uuid'],
+            'nom'                     => ['required', 'string', 'max:120'],
+            'telephone'               => ['nullable', 'string', 'max:20'],
+            'ville'                   => ['nullable', 'string', 'max:80'],
+            'quartier'                => ['nullable', 'string', 'max:80'],
+            'plafond_operation_fcfa'  => ['nullable', 'integer', 'min:1000', 'max:5000000'],
+            'plafond_journalier_fcfa' => ['nullable', 'integer', 'min:1000', 'max:50000000'],
         ]);
 
-        $projectId = $request->user()->project_id;
-        $code      = $this->tirerCodeLibre($projectId);
+        $partenaire = TondoPartenaireRetrait::where('project_id', $projectId)->find($data['partenaire_id']);
+        $support    = TondoSupportRetrait::where('project_id', $projectId)->find($data['support_id']);
 
-        if ($code === null) {
-            // Douze tirages infructueux ne relèvent plus du hasard : soit la
-            // table est saturée, soit quelque chose ne va pas. On refuse
-            // plutôt que de boucler indéfiniment.
+        if (! $partenaire || ! $support) {
+            return response()->json(['message' => 'Partenaire ou support introuvable.'], 422);
+        }
+        // Un agent créé sur un partenaire ou un support désactivé naîtrait
+        // bloqué, sans que rien dans le formulaire ne l'ait laissé paraître.
+        if (! $partenaire->actif || ! $support->actif) {
             return response()->json([
-                'message' => 'Impossible de générer un code agent disponible. Contactez la technique.',
-            ], 503);
+                'message' => 'Le partenaire ou le support choisi est désactivé. Réactivez-le avant de créer un agent.',
+            ], 422);
+        }
+        if ($erreur = $this->erreurLieu($support, $data['ville'] ?? null, $data['quartier'] ?? null)) {
+            return response()->json(['message' => $erreur, 'errors' => ['ville' => [$erreur]]], 422);
         }
 
-        $cle = TypesAgent::genererCleApi($code);
+        $plafondOperation  = $data['plafond_operation_fcfa']  ?? 200000;
+        $plafondJournalier = $data['plafond_journalier_fcfa'] ?? max(1000000, $plafondOperation);
+        if ($erreur = $this->erreurPlafonds($plafondOperation, $plafondJournalier)) {
+            return response()->json(['message' => $erreur, 'errors' => ['plafond_journalier_fcfa' => [$erreur]]], 422);
+        }
 
-        $agent = new TondoAgent();
-        // id généré en PHP pour récupérer la valeur immédiatement : le DEFAULT
-        // gen_random_uuid() de la colonne crée bien la ligne, mais Eloquent ne
-        // relit pas la valeur produite quand la clé n'est pas auto-incrémentée.
-        // Sans cela, la réponse renvoie un id nul — le client ne peut plus
-        // adresser l'agent, et le journal d'audit perd sa référence.
-        $agent->id = (string) Str::uuid();
-        $agent->fill([
-            'project_id'           => $projectId,
-            'code'                 => $code,
-            'nom'                  => $data['nom'],
-            'type'                 => $data['type'],
-            'statut'               => 'actif',
-            'ville'                => $data['ville'] ?? null,
-            'quartier'             => $data['quartier'] ?? null,
-            'telephone'            => $data['telephone'] ?? null,
-            'plafond_retrait_fcfa' => $data['plafond_retrait_fcfa'] ?? 200000,
-            'cle_api_hash'         => $cle['hash'],
-            'cle_api_apercu'       => $cle['apercu'],
-            'cle_api_creee_at'     => now(),
-        ]);
-        $agent->save();
+        $pin = RetraitAgents::genererPin();
 
-        $this->journaliser($request, 'agent_cree', "Agent {$code}", 'info', [
-            'agent_id' => $agent->id,
-            'type'     => $agent->type,
-            'plafond'  => $agent->plafond_retrait_fcfa,
+        $agent = DB::transaction(function () use ($projectId, $partenaire, $support, $data, $pin, $plafondOperation, $plafondJournalier) {
+            // Numéro tiré d'un compteur par couple partenaire × support, par un
+            // UPSERT atomique : deux créations simultanées obtiennent deux
+            // numéros distincts, et un numéro n'est jamais réattribué.
+            $table  = project_table('agents_compteurs');
+            $numero = (int) DB::selectOne(
+                "INSERT INTO {$table} (project_id, partenaire_id, support_id, dernier_numero, updated_at)
+                 VALUES (?, ?, ?, 1, now())
+                 ON CONFLICT (partenaire_id, support_id)
+                 DO UPDATE SET dernier_numero = {$table}.dernier_numero + 1, updated_at = now()
+                 RETURNING dernier_numero",
+                [$projectId, $partenaire->id, $support->id],
+            )->dernier_numero;
+
+            $agent = new TondoAgent();
+            // id généré en PHP : Eloquent ne relit pas la valeur du DEFAULT.
+            $agent->id = (string) Str::uuid();
+            $agent->fill([
+                'project_id'              => $projectId,
+                'partenaire_id'           => $partenaire->id,
+                'support_id'              => $support->id,
+                'numero'                  => $numero,
+                'identifiant'             => RetraitAgents::composerIdentifiant($partenaire->sigle, $support->sigle, $numero),
+                'nom'                     => $data['nom'],
+                'telephone'               => $data['telephone'] ?? null,
+                'ville'                   => $data['ville'] ?? null,
+                'quartier'                => $data['quartier'] ?? null,
+                'statut'                  => 'actif',
+                'pin_hash'                => Hash::make($pin),
+                'pin_doit_changer'        => true,
+                'plafond_operation_fcfa'  => $plafondOperation,
+                'plafond_journalier_fcfa' => $plafondJournalier,
+            ]);
+            $agent->save();
+
+            return $agent;
+        });
+
+        // Le PIN n'entre JAMAIS dans le journal : quiconque lit les journaux
+        // pourrait sinon se connecter à la place de l'agent.
+        $this->journaliser($request, 'agent_cree', "Agent {$agent->identifiant}", 'info', [
+            'agent_id'      => $agent->id,
+            'partenaire_id' => $partenaire->id,
+            'support_id'    => $support->id,
         ]);
 
         return response()->json([
-            'agent' => $this->presenter($agent),
-            // ⚠️ Unique apparition de la clé en clair, de toute sa vie.
-            'cle_api' => $cle['cle'],
-            'avertissement' => 'Cette clé ne sera plus jamais affichée. Transmettez-la à l\'exploitant et conservez-en une copie sûre.',
+            'agent'         => $this->presenter($agent->load(['partenaire', 'support'])),
+            // ⚠️ Unique apparition du PIN en clair.
+            'pin'           => $pin,
+            'avertissement' => 'Ce PIN ne sera plus jamais affiché. Transmettez-le à l\'agent : il devra le changer à sa première connexion.',
         ], 201);
     }
 
     /**
      * PATCH /api/admin/agents/{id}
      *
-     * Le `code` n'est PAS modifiable : il est affiché au comptoir et repris
-     * dans les SMS déjà envoyés. Le changer invaliderait ce que des
-     * bénéficiaires ont sous les yeux.
+     * Partenaire et support refusés explicitement plutôt qu'ignorés : un
+     * formulaire qui les enverrait croirait avoir réussi.
      */
     public function update(Request $request, string $id): JsonResponse
     {
@@ -147,20 +174,40 @@ class AgentsController extends Controller
             return response()->json(['message' => 'Agent introuvable.'], 404);
         }
 
+        if ($request->hasAny(['partenaire_id', 'support_id', 'identifiant', 'numero'])) {
+            return response()->json([
+                'message' => 'Le partenaire, le support et l\'identifiant d\'un agent ne se modifient pas. Créez un nouvel agent.',
+            ], 422);
+        }
+
         $data = $request->validate([
-            'nom'                  => ['sometimes', 'string', 'max:120'],
-            'type'                 => ['sometimes', 'string', 'in:' . implode(',', TypesAgent::TYPES)],
-            'ville'                => ['sometimes', 'nullable', 'string', 'max:80'],
-            'quartier'             => ['sometimes', 'nullable', 'string', 'max:80'],
-            'telephone'            => ['sometimes', 'nullable', 'string', 'max:20'],
-            'plafond_retrait_fcfa' => ['sometimes', 'integer', 'min:1000', 'max:5000000'],
+            'nom'                     => ['sometimes', 'string', 'max:120'],
+            'telephone'               => ['sometimes', 'nullable', 'string', 'max:20'],
+            'ville'                   => ['sometimes', 'nullable', 'string', 'max:80'],
+            'quartier'                => ['sometimes', 'nullable', 'string', 'max:80'],
+            'plafond_operation_fcfa'  => ['sometimes', 'integer', 'min:1000', 'max:5000000'],
+            'plafond_journalier_fcfa' => ['sometimes', 'integer', 'min:1000', 'max:50000000'],
         ]);
+
+        // Cohérence évaluée sur l'état FINAL, pas sur les seuls champs envoyés :
+        // baisser le plafond journalier sous le plafond par opération existant
+        // doit être refusé même si ce dernier n'est pas dans la requête.
+        $apres = array_merge($agent->only([
+            'ville', 'quartier', 'plafond_operation_fcfa', 'plafond_journalier_fcfa',
+        ]), $data);
+
+        if ($erreur = $this->erreurLieu($agent->support, $apres['ville'], $apres['quartier'])) {
+            return response()->json(['message' => $erreur, 'errors' => ['ville' => [$erreur]]], 422);
+        }
+        if ($erreur = $this->erreurPlafonds($apres['plafond_operation_fcfa'], $apres['plafond_journalier_fcfa'])) {
+            return response()->json(['message' => $erreur, 'errors' => ['plafond_journalier_fcfa' => [$erreur]]], 422);
+        }
 
         $avant = $agent->only(array_keys($data));
         $agent->fill($data);
         $agent->save();
 
-        $this->journaliser($request, 'agent_modifie', "Agent {$agent->code}", 'info', [
+        $this->journaliser($request, 'agent_modifie', "Agent {$agent->identifiant}", 'info', [
             'agent_id' => $agent->id,
             'avant'    => $avant,
             'apres'    => $data,
@@ -172,9 +219,6 @@ class AgentsController extends Controller
     /**
      * POST /api/admin/agents/{id}/statut
      * Body : { statut: 'actif'|'suspendu', motif?: string }
-     *
-     * La suspension prend effet à l'appel suivant : l'authentification relit
-     * le statut à chaque requête, sans cache.
      */
     public function statut(Request $request, string $id): JsonResponse
     {
@@ -186,20 +230,20 @@ class AgentsController extends Controller
         }
 
         $data = $request->validate([
-            'statut' => ['required', 'string', 'in:' . implode(',', TypesAgent::STATUTS)],
+            'statut' => ['required', 'string', 'in:' . implode(',', RetraitAgents::STATUTS)],
             'motif'  => ['nullable', 'string', 'max:300'],
         ]);
 
         $agent->statut = $data['statut'];
-        // Le motif n'a de sens que sur une suspension ; le conserver après
-        // réactivation laisserait croire à une suspension toujours en cours.
+        // Un motif conservé après réactivation laisserait croire à une
+        // suspension toujours en cours.
         $agent->motif_suspension = $data['statut'] === 'suspendu' ? ($data['motif'] ?? null) : null;
         $agent->save();
 
         $this->journaliser(
             $request,
             $data['statut'] === 'suspendu' ? 'agent_suspendu' : 'agent_reactive',
-            "Agent {$agent->code}",
+            "Agent {$agent->identifiant}",
             $data['statut'] === 'suspendu' ? 'warning' : 'info',
             ['agent_id' => $agent->id, 'motif' => $data['motif'] ?? null],
         );
@@ -208,13 +252,14 @@ class AgentsController extends Controller
     }
 
     /**
-     * POST /api/admin/agents/{id}/cle
+     * POST /api/admin/agents/{id}/pin
      *
-     * Réémet la clé. L'ancienne cesse de fonctionner IMMÉDIATEMENT : c'est la
-     * procédure de révocation, et une révocation qui laisserait une fenêtre de
-     * grâce ne révoquerait rien.
+     * Réinitialise le PIN : nouveau PIN aléatoire, à changer à la prochaine
+     * connexion, compteur d'échecs remis à zéro et verrou levé. C'est la seule
+     * façon de débloquer un agent verrouillé — volontairement une action
+     * d'admin, tracée, et non un délai qui expirerait tout seul.
      */
-    public function rotationCle(Request $request, string $id): JsonResponse
+    public function reinitialiserPin(Request $request, string $id): JsonResponse
     {
         $this->exigerSuperAdmin($request);
 
@@ -223,115 +268,97 @@ class AgentsController extends Controller
             return response()->json(['message' => 'Agent introuvable.'], 404);
         }
 
-        $cle = TypesAgent::genererCleApi($agent->code);
+        $pin         = RetraitAgents::genererPin();
+        $etaitVerrou = $agent->estVerrouille();
 
-        $agent->cle_api_hash     = $cle['hash'];
-        $agent->cle_api_apercu   = $cle['apercu'];
-        $agent->cle_api_creee_at = now();
+        $agent->pin_hash                = Hash::make($pin);
+        $agent->pin_doit_changer        = true;
+        $agent->pin_tentatives_echouees = 0;
+        $agent->pin_verrouille_at       = null;
+        $agent->pin_modifie_at          = null;
         $agent->save();
 
-        $this->journaliser($request, 'agent_cle_reemise', "Agent {$agent->code}", 'warning', [
-            'agent_id' => $agent->id,
+        $this->journaliser($request, 'agent_pin_reinitialise', "Agent {$agent->identifiant}", 'warning', [
+            'agent_id'       => $agent->id,
+            'etait_verrouille' => $etaitVerrou,
         ]);
 
         return response()->json([
             'agent'         => $this->presenter($agent),
-            'cle_api'       => $cle['cle'],
-            'avertissement' => 'L\'ancienne clé ne fonctionne plus. Cette nouvelle clé ne sera plus jamais affichée.',
+            'pin'           => $pin,
+            'avertissement' => 'L\'ancien PIN ne fonctionne plus. Ce nouveau PIN ne sera plus jamais affiché ; l\'agent devra le changer à sa prochaine connexion.',
         ]);
     }
 
     // ── Interne ─────────────────────────────────────────────────────────────
 
-    private function exigerSuperAdmin(Request $request): void
-    {
-        abort_unless(
-            $request->user()->role === 'super_admin',
-            403,
-            'Action réservée aux super admins.',
-        );
-    }
-
     private function trouver(Request $request, string $id): ?TondoAgent
     {
-        return TondoAgent::where('project_id', $request->user()->project_id)->find($id);
+        if (! Str::isUuid($id)) {
+            return null;
+        }
+
+        return TondoAgent::with(['partenaire', 'support'])
+            ->where('project_id', $request->user()->project_id)
+            ->find($id);
     }
 
-    /**
-     * Tire un code non encore utilisé dans ce projet.
-     *
-     * Le tirage est aléatoire et non séquentiel : une numérotation croissante
-     * publierait le nombre d'agents et l'ordre des recrutements. On vérifie
-     * donc l'unicité, plutôt que de la tenir d'une suite.
-     */
-    private function tirerCodeLibre(string $projectId): ?string
+    /** Ville et quartier obligatoires sur un support qui a un lieu physique. */
+    private function erreurLieu(?TondoSupportRetrait $support, ?string $ville, ?string $quartier): ?string
     {
-        for ($i = 0; $i < self::TENTATIVES_CODE; $i++) {
-            $code = TypesAgent::genererCode();
-            $pris = TondoAgent::where('project_id', $projectId)->where('code', $code)->exists();
-            if (! $pris) {
-                return $code;
-            }
+        if ($support && $support->necessite_lieu && (trim((string) $ville) === '' || trim((string) $quartier) === '')) {
+            return "Le support « {$support->libelle} » a un lieu physique : la ville et le quartier sont obligatoires.";
         }
 
         return null;
     }
 
     /**
-     * Forme la représentation publique d'un agent.
-     *
-     * `cle_api_hash` n'y figure pas : l'empreinte suffit à se faire passer
-     * pour l'agent, il n'y a pas de sel à connaître en plus.
+     * Un plafond journalier inférieur au plafond par opération rendrait ce
+     * dernier inatteignable sans que rien ne le signale.
+     */
+    private function erreurPlafonds(int $operation, int $journalier): ?string
+    {
+        return $journalier < $operation
+            ? 'Le plafond journalier ne peut pas être inférieur au plafond par opération.'
+            : null;
+    }
+
+    /**
+     * Représentation d'un agent — jamais le PIN ni son empreinte.
      *
      * @return array<string, mixed>
      */
     private function presenter(TondoAgent $a): array
     {
         return [
-            'id'                   => $a->id,
-            'code'                 => $a->code,
-            'nom'                  => $a->nom,
-            'type'                 => $a->type,
-            'statut'               => $a->statut,
-            'motif_suspension'     => $a->motif_suspension,
-            'ville'                => $a->ville,
-            'quartier'             => $a->quartier,
-            'telephone'            => $a->telephone,
-            'plafond_retrait_fcfa' => $a->plafond_retrait_fcfa,
-            'cle_api_apercu'       => $a->cle_api_apercu,
-            'cle_api_creee_at'     => $a->cle_api_creee_at?->toIso8601String(),
-            'derniere_activite_at' => $a->derniere_activite_at?->toIso8601String(),
-            'operationnel'         => $a->estOperationnel(),
-            'created_at'           => $a->created_at?->toIso8601String(),
+            'id'                      => $a->id,
+            'identifiant'             => $a->identifiant,
+            'nom'                     => $a->nom,
+            'telephone'               => $a->telephone,
+            'ville'                   => $a->ville,
+            'quartier'                => $a->quartier,
+            'statut'                  => $a->statut,
+            'motif_suspension'        => $a->motif_suspension,
+            'partenaire'              => $a->partenaire ? [
+                'id' => $a->partenaire->id, 'nom' => $a->partenaire->nom,
+                'sigle' => $a->partenaire->sigle, 'actif' => $a->partenaire->actif,
+            ] : null,
+            'support'                 => $a->support ? [
+                'id' => $a->support->id, 'libelle' => $a->support->libelle,
+                'sigle' => $a->support->sigle, 'actif' => $a->support->actif,
+            ] : null,
+            'pin_doit_changer'        => $a->pin_doit_changer,
+            'pin_verrouille'          => $a->estVerrouille(),
+            'pin_tentatives_echouees' => $a->pin_tentatives_echouees,
+            'plafond_operation_fcfa'  => $a->plafond_operation_fcfa,
+            'plafond_journalier_fcfa' => $a->plafond_journalier_fcfa,
+            // Ce qui empêche l'agent d'opérer MAINTENANT, toutes causes
+            // confondues — statut, verrou, partenaire ou support désactivé.
+            'motif_blocage'           => $a->motifBlocage(),
+            'derniere_connexion_at'   => $a->derniere_connexion_at?->toIso8601String(),
+            'derniere_activite_at'    => $a->derniere_activite_at?->toIso8601String(),
+            'created_at'              => $a->created_at?->toIso8601String(),
         ];
-    }
-
-    /**
-     * Trace l'action dans le journal d'audit.
-     *
-     * @param  array<string, mixed> $metadonnees
-     */
-    private function journaliser(
-        Request $request,
-        string  $action,
-        string  $cible,
-        string  $niveau,
-        array   $metadonnees,
-    ): void {
-        $admin = $request->user();
-
-        DB::table(project_table('logs'))->insert([
-            'id'              => (string) Str::uuid(),
-            'project_id'      => $admin->project_id,
-            'acteur_admin_id' => $admin->id,
-            'acteur_libelle'  => trim(($admin->prenom ?? '') . ' ' . ($admin->nom ?? '')) ?: 'Admin',
-            'acteur_role'     => $admin->role,
-            'action'          => $action,
-            'cible'           => $cible,
-            'niveau'          => $niveau,
-            'metadonnees'     => json_encode($metadonnees),
-            'date'            => now(),
-            'created_at'      => now(),
-        ]);
     }
 }
