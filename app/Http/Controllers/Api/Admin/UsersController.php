@@ -207,7 +207,8 @@ class UsersController extends Controller
                 cagnotte:      $cagnotte,
                 source:        'suppression_compte',
                 prefixeIdem:   'TONDO-SUPPR-',
-                prefixeTrans:  'TONDOSUPPR',
+                // Les lignes antérieures au 2026-09-17 portent TONDOSUPPR.
+                prefixeTrans:  'TONJISUPPR',
                 cloturer:      true,
             );
 
