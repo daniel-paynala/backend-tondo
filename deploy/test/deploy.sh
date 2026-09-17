@@ -132,6 +132,6 @@ fi
 
 echo
 echo "──────────────────────────────────────────────────────────"
-echo " Backoffice : http://13.39.79.94/"
-echo " API        : http://13.39.79.94:8080/"
+echo " Backoffice : https://test-controller.tonji.ga/"
+echo " API        : https://test-api.tonji.ga/"
 echo "──────────────────────────────────────────────────────────"

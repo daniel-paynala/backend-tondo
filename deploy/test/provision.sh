@@ -186,8 +186,13 @@ fi
 # utilisable quel que soit l'endroit où on l'a déposé.
 ICI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "▸ Pose des vhosts et de l'unité systemd…"
-sudo cp "$ICI/nginx-backend.conf"  /etc/nginx/conf.d/backend-test.conf
-sudo cp "$ICI/nginx-admin.conf"    /etc/nginx/conf.d/admin-test.conf
+# Vraie IP des visiteurs derrière Cloudflare — préfixe 00 pour être chargé
+# avant les blocs server.
+sudo cp "$ICI/cloudflare-realip.conf"    /etc/nginx/conf.d/00-cloudflare-realip.conf
+# test-api.tonji.ga et test-controller.tonji.ga.
+sudo cp "$ICI/nginx-test-domaines.conf"  /etc/nginx/conf.d/test-domaines.conf
+# IP nue et noms inconnus : connexion fermée sans réponse.
+sudo cp "$ICI/nginx-defaut.conf"         /etc/nginx/conf.d/defaut.conf
 sudo cp "$ICI/tonji-admin.service" /etc/systemd/system/tonji-admin.service
 sudo systemctl daemon-reload
 sudo nginx -t
@@ -205,7 +210,7 @@ echo "────────────────────────�
 echo " Provisionnement terminé."
 echo
 echo " Reste à faire, dans l'ordre :"
-echo "  1. Ouvrir les ports 80 et 8080 dans le security group AWS."
+echo "  1. Ouvrir le port 80 aux seules plages Cloudflare dans le security group AWS."
 echo "  2. Déposer les fichiers d'environnement (voir deploy.sh)."
 echo "  3. Lancer deploy.sh."
 echo "──────────────────────────────────────────────────────────"
