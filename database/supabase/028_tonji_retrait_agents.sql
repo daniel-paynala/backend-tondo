@@ -157,25 +157,68 @@ CREATE TABLE IF NOT EXISTS public.tonji_agents (
 
 
 -- ─────────────────────────────────────────────────────────────────────────
--- 4 bis. Retraits en espèces
+-- 4 bis. Retraits en espèces (le dossier)
 -- ─────────────────────────────────────────────────────────────────────────
--- Créée avant le parcours de retrait lui-même, parce que les règles de
--- suppression en dépendent : un agent ou un support ne se supprime que si
--- AUCUN retrait n'est passé par lui. Sans table, « aucun retrait » ne se
--- vérifierait contre rien — et un contrôle toujours vrai laisserait supprimer
--- un agent ayant servi, le jour où les retraits existeront.
+-- Une ligne par demande de retrait, de la saisie au comptoir jusqu'à son
+-- issue. Seul un retrait VALIDÉ fait sortir de l'argent : il écrit alors une
+-- ligne dans le grand livre (payout), dans la même transaction que le débit
+-- du solde. Une demande en attente, expirée, refusée ou annulée n'y laisse
+-- aucune trace.
 --
--- Réduite pour l'instant à ce qui ne changera pas. Le statut, le code
--- d'autorisation et la clé d'idempotence s'ajouteront avec le parcours.
+--   en_attente_code ──► valide     (code juste, solde et plafonds suffisants)
+--                   ├─► refuse     (3 codes faux, solde ou plafond insuffisant)
+--                   ├─► expire     (code non saisi à temps)
+--                   └─► annule     (abandon, ou remplacée par une nouvelle demande)
 CREATE TABLE IF NOT EXISTS public.tonji_retraits_especes (
-    id            uuid        DEFAULT gen_random_uuid() NOT NULL,
-    project_id    uuid        NOT NULL,
-    agent_id      uuid        NOT NULL,
-    cagnotte_id   uuid        NOT NULL,
-    montant_fcfa  bigint      NOT NULL,
-    created_at    timestamptz NOT NULL DEFAULT now(),
-    updated_at    timestamptz NOT NULL DEFAULT now()
+    id               uuid        DEFAULT gen_random_uuid() NOT NULL,
+    project_id       uuid        NOT NULL,
+
+    -- TONJICASH + 9 caractères. Citée dans les SMS au titulaire, et reprise
+    -- telle quelle comme trans_id du payout : un seul identifiant de la
+    -- demande au grand livre.
+    reference        varchar(30) NOT NULL,
+
+    agent_id         uuid        NOT NULL,
+    cagnotte_id      uuid        NOT NULL,
+    montant_fcfa     bigint      NOT NULL,
+
+    statut           varchar(20) NOT NULL DEFAULT 'en_attente_code',
+    motif_refus      text,
+
+    -- Code envoyé par SMS au numéro de retrait. Haché : même la base ne
+    -- permet pas de valider un retrait à la place du titulaire.
+    code_hash        text        NOT NULL,
+    code_tentatives  smallint    NOT NULL DEFAULT 0,
+    code_expire_at   timestamptz NOT NULL,
+
+    -- Fournie par le terminal. Rejouer une demande avec la même clé renvoie
+    -- le même dossier, jamais un second retrait — c'est ce qui rend sûre une
+    -- nouvelle tentative après une coupure réseau.
+    cle_idempotence  varchar(100) NOT NULL,
+
+    -- Renseigné à la validation, et seulement à la validation.
+    payout_id        uuid,
+    -- Moment où le dossier a atteint son issue, quelle qu'elle soit.
+    termine_at       timestamptz,
+
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    updated_at       timestamptz NOT NULL DEFAULT now()
 );
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 4 ter. Le grand livre : payout accueille les espèces
+-- ─────────────────────────────────────────────────────────────────────────
+-- Un retrait validé est une sortie d'argent comme une autre : il s'inscrit
+-- dans payout, et la réconciliation (Σ payin − Σ payout = solde) comme
+-- l'historique du gérant l'intègrent sans autre changement. Deux colonnes le
+-- distinguent d'un transfert Mobile Money.
+--
+-- Valeur par défaut `mobile_money` : toutes les lignes existantes restent ce
+-- qu'elles sont, sans réécriture.
+ALTER TABLE public.tonji_payout ADD COLUMN IF NOT EXISTS canal    varchar(20) NOT NULL DEFAULT 'mobile_money';
+-- L'agent qui a remis les billets. Vide pour un transfert Mobile Money.
+ALTER TABLE public.tonji_payout ADD COLUMN IF NOT EXISTS agent_id uuid;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
@@ -266,9 +309,9 @@ BEGIN
     ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_project_fk
       FOREIGN KEY (project_id) REFERENCES public.projects(id) ON DELETE RESTRICT;
   END IF;
-  -- RESTRICT, et non CASCADE : c'est le filet de sécurité derrière le contrôle
-  -- du code. Même si une vérification manquait un jour, la base refuserait de
-  -- supprimer un agent par lequel un retrait est passé.
+  -- RESTRICT partout : c'est le filet de sécurité derrière les contrôles du
+  -- code. Ni l'agent, ni la cagnotte, ni la ligne du grand livre ne peuvent
+  -- disparaître sous un dossier de retrait.
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_retraits_especes_agent_fk') THEN
     ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_agent_fk
       FOREIGN KEY (agent_id) REFERENCES public.tonji_agents(id) ON DELETE RESTRICT;
@@ -277,9 +320,43 @@ BEGIN
     ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_cagnotte_fk
       FOREIGN KEY (cagnotte_id) REFERENCES public.tonji_cagnottes(id) ON DELETE RESTRICT;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_retraits_especes_payout_fk') THEN
+    ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_payout_fk
+      FOREIGN KEY (payout_id) REFERENCES public.tonji_payout(id) ON DELETE RESTRICT;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_retraits_especes_montant_check') THEN
     ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_montant_check
       CHECK (montant_fcfa > 0);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_retraits_especes_statut_check') THEN
+    ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_statut_check
+      CHECK (statut IN ('en_attente_code', 'valide', 'refuse', 'expire', 'annule'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_retraits_especes_reference_check') THEN
+    ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_reference_check
+      CHECK (reference ~ '^TONJICASH[A-Z0-9]{9}$');
+  END IF;
+  -- Un dossier est validé si et seulement s'il a écrit dans le grand livre :
+  -- ni argent sorti sans dossier validé, ni dossier validé sans argent sorti.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_retraits_especes_payout_check') THEN
+    ALTER TABLE public.tonji_retraits_especes ADD CONSTRAINT tonji_retraits_especes_payout_check
+      CHECK ((statut = 'valide') = (payout_id IS NOT NULL));
+  END IF;
+
+  -- Payout
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_payout_canal_check') THEN
+    ALTER TABLE public.tonji_payout ADD CONSTRAINT tonji_payout_canal_check
+      CHECK (canal IN ('mobile_money', 'especes'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_payout_agent_fk') THEN
+    ALTER TABLE public.tonji_payout ADD CONSTRAINT tonji_payout_agent_fk
+      FOREIGN KEY (agent_id) REFERENCES public.tonji_agents(id) ON DELETE RESTRICT;
+  END IF;
+  -- Espèces si et seulement si un agent est désigné : une sortie en espèces
+  -- sans agent n'aurait personne à qui demander des comptes.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tonji_payout_canal_agent_check') THEN
+    ALTER TABLE public.tonji_payout ADD CONSTRAINT tonji_payout_canal_agent_check
+      CHECK ((canal = 'especes') = (agent_id IS NOT NULL));
   END IF;
 END $$;
 
@@ -307,12 +384,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS tonji_agents_numero_uidx
 CREATE INDEX IF NOT EXISTS tonji_agents_projet_idx
   ON public.tonji_agents (project_id, created_at DESC);
 
--- « Un retrait est-il passé par cet agent ? » — posée à chaque tentative de
--- suppression, et plus tard pour le cumul journalier.
+CREATE UNIQUE INDEX IF NOT EXISTS tonji_retraits_especes_reference_uidx
+  ON public.tonji_retraits_especes (reference);
+-- Une clé d'idempotence n'a de sens que pour le terminal qui l'a émise.
+CREATE UNIQUE INDEX IF NOT EXISTS tonji_retraits_especes_idempotence_uidx
+  ON public.tonji_retraits_especes (agent_id, cle_idempotence);
+-- UNE seule demande en attente par cagnotte, garantie par la base : sans cela,
+-- le titulaire recevrait deux codes pour deux montants et pourrait autoriser
+-- le mauvais.
+CREATE UNIQUE INDEX IF NOT EXISTS tonji_retraits_especes_attente_uidx
+  ON public.tonji_retraits_especes (cagnotte_id) WHERE statut = 'en_attente_code';
+-- Cumul journalier d'un agent, et contrôle « un retrait est-il passé par lui ».
 CREATE INDEX IF NOT EXISTS tonji_retraits_especes_agent_idx
-  ON public.tonji_retraits_especes (agent_id, created_at DESC);
+  ON public.tonji_retraits_especes (agent_id, statut, termine_at);
 CREATE INDEX IF NOT EXISTS tonji_retraits_especes_cagnotte_idx
   ON public.tonji_retraits_especes (cagnotte_id, created_at DESC);
+-- Relevé d'un partenaire : les sorties en espèces de ses agents.
+CREATE INDEX IF NOT EXISTS tonji_payout_agent_idx
+  ON public.tonji_payout (agent_id, date_creation) WHERE agent_id IS NOT NULL;
 
 
 -- ─────────────────────────────────────────────────────────────────────────
