@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\OperationReelleBloquee;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -71,6 +72,41 @@ class PaynalaPaymentService
     }
 
     /**
+     * Vrai si les opérations d'argent réel sont interdites dans cet environnement.
+     *
+     * Le serveur de test (APP_ENV=staging) parle à l'API Paynala de production,
+     * faute d'environnement de test chez Paynala. Le KYC y est utile et sans
+     * risque ; un encaissement ou un transfert y déplacerait de l'argent réel
+     * sur la base de soldes fictifs. Les postes de développement (local) ne
+     * sont pas concernés : leurs essais réels sont faits en connaissance de cause.
+     */
+    public static function operationsReellesBloquees(): bool
+    {
+        return app()->environment('staging')
+            && ! config('services.paynala.operations_reelles_en_test');
+    }
+
+    /**
+     * Refuse l'opération si l'argent réel est bloqué ici.
+     *
+     * À appeler au DÉBUT de chaque circuit d'argent, avant de réserver des
+     * fonds : plusieurs appelants décrémentent le solde avant l'appel à
+     * Paynala et ne le restaurent pas sur erreur. Refuser en amont évite de
+     * laisser un solde amputé et d'alerter les admins à tort.
+     *
+     * @throws OperationReelleBloquee
+     */
+    public static function assurerOperationsReellesAutorisees(string $operation): void
+    {
+        if (self::operationsReellesBloquees()) {
+            Log::warning('[paynala] opération d\'argent réel bloquée sur l\'environnement de test', ['operation' => $operation]);
+            throw new OperationReelleBloquee(
+                "Opération « {$operation} » indisponible sur l'environnement de test : elle déplacerait de l'argent réel."
+            );
+        }
+    }
+
+    /**
      * Initie un paiement Airtel Money.
      *
      * @param  string $requestId  Identifiant unique alphanumérique (4-64 chars, pas de tirets).
@@ -88,6 +124,10 @@ class PaynalaPaymentService
         string $firstName = '',
         string $lastName  = '',
     ): array {
+        // Filet de sécurité : même un appelant qui aurait oublié le contrôle en
+        // amont ne peut pas déclencher un encaissement réel depuis le test.
+        self::assurerOperationsReellesAutorisees('encaissement');
+
         $token = $this->getToken();
 
         $response = Http::withToken($token)
@@ -319,6 +359,10 @@ class PaynalaPaymentService
         string $reference,
         string $type = 'B2C',
     ): array {
+        // Filet de sécurité : même un appelant qui aurait oublié le contrôle en
+        // amont ne peut pas déclencher un transfert réel depuis le test.
+        self::assurerOperationsReellesAutorisees('transfert');
+
         // Toujours un token frais pour disburse : l'endpoint est plus strict
         // que KYC/payment et rejette les tokens mis en cache trop longtemps.
         Cache::forget('paynala_oauth_token');

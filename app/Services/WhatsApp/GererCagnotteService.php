@@ -168,6 +168,10 @@ class GererCagnotteService
             ->select(['id', 'type_client'])
             ->first();
 
+        // Environnement de test : refuser AVANT de réserver. Plus bas, un échec
+        // de Paynala laisse le solde décrémenté pour vérification manuelle.
+        PaynalaPaymentService::assurerOperationsReellesAutorisees('transfert');
+
         // ── Phase 1 — réserver sous row-lock ─────────────────────────────────
         DB::transaction(function () use (
             $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,

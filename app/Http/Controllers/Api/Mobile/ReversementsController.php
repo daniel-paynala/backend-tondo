@@ -118,6 +118,15 @@ class ReversementsController extends Controller
             ? '0' . substr($numeroBeneficiaireE164, 4)
             : $numeroBeneficiaireE164;
 
+        // Environnement de test : refuser AVANT de réserver les fonds. Plus bas,
+        // un échec de Paynala laisse le solde décrémenté pour vérification
+        // manuelle — il ne faut pas en arriver là pour un transfert bloqué.
+        if (PaynalaPaymentService::operationsReellesBloquees()) {
+            return response()->json([
+                'message' => 'Les transferts sont désactivés sur l\'environnement de test.',
+            ], 503);
+        }
+
         // ── Génération des identifiants Paynala ──────────────────────────────
         $nextNum        = DB::table(project_table('payout'))->count() + 1;
         $typeLabel      = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';

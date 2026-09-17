@@ -73,8 +73,17 @@ return [
     | Paynala Payment Gateway — Airtel Money Gabon
     |--------------------------------------------------------------------------
     |
-    | PAYNALA_BASE_URL : staging = https://testapi.paynala.com/functions/v1
-    |                    prod    = https://api.paynala.com/functions/v1
+    | PAYNALA_BASE_URL : https://api.paynala.com/functions/v1
+    |
+    | ⚠️ Il n'existe pas d'environnement de test Paynala : testapi.paynala.com ne
+    | résout pas (constaté le 2026-09-11). La valeur par défaut ci-dessous reste
+    | cette adresse morte à dessein — un environnement mal configuré échoue sans
+    | rien déplacer, au lieu de tomber silencieusement sur la production.
+    |
+    | Le serveur de test utilise donc api.paynala.com, pour le KYC notamment.
+    | Les encaissements et transferts y sont BLOQUÉS (APP_ENV=staging) tant que
+    | PAYNALA_OPERATIONS_REELLES n'est pas explicitement à true : ils
+    | déplaceraient de l'argent réel sur la base de soldes de test.
     |
     */
     'paynala' => [
@@ -82,6 +91,7 @@ return [
         'client_secret' => env('PAYNALA_CLIENT_SECRET'),
         'base_url'      => env('PAYNALA_BASE_URL', 'https://testapi.paynala.com/functions/v1'),
         'operator_key'  => env('PAYNALA_OPERATOR_KEY'),
+        'operations_reelles_en_test' => (bool) env('PAYNALA_OPERATIONS_REELLES', false),
     ],
 
     /*

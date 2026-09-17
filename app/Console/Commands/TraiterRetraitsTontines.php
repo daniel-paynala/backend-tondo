@@ -48,6 +48,14 @@ class TraiterRetraitsTontines extends Command
         PushNotifier      $notif,
         TontineService        $tontineService,
     ): int {
+        // Environnement de test : aucun transfert réel. On s'arrête avant de
+        // parcourir les cagnottes, plutôt que de créer un payout en échec par
+        // cagnotte éligible.
+        if (\App\Services\PaynalaPaymentService::operationsReellesBloquees()) {
+            $this->warn('Transferts réels bloqués sur l\'environnement de test (PAYNALA_OPERATIONS_REELLES).');
+            return self::SUCCESS;
+        }
+
         $isDryRun = (bool) $this->option('dry-run');
         // Heure locale Gabon pour éviter un décalage de date lié à UTC.
         $today    = now()->timezone('Africa/Libreville')->toDateString();
