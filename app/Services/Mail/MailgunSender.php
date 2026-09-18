@@ -23,6 +23,12 @@ class MailgunSender
         $endpoint = config('services.mailgun.endpoint', 'api.eu.mailgun.net');
         $from     = config('services.mailgun.from_name').' <'.config('services.mailgun.from').'>';
 
+        // Même préfixe que le bandeau du gabarit : la liste des messages suffit à
+        // distinguer un envoi de recette d'un envoi de production.
+        if (! app()->environment('production')) {
+            $subject = '[TEST] '.$subject;
+        }
+
         if (! $secret || ! $domain) {
             Log::warning('MailgunSender : MAILGUN_SECRET/MAILGUN_DOMAIN manquant — e-mail non envoyé', ['to' => $to]);
 
