@@ -123,7 +123,7 @@ class MarchandsController extends Controller
         if ($request->has('numero_tel')) {
             $request->merge(['numero_tel' => self::versE164($request->input('numero_tel'))]);
         }
-        $data = $request->validate($this->regles($projectId, $marchand->id, partiel: true));
+        $data = $request->validate($this->regles($projectId, partiel: true));
 
         // Changer le numéro change la destination de l'argent : le titulaire
         // affiché doit suivre, sinon la fiche afficherait le nom de l'ancien
@@ -267,32 +267,18 @@ class MarchandsController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function regles(string $projectId, ?string $ignorerId = null, bool $partiel = false): array
+    private function regles(string $projectId, bool $partiel = false): array
     {
         $requis = $partiel ? 'sometimes' : 'required';
-        $table  = project_table('marchands');
 
         return [
             'nom'           => [$requis, 'string', 'min:2', 'max:120'],
-            // Miroir du CHECK en base : le refus doit venir de la validation,
-            // avec un message lisible, pas d'une contrainte Postgres.
-            'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/',
-                // Un numéro ne peut désigner qu'une fiche : sinon le relevé
-                // d'un marchand deviendrait ambigu. Le message nomme la fiche
-                // qui le détient, y compris si elle est désactivée.
-                function (string $attribut, mixed $valeur, \Closure $echec) use ($table, $projectId, $ignorerId) {
-                    $existant = DB::table($table)
-                        ->where('project_id', $projectId)
-                        ->where('numero_tel', (string) $valeur)
-                        ->when($ignorerId, fn ($q) => $q->where('id', '!=', $ignorerId))
-                        ->first(['nom', 'actif']);
-
-                    if ($existant) {
-                        $echec($existant->actif
-                            ? "Ce numéro est déjà enregistré pour le marchand « {$existant->nom} »."
-                            : "Ce numéro appartient au marchand « {$existant->nom} », actuellement désactivé. Réactivez cette fiche plutôt que d'en créer une autre.");
-                    }
-                }],
+            // Format : miroir du CHECK en base, pour un message lisible plutôt
+            // qu'une erreur Postgres. En revanche, un numéro peut porter
+            // plusieurs fiches : une chaîne encaisse sur
+            // un seul numéro pour plusieurs établissements. C'est le marchand
+            // choisi au paiement qui dit où l'on a payé.
+            'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/'],
             'type_paynala'  => ['sometimes', Rule::in(['particulier', 'entreprise'])],
             // Référence à la liste administrée : un texte libre finissait en
             // « Santé » / « santé » / « Pharmacie » pour la même réalité.
