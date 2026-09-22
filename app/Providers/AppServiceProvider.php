@@ -57,6 +57,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Tonji ne parle qu'une langue à ses utilisateurs et à ses admins. Les
+        // messages de validation partent tels quels dans le dashboard et dans
+        // l'app : on ne les laisse pas dépendre d'un APP_LOCALE oublié à « en »
+        // dans un .env — c'est exactement ce qui a produit
+        // « The numero tel has already been taken. » à l'écran.
+        app()->setLocale('fr');
+
         $this->configurerRateLimiters();
     }
 
