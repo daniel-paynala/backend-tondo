@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
 use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
+use App\Http\Controllers\Api\Mobile\MarchandsController as MobileMarchandsController;
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\Mobile\AssociationController as MobileAssociationController;
@@ -333,5 +334,7 @@ Route::prefix('mobile')->group(function () {
 
         // Reversements partiels (payout gérant → bénéficiaire, cagnotte ouverte)
         Route::post('/reversements', [MobileReversementsController::class, 'store']);
+        // Destinations marchandes proposées au moment d'un transfert.
+        Route::get('/marchands', [MobileMarchandsController::class, 'index']);
     });
 });

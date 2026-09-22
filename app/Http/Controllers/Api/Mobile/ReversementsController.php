@@ -37,6 +37,7 @@ class ReversementsController extends Controller
      *   cagnotte_reference   : string  (4-5 chiffres)
      *   numero_beneficiaire  : string|null  (9 chiffres local, ex : 074577473)
      *   membre_id        : string|null  (UUID tondo_participants.id)
+     *   marchand_id          : string|null  (UUID tondo_marchands.id)
      *   montant              : int           (FCFA, min 100, max 500 000)
      * }
      */
@@ -46,12 +47,15 @@ class ReversementsController extends Controller
             'cagnotte_reference'  => ['required', 'string', 'regex:/^\d{6}$/'],
             'numero_beneficiaire' => ['nullable', 'string', 'regex:/^\d{9}$/'],
             'participant_id'      => ['nullable', 'string', 'uuid'],
+            // Destination marchande : le client envoie le solde chez un
+            // commerçant enregistré plutôt que sur un numéro qu'il saisit.
+            'marchand_id'         => ['nullable', 'string', 'uuid'],
             'montant'             => ['required', 'integer', 'min:100'],
         ]);
 
-        if (empty($data['numero_beneficiaire']) && empty($data['participant_id'])) {
+        if (empty($data['numero_beneficiaire']) && empty($data['participant_id']) && empty($data['marchand_id'])) {
             throw ValidationException::withMessages([
-                'numero_beneficiaire' => 'Indiquez un numéro bénéficiaire ou sélectionnez un membre.',
+                'numero_beneficiaire' => 'Indiquez un numéro bénéficiaire, un membre ou un marchand.',
             ]);
         }
 
@@ -87,8 +91,27 @@ class ReversementsController extends Controller
 
         // ── Résolution du numéro bénéficiaire ────────────────────────────────
         $beneficiaireUserId = null;
+        // Fiche marchand retenue, le cas échéant : elle porte le numéro qui
+        // encaisse et le type de compte à transmettre à Paynala.
+        $marchand = null;
 
-        if (! empty($data['participant_id'])) {
+        if (! empty($data['marchand_id'])) {
+            $marchand = DB::table(project_table('marchands'))
+                ->where('project_id', $user->project_id)
+                ->where('id', $data['marchand_id'])
+                ->first(['id', 'nom', 'numero_tel', 'actif', 'type_paynala']);
+
+            if (! $marchand || ! $marchand->actif) {
+                throw ValidationException::withMessages([
+                    'marchand_id' => 'Ce marchand n\'est plus disponible.',
+                ]);
+            }
+
+            $numeroBeneficiaireE164 = $marchand->numero_tel;
+            // Le bénéficiaire est un commerce, pas un compte Tonji : même si le
+            // numéro correspond à un utilisateur, la ligne ne lui appartient pas.
+            $beneficiaireUserId = null;
+        } elseif (! empty($data['participant_id'])) {
             $participant = DB::table(project_table('participants'))
                 ->join('users', project_table('participants').'.user_id', '=', 'users.id')
                 ->where(project_table('participants').'.id', $data['participant_id'])
@@ -143,7 +166,7 @@ class ReversementsController extends Controller
         try {
             DB::transaction(function () use (
                 $cagnotte, $data, $payoutId, $transId, $idempotencyKey,
-                $reference, $numeroBeneficiaireE164, $beneficiaireUserId, $user
+                $reference, $numeroBeneficiaireE164, $beneficiaireUserId, $user, $marchand
             ) {
                 // Verrouillage exclusif de la ligne cagnotte.
                 $soldeActuel = DB::table(project_table('cagnottes'))
@@ -169,13 +192,18 @@ class ReversementsController extends Controller
                     'numero_tel'    => $numeroBeneficiaireE164,
                     'montant'       => $data['montant'],
                     'statut'        => 'initie',
-                    'request'       => json_encode([
+                    // Les deux colonnes disent la même chose et une contrainte
+                    // l'exige : elles se posent ensemble.
+                    'type_beneficiaire' => $marchand ? 'marchand' : 'particulier',
+                    'marchand_id'       => $marchand?->id,
+                    'request'       => json_encode(array_filter([
                         'idempotency_key'     => $idempotencyKey,
                         'reference'           => $reference,
                         'cagnotte_reference'  => $cagnotte->reference,
                         'numero_beneficiaire' => $numeroBeneficiaireE164,
                         'montant'             => $data['montant'],
-                    ]),
+                        'marchand'            => $marchand?->nom,
+                    ])),
                     'date_creation' => now(),
                     'created_at'    => now(),
                     'updated_at'    => now(),
@@ -200,11 +228,15 @@ class ReversementsController extends Controller
         }
 
         // ── PHASE 2 : appel Paynala (hors transaction DB) ────────────────────
-        $disburseType = $this->paynala->resolveDisburseType(
-            msisdnLocal: $msisdnLocal,
-            msisdnE164:  $numeroBeneficiaireE164,
-            userId:      $beneficiaireUserId,
-        );
+        // Pour un marchand, le type est celui de sa fiche : c'est une donnée
+        // administrée, plus fiable qu'une déduction à partir du KYC.
+        $disburseType = $marchand
+            ? ($marchand->type_paynala === 'entreprise' ? 'B2B' : 'B2C')
+            : $this->paynala->resolveDisburseType(
+                msisdnLocal: $msisdnLocal,
+                msisdnE164:  $numeroBeneficiaireE164,
+                userId:      $beneficiaireUserId,
+            );
 
         try {
             $disburseData = $this->paynala->disburse(
