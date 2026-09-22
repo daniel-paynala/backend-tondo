@@ -277,7 +277,22 @@ class MarchandsController extends Controller
             // Miroir du CHECK en base : le refus doit venir de la validation,
             // avec un message lisible, pas d'une contrainte Postgres.
             'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/',
-                Rule::unique($table, 'numero_tel')->where('project_id', $projectId)->ignore($ignorerId)],
+                // Un numéro ne peut désigner qu'une fiche : sinon le relevé
+                // d'un marchand deviendrait ambigu. Le message nomme la fiche
+                // qui le détient, y compris si elle est désactivée.
+                function (string $attribut, mixed $valeur, \Closure $echec) use ($table, $projectId, $ignorerId) {
+                    $existant = DB::table($table)
+                        ->where('project_id', $projectId)
+                        ->where('numero_tel', (string) $valeur)
+                        ->when($ignorerId, fn ($q) => $q->where('id', '!=', $ignorerId))
+                        ->first(['nom', 'actif']);
+
+                    if ($existant) {
+                        $echec($existant->actif
+                            ? "Ce numéro est déjà enregistré pour le marchand « {$existant->nom} »."
+                            : "Ce numéro appartient au marchand « {$existant->nom} », actuellement désactivé. Réactivez cette fiche plutôt que d'en créer une autre.");
+                    }
+                }],
             'type_paynala'  => ['sometimes', Rule::in(['particulier', 'entreprise'])],
             // Référence à la liste administrée : un texte libre finissait en
             // « Santé » / « santé » / « Pharmacie » pour la même réalité.
