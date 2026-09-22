@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Api\Admin\Concerns\GereRetraitAgents;
 use App\Http\Controllers\Controller;
 use App\Models\TondoMarchand;
+use App\Services\PaynalaPaymentService;
 use App\Services\VerificationNumeroRetrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -65,6 +66,11 @@ class MarchandsController extends Controller
      * Le KYC est appelé ici, pas seulement à la saisie : entre l'aperçu affiché
      * dans le formulaire et l'enregistrement, rien ne garantit que le numéro
      * soumis soit celui qui a été vérifié.
+     *
+     * Il décide aussi du routage : un compte Airtel professionnel part en B2B,
+     * un compte personnel en B2C. Ce n'est pas un choix d'administrateur —
+     * déclarer « entreprise » un numéro personnel fait répondre « Transaction
+     * Ambiguous » à Airtel, la cagnotte est débitée et rien n'arrive.
      */
     public function store(Request $request, VerificationNumeroRetrait $verification): JsonResponse
     {
@@ -97,6 +103,7 @@ class MarchandsController extends Controller
             'project_id'           => $projectId,
             'titulaire'            => $verdict['titulaire'],
             'titulaire_verifie_at' => $verdict['titulaire'] ? now() : null,
+            'type_paynala'         => self::typeSelonOperateur($data['numero_tel']),
         ]);
         $marchand->save();
 
@@ -140,6 +147,9 @@ class MarchandsController extends Controller
 
             $data['titulaire']            = $verdict['titulaire'];
             $data['titulaire_verifie_at'] = $verdict['titulaire'] ? now() : null;
+            // Le routage suit le nouveau numéro : garder l'ancien ferait partir
+            // un B2B vers un compte personnel, ou l'inverse.
+            $data['type_paynala']         = self::typeSelonOperateur($data['numero_tel']);
         }
 
         $avant = $marchand->only(array_keys($data));
@@ -205,10 +215,14 @@ class MarchandsController extends Controller
         $verdict = $verification->verifier($data['numero_tel'], $request->user()->project_id);
 
         return response()->json([
-            'numero_tel' => self::versE164($data['numero_tel']),
-            'operateur'  => $verdict['operateur'],
-            'kyc_ok'     => $verdict['kycOk'],
-            'titulaire'  => $verdict['titulaire'],
+            'numero_tel'   => self::versE164($data['numero_tel']),
+            'operateur'    => $verdict['operateur'],
+            'kyc_ok'       => $verdict['kycOk'],
+            'titulaire'    => $verdict['titulaire'],
+            // « entreprise » => décaissement B2B possible, « particulier » => B2C.
+            'type_paynala' => $verdict['kycOk'] === true
+                ? self::typeSelonOperateur(self::versE164($data['numero_tel']))
+                : null,
         ]);
     }
 
@@ -254,6 +268,20 @@ class MarchandsController extends Controller
     // ── Interne ─────────────────────────────────────────────────────────────
 
     /**
+     * Type de compte tel que l'opérateur le voit, jamais tel qu'on le déclare.
+     *
+     * Le grade Airtel a été mis en cache par la vérification qui précède. En
+     * son absence — cache expiré, opérateur muet — on retient « particulier » :
+     * un B2C vers un compte professionnel passe, l'inverse échoue.
+     */
+    private static function typeSelonOperateur(string $numeroE164): string
+    {
+        $local = '0' . substr($numeroE164, 4);
+
+        return app(PaynalaPaymentService::class)->resolveTypeClientFromKyc($local) ?? 'particulier';
+    }
+
+    /**
      * Forme unique en base : +241 suivi du numéro sans son zéro initial.
      * Le dashboard laisse saisir « 07 60 77 52 » comme « +24107607752 ».
      */
@@ -279,7 +307,6 @@ class MarchandsController extends Controller
             // un seul numéro pour plusieurs établissements. C'est le marchand
             // choisi au paiement qui dit où l'on a payé.
             'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/'],
-            'type_paynala'  => ['sometimes', Rule::in(['particulier', 'entreprise'])],
             // Référence à la liste administrée : un texte libre finissait en
             // « Santé » / « santé » / « Pharmacie » pour la même réalité.
             'categorie_id'  => ['sometimes', 'nullable', 'uuid',
