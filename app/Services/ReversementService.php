@@ -48,7 +48,6 @@ class ReversementService
      *  3. Confirmation `succes` et clôture de la cagnotte si demandée.
      *
      * @param  string $source        Trace écrite dans `payout.request` (ex : 'suppression_compte').
-     * @param  string $prefixeIdem   Préfixe de la clé d'idempotence Paynala.
      * @param  string $prefixeTrans  Préfixe du trans_id interne.
      * @param  bool   $cloturer      Clôture la cagnotte après un reversement réussi.
      * @param  array<string, mixed> $trace Champs supplémentaires fusionnés dans
@@ -58,7 +57,6 @@ class ReversementService
     public function reverserSolde(
         TondoCagnotte $cagnotte,
         string $source,
-        string $prefixeIdem,
         string $prefixeTrans,
         bool   $cloturer = true,
         array  $trace = [],
@@ -83,11 +81,19 @@ class ReversementService
             ? '0' . substr($numeroE164, 4)
             : ltrim($numeroE164, '+');
 
-        $nextNum        = DB::table(project_table('payout'))->count() + 1;
-        $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = $prefixeIdem . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
-        $payoutId       = (string) Str::uuid();
-        $transId        = $prefixeTrans . strtoupper(Str::random(9));
+        $reference = 'TONDODISBURSEMENT' . now()->getTimestampMs();
+        $payoutId  = (string) Str::uuid();
+        $transId   = $prefixeTrans . strtoupper(Str::random(9));
+
+        // Clé d'idempotence = la référence de la transaction elle-même.
+        //
+        // Elle était dérivée d'un COUNT(*) + 1 : deux transferts simultanés
+        // produisaient la même clé, et surtout la recette repartait de 1 alors
+        // qu'elle parle au MÊME Paynala que la production, faute
+        // d'environnement de test chez eux. D'où le refus « Transaction
+        // Ambiguous » : la clé avait déjà servi, pour d'autres montants.
+        // Le trans_id est unique en base, il l'est donc aussi chez Paynala.
+        $idempotencyKey = $transId;
 
         // Bénéficiaire du retrait — peut être un tiers (cagnotte créée pour un proche).
         $beneficiaireUserId = DB::table('users')->where('numero', $numeroE164)->value('id');

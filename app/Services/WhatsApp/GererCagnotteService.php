@@ -155,12 +155,14 @@ class GererCagnotteService
             ? '0' . substr($numeroE164, 4)   // supprime le préfixe +241, ajoute 0
             : ltrim($numeroE164, '+');
 
-        // Clé d'idempotence basée sur le numéro de séquence des payouts (TONDO-WA-0001…)
-        $nextNum        = DB::table(project_table('payout'))->count() + 1;
         $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = 'TONDO-WA-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
         $payoutId       = (string) Str::uuid();
         $transId        = 'TONDOPAYOUT' . strtoupper(Str::random(9));
+
+        // Clé d'idempotence = la référence de la transaction elle-même : le
+        // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la
+        // recette parle au même Paynala que la production.
+        $idempotencyKey = $transId;
 
         // Rechercher le compte bénéficiaire pour renseigner user_id et type_client
         $benefUser = DB::table('users')
