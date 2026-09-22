@@ -412,6 +412,22 @@ class PaynalaPaymentService
      * @param  string|null $msisdnE164   Numéro E.164 correspondant (ex : +24177730634).
      * @param  string|null $userId       UUID du compte Tondo du bénéficiaire, si connu.
      */
+    /**
+     * Traduit un type de compte en mode de décaissement, d'après la config.
+     *
+     * Toute la chaîne passe par ici : le transfert d'une cagnotte, le paiement
+     * d'un marchand, le cron de 18 h. Un seul endroit à corriger si Paynala
+     * change ses appellations.
+     */
+    public static function modeDisburse(?string $typeClient): string
+    {
+        $routage = config('services.paynala.routage_disburse', []);
+
+        // Défaut « particulier » : un B2C vers un compte professionnel passe,
+        // l'inverse échoue.
+        return $routage[$typeClient] ?? ($routage['particulier'] ?? 'B2C');
+    }
+
     public function resolveDisburseType(
         string  $msisdnLocal,
         ?string $msisdnE164 = null,
@@ -424,7 +440,7 @@ class PaynalaPaymentService
                 ->value('type_client');
 
             if ($typeClient) {
-                return $typeClient === 'entreprise' ? 'B2B' : 'B2C';
+                return self::modeDisburse($typeClient);
             }
         }
 
@@ -433,7 +449,7 @@ class PaynalaPaymentService
             ?? ($msisdnE164 ? Cache::get('paynala_kyc_type_' . $msisdnE164) : null);
 
         if ($cacheType) {
-            return $cacheType === 'entreprise' ? 'B2B' : 'B2C';
+            return self::modeDisburse($cacheType);
         }
 
         // 3. Appel KYC live pour résoudre le grade Airtel.
@@ -441,14 +457,14 @@ class PaynalaPaymentService
             $this->checkKyc($msisdnLocal);
             $cacheType = Cache::get('paynala_kyc_type_' . $msisdnLocal);
             if ($cacheType) {
-                return $cacheType === 'entreprise' ? 'B2B' : 'B2C';
+                return self::modeDisburse($cacheType);
             }
         } catch (\Throwable) {
             // KYC indisponible — on ne bloque pas le payout.
         }
 
         // 4. Défaut sécurisé : particulier.
-        return 'B2C';
+        return self::modeDisburse('particulier');
     }
 
     // ─────────────────────────────────────────────────────────────────
