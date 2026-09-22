@@ -35,13 +35,21 @@ class MarchandsController extends Controller
     /** GET /api/admin/marchands */
     public function index(Request $request): JsonResponse
     {
-        $marchands = TondoMarchand::where('project_id', $request->user()->project_id)
-            ->when($request->filled('actif'), fn ($q) => $q->where('actif', $request->boolean('actif')))
-            ->when($request->filled('q'), function ($q) use ($request) {
+        $categories = project_table('categories_marchands');
+        $marchandsTable = project_table('marchands');
+
+        $marchands = TondoMarchand::where("{$marchandsTable}.project_id", $request->user()->project_id)
+            // Le libellé accompagne chaque fiche : le dashboard l'affiche en
+            // pastille, et une requête par ligne serait du gaspillage.
+            ->leftJoin($categories, "{$categories}.id", '=', "{$marchandsTable}.categorie_id")
+            ->select("{$marchandsTable}.*", "{$categories}.libelle as categorie_libelle")
+            ->when($request->filled('actif'), fn ($q) => $q->where("{$marchandsTable}.actif", $request->boolean('actif')))
+            ->when($request->filled('q'), function ($q) use ($request, $marchandsTable) {
                 $terme = '%' . $request->string('q')->trim() . '%';
-                $q->where(fn ($s) => $s->where('nom', 'ilike', $terme)->orWhere('numero_tel', 'ilike', $terme));
+                $q->where(fn ($s) => $s->where("{$marchandsTable}.nom", 'ilike', $terme)
+                    ->orWhere("{$marchandsTable}.numero_tel", 'ilike', $terme));
             })
-            ->orderBy('nom')
+            ->orderBy("{$marchandsTable}.nom")
             ->get();
 
         $stats = TondoMarchand::statistiques($marchands->pluck('id'));
@@ -271,7 +279,10 @@ class MarchandsController extends Controller
             'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/',
                 Rule::unique($table, 'numero_tel')->where('project_id', $projectId)->ignore($ignorerId)],
             'type_paynala'  => ['sometimes', Rule::in(['particulier', 'entreprise'])],
-            'categorie'     => ['sometimes', 'nullable', 'string', 'max:40'],
+            // Référence à la liste administrée : un texte libre finissait en
+            // « Santé » / « santé » / « Pharmacie » pour la même réalité.
+            'categorie_id'  => ['sometimes', 'nullable', 'uuid',
+                Rule::exists(project_table('categories_marchands'), 'id')->where('project_id', $projectId)],
             'ville'         => ['sometimes', 'nullable', 'string', 'max:60'],
             'contact_nom'   => ['sometimes', 'nullable', 'string', 'max:120'],
             'contact_tel'   => ['sometimes', 'nullable', 'string', 'max:16'],
@@ -293,6 +304,13 @@ class MarchandsController extends Controller
         $stat = $stats[$m->id] ?? null;
         $nb   = $stat['nb'] ?? DB::table(project_table('payout'))->where('marchand_id', $m->id)->count();
 
+        // La liste apporte déjà le libellé par jointure ; après une écriture,
+        // il faut aller le chercher pour que la réponse soit complète.
+        $categorie = $m->categorie_libelle
+            ?? ($m->categorie_id
+                ? DB::table(project_table('categories_marchands'))->where('id', $m->categorie_id)->value('libelle')
+                : null);
+
         return [
             'id'                   => $m->id,
             'nom'                  => $m->nom,
@@ -300,7 +318,8 @@ class MarchandsController extends Controller
             'titulaire'            => $m->titulaire,
             'titulaire_verifie_at' => optional($m->titulaire_verifie_at)->toIso8601String(),
             'type_paynala'         => $m->type_paynala,
-            'categorie'            => $m->categorie,
+            'categorie_id'         => $m->categorie_id,
+            'categorie'            => $categorie,
             'ville'                => $m->ville,
             'contact_nom'          => $m->contact_nom,
             'contact_tel'          => $m->contact_tel,

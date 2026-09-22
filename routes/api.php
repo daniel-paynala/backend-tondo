@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Admin\AdminsController;
 use App\Http\Controllers\Api\Agent\RetraitsController as AgentRetraitsController;
 use App\Http\Controllers\Api\Agent\SessionController as AgentSessionController;
 use App\Http\Controllers\Api\Admin\AgentsController;
+use App\Http\Controllers\Api\Admin\CategoriesMarchandsController;
 use App\Http\Controllers\Api\Admin\MarchandsController;
 use App\Http\Controllers\Api\Admin\PartenairesRetraitController;
 use App\Http\Controllers\Api\Admin\SupportsRetraitController;
@@ -195,6 +196,11 @@ Route::prefix('admin')->group(function () {
         // Marchands : destinations de transfert enregistrées. L'argent part
         // chez un tiers, donc mêmes règles que ci-dessus — écritures réservées
         // aux super admins, lectures ouvertes pour le support.
+        Route::get('/categories-marchands',            [CategoriesMarchandsController::class, 'index']);
+        Route::post('/categories-marchands',           [CategoriesMarchandsController::class, 'store']);    // super_admin
+        Route::patch('/categories-marchands/{id}',     [CategoriesMarchandsController::class, 'update']);   // super_admin
+        Route::delete('/categories-marchands/{id}',    [CategoriesMarchandsController::class, 'destroy']);  // super_admin
+
         Route::get('/marchands',                       [MarchandsController::class, 'index']);
         Route::post('/marchands',                      [MarchandsController::class, 'store']);              // super_admin
         Route::post('/marchands/verifier-numero',      [MarchandsController::class, 'verifierNumero']);
