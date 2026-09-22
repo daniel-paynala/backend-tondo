@@ -205,7 +205,6 @@ class TraiterReversementsAutoCagnottes extends Command
         $res = $reversements->reverserSolde(
             cagnotte:     $cagnotte,
             source:       'cron_reversement_auto',
-            prefixeIdem:  'TONDO-AUTO-',
             // Préfixe de trans_id : désigne l'origine du transfert dans le grand
             // livre (payout). Les lignes antérieures au 2026-09-17 portent TONDOAUTO.
             prefixeTrans: 'TONJIAUTO',

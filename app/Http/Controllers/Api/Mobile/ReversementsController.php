@@ -151,13 +151,22 @@ class ReversementsController extends Controller
         }
 
         // ── Génération des identifiants Paynala ──────────────────────────────
-        $nextNum        = DB::table(project_table('payout'))->count() + 1;
-        $typeLabel      = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
-        $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = 'TONJI-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
+        $reference = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
+        $payoutId  = (string) Str::uuid();
 
-        $payoutId = (string) Str::uuid();
-        $transId  = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+        // Un paiement marchand se reconnaît à sa référence, comme les retraits
+        // en espèces (TONJICASH) ou le transfert automatique (TONJIAUTO).
+        $transId = ($marchand ? 'TONJIMERCHANT' : 'TONJIPAYOUT') . strtoupper(Str::random(9));
+
+        // Clé d'idempotence = la référence de la transaction elle-même.
+        //
+        // Elle était dérivée d'un COUNT(*) + 1 : deux transferts simultanés
+        // produisaient la même clé, et surtout la recette repartait de 1 alors
+        // qu'elle parle au MÊME Paynala que la production, faute
+        // d'environnement de test chez eux. D'où le refus « Transaction
+        // Ambiguous » : la clé avait déjà servi, pour d'autres montants.
+        // Le trans_id est unique en base, il l'est donc aussi chez Paynala.
+        $idempotencyKey = $transId;
 
         // ── PHASE 1 : réserver les fonds sous row-lock ───────────────────────
         // On verrouille la ligne cagnotte, on re-vérifie le solde et on insère

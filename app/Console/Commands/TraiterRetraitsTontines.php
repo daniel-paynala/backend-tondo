@@ -175,11 +175,15 @@ class TraiterRetraitsTontines extends Command
             }
 
             // ── Génération des identifiants Paynala ───────────────────────────
-            $nextNum        = DB::table(project_table('payout'))->count() + 1;
+
             $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-            $idempotencyKey = 'TONDO-TONTINE-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
             $payoutId       = (string) Str::uuid();
             $transId        = 'TONDOPAYOUT' . strtoupper(Str::random(9));
+
+            // Clé d'idempotence = la référence de la transaction elle-même : le
+        // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la
+        // recette parle au même Paynala que la production.
+            $idempotencyKey = $transId;
 
             // ── Phase 1 : réserver sous row-lock ─────────────────────────────
             try {
