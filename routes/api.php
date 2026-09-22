@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Admin\AdminsController;
 use App\Http\Controllers\Api\Agent\RetraitsController as AgentRetraitsController;
 use App\Http\Controllers\Api\Agent\SessionController as AgentSessionController;
 use App\Http\Controllers\Api\Admin\AgentsController;
+use App\Http\Controllers\Api\Admin\MarchandsController;
 use App\Http\Controllers\Api\Admin\PartenairesRetraitController;
 use App\Http\Controllers\Api\Admin\SupportsRetraitController;
 use App\Http\Controllers\Api\Admin\AuthController;
@@ -190,6 +191,16 @@ Route::prefix('admin')->group(function () {
         Route::post('/agents/{id}/statut',             [AgentsController::class, 'statut']);                // super_admin
         Route::post('/agents/{id}/pin',                [AgentsController::class, 'reinitialiserPin']);      // super_admin
         Route::delete('/agents/{id}',                  [AgentsController::class, 'destroy']);               // super_admin
+
+        // Marchands : destinations de transfert enregistrées. L'argent part
+        // chez un tiers, donc mêmes règles que ci-dessus — écritures réservées
+        // aux super admins, lectures ouvertes pour le support.
+        Route::get('/marchands',                       [MarchandsController::class, 'index']);
+        Route::post('/marchands',                      [MarchandsController::class, 'store']);              // super_admin
+        Route::post('/marchands/verifier-numero',      [MarchandsController::class, 'verifierNumero']);
+        Route::get('/marchands/{id}/paiements',        [MarchandsController::class, 'paiements']);
+        Route::patch('/marchands/{id}',                [MarchandsController::class, 'update']);             // super_admin
+        Route::delete('/marchands/{id}',               [MarchandsController::class, 'destroy']);            // super_admin
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);
