@@ -240,7 +240,7 @@ class ReversementsController extends Controller
         // Pour un marchand, le type est celui de sa fiche : c'est une donnée
         // administrée, plus fiable qu'une déduction à partir du KYC.
         $disburseType = $marchand
-            ? ($marchand->type_paynala === 'entreprise' ? 'B2B' : 'B2C')
+            ? PaynalaPaymentService::modeDisburse($marchand->type_paynala)
             : $this->paynala->resolveDisburseType(
                 msisdnLocal: $msisdnLocal,
                 msisdnE164:  $numeroBeneficiaireE164,

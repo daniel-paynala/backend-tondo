@@ -92,6 +92,20 @@ return [
         'base_url'      => env('PAYNALA_BASE_URL', 'https://testapi.paynala.com/functions/v1'),
         'operator_key'  => env('PAYNALA_OPERATOR_KEY'),
         'operations_reelles_en_test' => (bool) env('PAYNALA_OPERATIONS_REELLES', false),
+
+        /*
+         * Mode de décaissement selon le type du compte qui reçoit, tel que le
+         * grade Airtel le donne. Un compte professionnel se paie en B2B, un
+         * compte personnel en B2C — inverser les deux fait répondre
+         * « Transaction Ambiguous » et débite la cagnotte pour rien.
+         *
+         * En réglage plutôt qu'en dur : si Paynala renomme ses modes ou en
+         * ajoute un, cela se change dans un .env, sans redéploiement de code.
+         */
+        'routage_disburse' => [
+            'entreprise'  => env('PAYNALA_MODE_ENTREPRISE', 'B2B'),
+            'particulier' => env('PAYNALA_MODE_PARTICULIER', 'B2C'),
+        ],
     ],
 
     /*
