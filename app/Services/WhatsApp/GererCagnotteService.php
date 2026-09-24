@@ -125,7 +125,7 @@ class GererCagnotteService
      * Phase 1 — Réservation atomique (dans une transaction DB) :
      *   - Verrouille la ligne tondo_cagnottes (lockForUpdate) pour éviter les doubles dépenses.
      *   - Vérifie que le solde disponible couvre le montant demandé.
-     *   - Insère une ligne tondo_payout avec statut 'initie' (idempotency key = TONDO-WA-XXXX).
+     *   - Insère une ligne tondo_payout avec statut 'initie' (clé d'idempotence = le trans_id).
      *   - Décrémente montant_collecte de la cagnotte.
      *
      * Phase 2 — Appel Paynala HORS transaction (pour ne pas bloquer la DB pendant l'appel réseau) :
@@ -155,12 +155,16 @@ class GererCagnotteService
             ? '0' . substr($numeroE164, 4)   // supprime le préfixe +241, ajoute 0
             : ltrim($numeroE164, '+');
 
-        // Clé d'idempotence basée sur le numéro de séquence des payouts (TONDO-WA-0001…)
-        $nextNum        = DB::table(project_table('payout'))->count() + 1;
-        $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = 'TONDO-WA-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
+        $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
         $payoutId       = (string) Str::uuid();
-        $transId        = 'TONDOPAYOUT' . strtoupper(Str::random(9));
+        $transId        = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+
+        // Clé d'idempotence = la référence de la transaction elle-même.
+        //
+        // Elle était dérivée d'un COUNT(*) + 1 : deux décaissements simultanés
+        // produisaient la même clé, que l'opérateur dédoublonne. Le trans_id est
+        // unique en base, il l'est donc aussi chez Paynala.
+        $idempotencyKey = $transId;
 
         // Rechercher le compte bénéficiaire pour renseigner user_id et type_client
         $benefUser = DB::table('users')
