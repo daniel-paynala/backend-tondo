@@ -81,7 +81,7 @@ class ReversementService
             ? '0' . substr($numeroE164, 4)
             : ltrim($numeroE164, '+');
 
-        $reference = 'TONDODISBURSEMENT' . now()->getTimestampMs();
+        $reference = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
         $payoutId  = (string) Str::uuid();
         $transId   = $prefixeTrans . strtoupper(Str::random(9));
 

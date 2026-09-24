@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $project_id    Isolation multi-tenant.
  * @property string $cagnotte_id   FK → tondo_cagnottes.id
  * @property ?string $user_id      FK → tondo_users.id (bénéficiaire, null si compte light).
- * @property string $trans_id      Identifiant interne Tondo (ex : 'TONDOPAYOUTXXXXXXX').
+ * @property string $trans_id      Identifiant interne Tonji (ex : 'TONJIPAYOUTXXXXXXX').
  * @property ?string $operateur_id Identifiant de transaction côté Airtel Money.
  * @property string $numero_tel    Numéro E.164 du bénéficiaire.
  * @property int    $montant       Montant décaissé (FCFA).

@@ -175,10 +175,16 @@ class TraiterRetraitsTontines extends Command
             }
 
             // ── Génération des identifiants Paynala ───────────────────────────
-
-            $reference      = 'TONDODISBURSEMENT' . now()->getTimestampMs();
+            $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
             $payoutId       = (string) Str::uuid();
-            $transId        = 'TONDOPAYOUT' . strtoupper(Str::random(9));
+            $transId        = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+
+            // Clé d'idempotence = la référence de la transaction elle-même.
+        //
+        // Elle était dérivée d'un COUNT(*) + 1 : deux décaissements simultanés
+        // produisaient la même clé, que l'opérateur dédoublonne. Le trans_id est
+        // unique en base, il l'est donc aussi chez Paynala.
+            $idempotencyKey = $transId;
 
             // Clé d'idempotence = la référence de la transaction elle-même : le
         // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la

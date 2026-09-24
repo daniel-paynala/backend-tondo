@@ -344,7 +344,7 @@ class PaynalaPaymentService
     /**
      * Décaissement Airtel Money (payout) vers un bénéficiaire.
      *
-     * @param  string $idempotencyKey  Clé unique (ex : TONDOPAYOUT-XXXXXXXXX) — évite les doublons.
+     * @param  string $idempotencyKey  Clé unique — le trans_id du payout, unique en base.
      * @param  int    $amount          Montant en XAF.
      * @param  string $msisdn          Numéro local 9 chiffres (ex : 074577473).
      * @param  string $reference       Courte référence lisible.
