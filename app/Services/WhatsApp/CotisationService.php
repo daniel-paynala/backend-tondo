@@ -339,7 +339,7 @@ class CotisationService
      *   4. Sur FAILED  : marque la ligne 'echec' en DB.
      *   5. Sinon       : retourne 'initie' (toujours en attente).
      *
-     * @param  string $transId    Identifiant interne de la transaction (ex : TONDOPAYIN...)
+     * @param  string $transId    Identifiant interne de la transaction (ex : TONJIPAYIN...)
      * @param  string $projectId  UUID du projet Tondo
      * @return string             'initie' | 'succes' | 'echec'
      */
@@ -394,7 +394,7 @@ class CotisationService
      * Initie un paiement Airtel Money (push USSD sur le téléphone du cotisant).
      *
      * Séquence :
-     *   1. Génère un identifiant de transaction interne (TONDOPAYIN + random).
+     *   1. Génère un identifiant de transaction interne (TONJIPAYIN + random).
      *   2. Convertit le numéro E.164 en format local Airtel (0XXXXXXXX).
      *   3. Appelle PaynalaPaymentService::createPayment() — envoie la demande push à Airtel.
      *   4. En DB (transaction atomique) : crée ou met à jour le membre,
@@ -423,7 +423,7 @@ class CotisationService
         string        $canal = 'bot',
     ): array {
         // Identifiant de transaction interne unique (traçabilité)
-        $transId       = 'TONDOPAYIN' . strtoupper(Str::random(10));
+        $transId       = 'TONJIPAYIN' . strtoupper(Str::random(10));
         // Numéro sans "+" pour extraire les chiffres locaux
         $phoneE164     = ltrim($user->numero, '+');
         // Supprime l'indicatif pour obtenir la partie locale (ex : 77123456)
@@ -546,7 +546,7 @@ class CotisationService
         int           $penalite,
         string        $canal = 'bot',
     ): array {
-        $transId = 'TONDOPAYIN' . strtoupper(Str::random(10));
+        $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
 
         try {
             DB::transaction(function () use (

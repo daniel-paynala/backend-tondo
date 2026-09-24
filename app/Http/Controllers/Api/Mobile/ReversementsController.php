@@ -119,13 +119,16 @@ class ReversementsController extends Controller
             : $numeroBeneficiaireE164;
 
         // ── Génération des identifiants Paynala ──────────────────────────────
-        $nextNum        = DB::table(project_table('payout'))->count() + 1;
-        $typeLabel      = $cagnotte->type === 'tontine_periodique' ? 'TONTINE' : 'COTISATION';
-        $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
-        $idempotencyKey = 'TONJI-' . $typeLabel . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
+        $reference = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
+        $payoutId  = (string) Str::uuid();
+        $transId   = 'TONJIPAYOUT' . strtoupper(Str::random(9));
 
-        $payoutId = (string) Str::uuid();
-        $transId  = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+        // Clé d'idempotence = la référence de la transaction elle-même.
+        //
+        // Elle était dérivée d'un COUNT(*) + 1 : deux décaissements simultanés
+        // produisaient la même clé, que l'opérateur dédoublonne. Le trans_id est
+        // unique en base, il l'est donc aussi chez Paynala.
+        $idempotencyKey = $transId;
 
         // ── PHASE 1 : réserver les fonds sous row-lock ───────────────────────
         // On verrouille la ligne cagnotte, on re-vérifie le solde et on insère
