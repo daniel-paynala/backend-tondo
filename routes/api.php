@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
 use App\Http\Controllers\Api\Admin\ReconciliationController;
+use App\Http\Controllers\Api\Admin\SanteController;
 use App\Http\Controllers\Api\Admin\SignalementsController;
 use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
@@ -174,6 +175,9 @@ Route::prefix('admin')->group(function () {
         Route::patch('/agents/{id}',          [AgentsController::class, 'update']);       // super_admin
         Route::post('/agents/{id}/statut',    [AgentsController::class, 'statut']);       // super_admin
         Route::post('/agents/{id}/cle',       [AgentsController::class, 'rotationCle']);  // super_admin
+
+        // État du système : tâches planifiées, paiements bloqués, réglages.
+        Route::get('/sante', [SanteController::class, 'index']);
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);

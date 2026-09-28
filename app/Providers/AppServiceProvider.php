@@ -2,6 +2,11 @@
 
 namespace App\Providers;
 
+use App\Listeners\TracerTachePlanifiee;
+use Illuminate\Console\Events\ScheduledTaskFailed;
+use Illuminate\Console\Events\ScheduledTaskFinished;
+use Illuminate\Support\Facades\Event;
+
 use App\Contracts\PushNotifier;
 use App\Services\FcmService;
 use App\Services\WhatsApp\Contracts\WhatsAppSender;
@@ -57,6 +62,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Trace du passage des tâches planifiées : sans elle, une tâche qui ne
+        // tourne plus ne produit aucun signal.
+        Event::listen(ScheduledTaskFinished::class, [TracerTachePlanifiee::class, 'finie']);
+        Event::listen(ScheduledTaskFailed::class, [TracerTachePlanifiee::class, 'echouee']);
+
         $this->configurerRateLimiters();
     }
 
