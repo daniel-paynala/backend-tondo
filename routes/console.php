@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\CleanReceiptsCommand;
+use App\Console\Commands\SanteCommand;
 use App\Console\Commands\ResumeQuotidienCommand;
 use App\Console\Commands\TontineRappelsCommand;
 use App\Console\Commands\TraiterRetraitsTontines;
@@ -108,3 +109,17 @@ Schedule::command(AgregerEvenementsCommand::class)
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sonde de santé — 07:00
+//
+// N'écrit un courriel aux administrateurs QUE s'il y a quelque chose à dire.
+// Un rapport quotidien systématique finit par ne plus être ouvert, et c'est
+// le jour où il est rouge qu'on ne le lit pas.
+// ─────────────────────────────────────────────────────────────────────────────
+Schedule::command(SanteCommand::class, ['--alerter'])
+    ->dailyAt('07:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+

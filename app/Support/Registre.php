@@ -95,6 +95,26 @@ final class Registre
         'tondo:clean-receipts'         => 'chaque jour à 02:00',
         'tonji:resume-quotidien'       => 'chaque jour à 20:00',
         'tonji:agreger-evenements'     => 'chaque jour à 02:00',
+        'tonji:sante'                  => 'chaque jour à 07:00',
+    ];
+
+    /**
+     * Silence toléré pour chaque tâche, en secondes, avant de parler de panne.
+     *
+     * Une tâche quotidienne a droit à 26 heures — le temps d'un décalage et
+     * d'un redémarrage — tandis que celle qui tourne toutes les cinq secondes
+     * est considérée en panne après cinq minutes de silence.
+     */
+    public const RETARD_TOLERE = [
+        'tontines:traiter-retraits'    => 93600,  // 26 h
+        'cotisations:reversements-auto' => 93600, // 26 h
+        'tontines:rappels'             => 93600,  // 26 h
+        'tondo:verifier-paiements'     => 300,    // 5 min
+        'tonji:reconcilier-payins'     => 900,    // 15 min
+        'tondo:clean-receipts'         => 93600,  // 26 h
+        'tonji:resume-quotidien'       => 93600,  // 26 h
+        'tonji:agreger-evenements'     => 93600,  // 26 h
+        'tonji:sante'                  => 93600,  // 26 h
     ];
 
     /**
@@ -136,6 +156,7 @@ final class Registre
         'payout'    => ['trans_id', 'numero_tel', 'statut'],
         'cagnottes' => ['reference', 'numero_retrait', 'reversement_auto', 'statut_validation'],
         'paiements' => ['trans_id', 'canal', 'commentaire', 'actif'],
+        'taches'    => ['commande', 'derniere_execution', 'statut'],
     ];
 
     /** Fichiers scannés par l'audit des préfixes. */

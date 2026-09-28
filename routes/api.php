@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
 use App\Http\Controllers\Api\Admin\ReconciliationController;
+use App\Http\Controllers\Api\Admin\SanteController;
 use App\Http\Controllers\Api\Admin\SignalementsController;
 use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
@@ -208,6 +209,9 @@ Route::prefix('admin')->group(function () {
         Route::get('/marchands/{id}/paiements',        [MarchandsController::class, 'paiements']);
         Route::patch('/marchands/{id}',                [MarchandsController::class, 'update']);             // super_admin
         Route::delete('/marchands/{id}',               [MarchandsController::class, 'destroy']);            // super_admin
+
+        // État du système : tâches planifiées, paiements bloqués, réglages.
+        Route::get('/sante', [SanteController::class, 'index']);
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);
