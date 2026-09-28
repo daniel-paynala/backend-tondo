@@ -35,6 +35,8 @@ final class Registre
         'payout_auto'            => 'TONJIAUTO',         // cron de 18 h
         'payout_suppression'     => 'TONJISUPPR',        // rapatriement à la suppression d'un compte
         'reference_decaissement' => 'TONJIDISBURSEMENT', // référence transmise à Paynala
+        'retrait_especes'        => 'TONJICASH',         // retrait au comptoir (recette)
+        'payout_marchand'        => 'TONJIMERCHANT',     // paiement d'un marchand (recette)
     ];
 
     /**
