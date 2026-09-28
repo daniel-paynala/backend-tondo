@@ -1,0 +1,47 @@
+# ⚠️ À DÉPOSER DANS .github/workflows/audit.yml
+#
+# Ce fichier n'est pas à sa place définitive : le jeton d'accès utilisé pour
+# pousser n'a pas la permission « workflow », GitHub refuse donc la création
+# d'un workflow depuis la ligne de commande. Deux façons de l'activer :
+#   – ajouter la portée « workflow » au jeton, puis déplacer ce fichier ;
+#   – ou le créer directement depuis l'interface GitHub, en copiant ce contenu.
+#
+# Intégrité du produit — exécuté à chaque poussée et sur chaque demande de
+# fusion. Aucun dépôt n'avait d'intégration continue jusqu'ici : un préfixe
+# renommé à moitié pouvait traverser la revue sans que rien ne le signale.
+name: Audit d'intégrité
+
+on:
+  push:
+    branches: [main, develop, audit]
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, bcmath
+          coverage: none
+
+      - name: Installer les dépendances
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Préparer l'environnement
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # Contrôles statiques : préfixes, drapeaux, tâches, réglages, versions.
+      # Les dépôts mobile et web ne sont pas présents ici, les contrôles de
+      # parité s'ignorent d'eux-mêmes plutôt que d'échouer.
+      - name: Audit d'intégrité
+        run: php artisan tonji:audit
+
+      - name: Tests
+        run: php artisan test
