@@ -53,3 +53,32 @@ valeur. L'audit refuse ce qui n'y figure pas.
   production absente d'un poste de développement — sur `production` et
   `staging`, le même manque devient une anomalie.
 - **Ignoré** : contrôle non applicable ici, typiquement un dépôt voisin absent.
+
+## La sonde d'exploitation
+
+```bash
+php artisan tonji:sante             # état réel du système
+php artisan tonji:sante --alerter   # courriel aux admins seulement s'il y a un problème
+php artisan tonji:sante --json      # rapport brut
+```
+
+Même service que `GET /api/admin/sante` et que la page « Santé du système » du
+back-office : les règles sont écrites une fois.
+
+Ce qu'elle regarde : le dernier passage de chaque tâche planifiée comparé à sa
+cadence, les encaissements bloqués depuis plus d'une heure, les décaissements à
+régulariser, les réglages critiques et le schéma.
+
+### La panne qu'elle a révélée le premier jour
+
+Le serveur de recette n'avait **aucun planificateur**. Amazon Linux 2023
+minimal n'embarque pas cron, et le provisionnement ne posait rien à la place :
+les neuf tâches déclarées n'avaient jamais tourné. Aucune erreur, aucun log —
+c'est exactement le type de panne que cette sonde existe pour rendre visible.
+
+Le planificateur est désormais un minuteur systemd posé par
+`deploy/test/provision.sh`. Pour le vérifier :
+
+```bash
+systemctl list-timers tonji-planificateur.timer
+```

@@ -205,6 +205,46 @@ if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; t
   sudo setsebool -P httpd_can_network_connect 1
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Planificateur Laravel
+#
+# Amazon Linux 2023 minimal n'embarque PAS cron : sans cette unité, aucune des
+# tâches de routes/console.php ne s'exécute — ni le transfert automatique de
+# 18 h, ni les retraits de tontine de 20 h, ni la réconciliation. Et rien ne le
+# signale, puisqu'une tâche qui ne tourne pas ne produit aucune erreur.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "▸ Installation du planificateur (minuteur systemd)…"
+
+sudo tee /etc/systemd/system/tonji-planificateur.service >/dev/null <<'UNIT'
+[Unit]
+Description=Planificateur Tonji (artisan schedule:run)
+After=network.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/var/www/Backend
+ExecStart=/usr/bin/php /var/www/Backend/artisan schedule:run
+UNIT
+
+sudo tee /etc/systemd/system/tonji-planificateur.timer >/dev/null <<'UNIT'
+[Unit]
+Description=Reveille le planificateur Tonji chaque minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=1s
+Unit=tonji-planificateur.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now tonji-planificateur.timer
+echo "  Planificateur actif. Contrôle : php artisan tonji:sante"
+
 echo
 echo "──────────────────────────────────────────────────────────"
 echo " Provisionnement terminé."
