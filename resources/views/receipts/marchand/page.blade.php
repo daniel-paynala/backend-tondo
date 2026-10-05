@@ -51,6 +51,10 @@
              background:rgba(10,104,71,.07);color:var(--vert);
              font-size:13px;font-weight:600}
 
+    .qr{margin-top:20px;padding:16px;border-top:1px solid var(--brume);text-align:center}
+    .qr img{width:168px;height:168px;display:block;margin:0 auto}
+    .qr p{margin:10px 0 0;color:var(--ardoise);font-size:13px}
+
     .telecharger{display:block;margin-top:18px;padding:14px;border-radius:14px;
                  background:var(--vert);color:#fff;text-align:center;
                  font-weight:700;text-decoration:none}
@@ -98,6 +102,15 @@
       <dt>Cagnotte</dt><dd>{{ $cagnotte_titre }}</dd>
       <dt>N° de cagnotte</dt><dd>{{ $cagnotte_reference }}</dd>
     </dl>
+
+    {{-- Le QR est ici parce que c'est ICI qu'il sert : le client ouvre la page
+         sur son téléphone et montre l'écran, le commerçant scanne et tombe sur
+         cette même page depuis le sien. Le code circulaire n'en est pas un —
+         c'est ce qui permet de vérifier sans se faire passer l'appareil. --}}
+    <div class="qr">
+      <img src="{{ $qr_data_uri }}" alt="Code de vérification du paiement {{ $reference }}">
+      <p>Montrez ce code au commerçant pour qu'il vérifie</p>
+    </div>
 
     <a class="telecharger" href="{{ $qr_url }}/pdf">Télécharger le reçu (PDF)</a>
   </div>

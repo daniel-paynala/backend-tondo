@@ -107,7 +107,11 @@ class ReceiptMarchandService
         }
 
         return Pdf::loadView('receipts.marchand.pdf', $donnees)
-            ->setPaper('A4', 'portrait')
+            // A5 et non A4 : le contenu tient dans la moitié d'une A4, et
+            // les deux tiers restants faisaient document inachevé — sans
+            // compter le papier gâché à l'impression. A5 est aussi le format
+            // du reçu de cotisation à un cran près (A6, taille ticket).
+            ->setPaper('A5', 'portrait')
             ->setOptions([
                 // Sans cette ligne, DomPDF embarque SA police par défaut EN
                 // PLUS de celle demandée par la feuille de style : le fichier

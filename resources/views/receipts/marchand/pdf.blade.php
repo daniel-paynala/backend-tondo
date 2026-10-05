@@ -11,7 +11,9 @@
   <meta charset="utf-8">
   <title>Reçu {{ $reference }}</title>
   <style>
-    @page { margin: 28px 32px; }
+    /* Marges resserrees : en A5 la largeur utile tombe a ~128 mm, et les
+       marges d'une A4 y mangeraient un cinquieme de la page. */
+    @page { margin: 20px 22px; }
     body  { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #14202E; }
     .entete     { border-bottom: 2px solid #0A6847; padding-bottom: 10px; }
     .titre      { font-size: 15px; font-weight: bold; color: #0A6847; }
