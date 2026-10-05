@@ -70,6 +70,80 @@ class ReferenceCourteTest extends TestCase
         $this->assertNull(Registre::long('TM-'));
     }
 
+    public function test_l_alphabet_exclut_les_glyphes_jumeaux(): void
+    {
+        // I, L, O et U sont bannis : ce sont ceux qu'on confond à la lecture
+        // d'un SMS ou sous la dictée.
+        foreach (['I', 'L', 'O', 'U'] as $glyphe) {
+            $this->assertStringNotContainsString(
+                $glyphe,
+                Registre::ALPHABET_REFERENCE,
+                "{$glyphe} ne doit pas figurer dans l'alphabet",
+            );
+        }
+        $this->assertSame(32, strlen(Registre::ALPHABET_REFERENCE));
+    }
+
+    public function test_les_references_neuves_respectent_l_alphabet(): void
+    {
+        // Tirage aléatoire : on en génère assez pour que chaque position ait
+        // vu passer beaucoup de symboles.
+        foreach (array_keys(Registre::PREFIXES) as $cle) {
+            for ($i = 0; $i < 50; $i++) {
+                $reference = Registre::nouvelleReference($cle);
+                $suffixe   = substr($reference, strlen(Registre::PREFIXES[$cle]));
+
+                $this->assertMatchesRegularExpression(
+                    '/^[' . preg_quote(Registre::ALPHABET_REFERENCE, '/') . ']+$/',
+                    $suffixe,
+                    "suffixe hors alphabet pour {$cle} : {$suffixe}",
+                );
+            }
+        }
+    }
+
+    public function test_la_longueur_du_suffixe_suit_le_registre(): void
+    {
+        // `payin` tire dix caractères, le reste neuf — écart historique, pas
+        // un choix, mais des validations ailleurs comptent les positions.
+        $this->assertSame(
+            10,
+            strlen(substr(Registre::nouvelleReference('payin'), strlen('TONJIPAYIN'))),
+        );
+        $this->assertSame(
+            9,
+            strlen(substr(Registre::nouvelleReference('retrait_especes'), strlen('TONJICASH'))),
+        );
+    }
+
+    public function test_une_reference_neuve_se_raccourcit_et_se_redeveloppe(): void
+    {
+        foreach (array_keys(Registre::PREFIXES) as $cle) {
+            $transId = Registre::nouvelleReference($cle);
+            $court   = Registre::court($transId);
+
+            $this->assertNotNull($court, "pas de référence courte pour {$cle}");
+            $this->assertSame($transId, Registre::long($court));
+        }
+    }
+
+    public function test_une_cle_inconnue_est_refusee(): void
+    {
+        // Mieux vaut lever que fabriquer une référence au préfixe inventé :
+        // elle serait indéchiffrable et casserait la réconciliation.
+        $this->expectException(\InvalidArgumentException::class);
+        Registre::nouvelleReference('cle_qui_n_existe_pas');
+    }
+
+    public function test_deux_references_de_suite_different(): void
+    {
+        $vues = [];
+        for ($i = 0; $i < 200; $i++) {
+            $vues[] = Registre::nouvelleReference('payout_marchand');
+        }
+        $this->assertCount(200, array_unique($vues));
+    }
+
     public function test_la_casse_ne_decide_pas_du_succes(): void
     {
         // Une référence recopiée d'un SMS arrive souvent tout en minuscules.

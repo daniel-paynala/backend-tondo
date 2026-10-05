@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Traite les retraits périodiques des tontines à 20h (Africa/Libreville).
@@ -177,7 +178,7 @@ class TraiterRetraitsTontines extends Command
             // ── Génération des identifiants Paynala ───────────────────────────
             $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
             $payoutId       = (string) Str::uuid();
-            $transId        = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+            $transId        = Registre::nouvelleReference('payout_manuel');
 
             // Clé d'idempotence = la référence de la transaction elle-même : le
             // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et

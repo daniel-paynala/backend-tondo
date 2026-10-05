@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use App\Support\Registre;
 
 /**
  * Reversements partiels (payout gérant → bénéficiaire).
@@ -156,7 +157,7 @@ class ReversementsController extends Controller
 
         // Un paiement marchand se reconnaît à sa référence, comme les retraits
         // en espèces (TONJICASH) ou le transfert automatique (TONJIAUTO).
-        $transId = ($marchand ? 'TONJIMERCHANT' : 'TONJIPAYOUT') . strtoupper(Str::random(9));
+        $transId = Registre::nouvelleReference($marchand ? 'payout_marchand' : 'payout_manuel');
 
         // Clé d'idempotence = la référence de la transaction elle-même.
         //

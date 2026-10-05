@@ -13,6 +13,7 @@ use App\Services\TondoConfigService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Logique de paiement (payin) pour le canal WhatsApp.
@@ -423,7 +424,7 @@ class CotisationService
         string        $canal = 'bot',
     ): array {
         // Identifiant de transaction interne unique (traçabilité)
-        $transId       = 'TONJIPAYIN' . strtoupper(Str::random(10));
+        $transId       = Registre::nouvelleReference('payin');
         // Numéro sans "+" pour extraire les chiffres locaux
         $phoneE164     = ltrim($user->numero, '+');
         // Supprime l'indicatif pour obtenir la partie locale (ex : 77123456)
@@ -546,7 +547,7 @@ class CotisationService
         int           $penalite,
         string        $canal = 'bot',
     ): array {
-        $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
+        $transId = Registre::nouvelleReference('payin');
 
         try {
             DB::transaction(function () use (

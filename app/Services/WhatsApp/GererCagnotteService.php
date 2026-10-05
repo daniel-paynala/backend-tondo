@@ -10,6 +10,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Gestion des cagnottes et tontines existantes via le canal WhatsApp.
@@ -157,7 +158,7 @@ class GererCagnotteService
 
         $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
         $payoutId       = (string) Str::uuid();
-        $transId        = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+        $transId        = Registre::nouvelleReference('payout_manuel');
 
         // Clé d'idempotence = la référence de la transaction elle-même : le
         // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la

@@ -59,6 +59,71 @@ final class Registre
     ];
 
     /**
+     * Alphabet des références de transaction.
+     *
+     * Majuscules et chiffres **sans `I`, `L`, `O` ni `U`** : ce sont les quatre
+     * glyphes qu'on confond à la lecture — `I`/`1`, `L`/`1`, `O`/`0` — et `U`
+     * part avec eux pour qu'aucun mot ne se forme par accident. Une référence
+     * dictée au téléphone ou recopiée depuis un SMS cesse d'être un piège.
+     *
+     * 32 symboles sur 9 ou 10 positions : 3,5 × 10¹³ à 1,1 × 10¹⁵ combinaisons.
+     * L'index unique sur `trans_id` tranche le cas improbable d'une collision.
+     *
+     * Les références déjà émises gardent leur alphabet d'origine : elles
+     * restent valides, seules les nouvelles changent.
+     */
+    public const ALPHABET_REFERENCE = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+    /** Longueur du suffixe quand la clé n'en déclare pas d'autre. */
+    public const LONGUEUR_SUFFIXE = 9;
+
+    /**
+     * Longueurs qui s'écartent de la valeur par défaut.
+     *
+     * L'écart est historique et non un choix : `payin` a toujours tiré dix
+     * caractères. On le conserve parce que des validations ailleurs comptent
+     * les positions — {@see \App\Support\RetraitEspeces::FORMAT_REFERENCE}
+     * en est un exemple pour `retrait_especes`.
+     */
+    public const LONGUEURS_SUFFIXE = [
+        'payin' => 10,
+    ];
+
+    /**
+     * Fabrique une référence de transaction neuve.
+     *
+     * Prend la **clé** du registre et non le préfixe : c'est ce qui empêche un
+     * appelant de réécrire « TONJIPAYOUT » à la main, et c'est exactement ce
+     * qui avait laissé le bot WhatsApp émettre « TONDOPAYIN » pendant des mois.
+     *
+     * Le tirage passe par `random_int`, générateur cryptographique, et non par
+     * un aléa de confort : le `trans_id` est l'adresse de la page publique de
+     * reçu `/recu/{transId}`. Une référence devinable exposerait le reçu de
+     * quelqu'un d'autre.
+     *
+     * @throws \InvalidArgumentException si la clé n'est pas déclarée.
+     */
+    public static function nouvelleReference(string $cle): string
+    {
+        $prefixe = self::PREFIXES[$cle] ?? null;
+        if ($prefixe === null) {
+            throw new \InvalidArgumentException(
+                "Clé de préfixe inconnue : {$cle}. Déclarez-la dans Registre::PREFIXES."
+            );
+        }
+
+        $longueur = self::LONGUEURS_SUFFIXE[$cle] ?? self::LONGUEUR_SUFFIXE;
+        $dernier  = strlen(self::ALPHABET_REFERENCE) - 1;
+
+        $suffixe = '';
+        for ($i = 0; $i < $longueur; $i++) {
+            $suffixe .= self::ALPHABET_REFERENCE[random_int(0, $dernier)];
+        }
+
+        return $prefixe . $suffixe;
+    }
+
+    /**
      * Code court de chaque préfixe, pour la référence communiquée aux gens.
      *
      * `TONJIMERCHANTBPU2JID53` devient `TM-BPU2JID53` : 22 caractères à 12,

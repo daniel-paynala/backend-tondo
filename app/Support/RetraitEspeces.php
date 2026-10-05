@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Règles pures du retrait en espèces (sans DB, sans réseau).
@@ -21,13 +22,12 @@ class RetraitEspeces
     /**
      * Référence du retrait, reprise telle quelle comme trans_id du payout.
      *
-     * Str::random tire dans [A-Za-z0-9] ; en majuscules, il reste 36 symboles
-     * sur 9 positions, soit 10^14 combinaisons. L'index unique en base tranche
-     * le cas improbable d'une collision.
+     * Le tirage et le préfixe viennent du registre : l'alphabet y exclut les
+     * glyphes qu'on confond, et le préfixe ne s'écrit nulle part à la main.
      */
     public static function genererReference(): string
     {
-        return 'TONJICASH' . strtoupper(Str::random(9));
+        return Registre::nouvelleReference('retrait_especes');
     }
 
     public static function referenceValide(?string $reference): bool

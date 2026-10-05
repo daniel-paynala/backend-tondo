@@ -7,6 +7,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Rapatriement du solde d'une cagnotte vers son numéro de retrait.
@@ -48,7 +49,10 @@ class ReversementService
      *  3. Confirmation `succes` et clôture de la cagnotte si demandée.
      *
      * @param  string $source        Trace écrite dans `payout.request` (ex : 'suppression_compte').
-     * @param  string $prefixeTrans  Préfixe du trans_id interne.
+     * @param  string $cleTrans      Clé du registre pour le préfixe du trans_id
+     *                               (ex : 'payout_auto'). Une CLÉ et non un
+     *                               préfixe : le préfixe ne doit s'écrire nulle
+     *                               part ailleurs que dans le registre.
      * @param  bool   $cloturer      Clôture la cagnotte après un reversement réussi.
      * @param  array<string, mixed> $trace Champs supplémentaires fusionnés dans
      *                                     `payout.request` (ex : le mode du cron).
@@ -57,7 +61,7 @@ class ReversementService
     public function reverserSolde(
         TondoCagnotte $cagnotte,
         string $source,
-        string $prefixeTrans,
+        string $cleTrans,
         bool   $cloturer = true,
         array  $trace = [],
     ): array {
@@ -83,7 +87,7 @@ class ReversementService
 
         $reference = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
         $payoutId  = (string) Str::uuid();
-        $transId   = $prefixeTrans . strtoupper(Str::random(9));
+        $transId   = Registre::nouvelleReference($cleTrans);
 
         // Clé d'idempotence = la référence de la transaction elle-même.
         //
