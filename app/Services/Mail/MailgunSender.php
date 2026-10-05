@@ -29,6 +29,22 @@ class MailgunSender
             $subject = '[TEST] '.$subject;
         }
 
+        // Détournement hors production, miroir de celui des SMS.
+        //
+        // Ce service appelle l'API Mailgun en direct : il ignore MAIL_MAILER,
+        // et un `MAIL_MAILER=log` ne l'arrête donc PAS. Or la base de recette
+        // contient des copies de fiches réelles — sans ce garde-fou, un essai
+        // écrit à de vrais commerçants. Les SMS ont ce détournement depuis le
+        // début ; l'e-mail ne l'avait pas, l'oubli est corrigé ici.
+        //
+        // Le destinataire d'origine est rappelé dans le sujet : sans lui, on
+        // ne saurait pas, en relisant sa boîte, à qui le message était destiné.
+        $forcee = trim((string) config('services.mailgun.destinataire_force'));
+        if (! app()->environment('production') && $forcee !== '') {
+            $subject = $subject.' → '.$to;
+            $to      = $forcee;
+        }
+
         if (! $secret || ! $domain) {
             Log::warning('MailgunSender : MAILGUN_SECRET/MAILGUN_DOMAIN manquant — e-mail non envoyé', ['to' => $to]);
 

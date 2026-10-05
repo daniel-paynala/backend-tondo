@@ -216,6 +216,13 @@ return [
     // Paynala, domaine paynala.com). Appelée en HTTP direct — pas besoin du
     // transport Mailgun de Laravel ni d'un package composer supplémentaire.
     'mailgun' => [
+        /*
+         * Hors production : toute adresse est remplacée par celle-ci, le
+         * destinataire d'origine passant dans le sujet. Miroir de
+         * RETRAIT_SMS_DESTINATAIRE_FORCE. Vide = aucun détournement, donc de
+         * vrais commerçants reçoivent les essais de recette.
+         */
+        'destinataire_force' => env('MAIL_DESTINATAIRE_FORCE', ''),
         'domain'   => env('MAILGUN_DOMAIN', 'paynala.com'),
         'secret'   => env('MAILGUN_SECRET'),
         'endpoint' => env('MAILGUN_ENDPOINT', 'api.eu.mailgun.net'),
