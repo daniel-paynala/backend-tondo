@@ -226,6 +226,14 @@ return [
     // URL du dashboard admin (pour les liens dans les e-mails d'invitation).
     'admin_dashboard_url' => env('ADMIN_DASHBOARD_URL', 'https://api.tonji.ga'),
 
+    /*
+     * Portail de suivi des marchands, cité en dernière ligne du message de
+     * paiement. Vide par défaut : l'adresse n'est pas arrêtée, et la ligne
+     * disparaît du message tant qu'elle ne l'est pas — mieux vaut pas de lien
+     * qu'un lien mort dans un SMS facturé.
+     */
+    'portail_marchand_url' => env('PORTAIL_MARCHAND_URL', ''),
+
     // Supabase Storage — stockage des pièces des associations (bucket PRIVÉ).
     // Réutilise l'URL + la clé service_role déjà présentes dans le .env.
     'supabase' => [

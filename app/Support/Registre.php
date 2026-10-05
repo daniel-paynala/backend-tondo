@@ -263,6 +263,7 @@ final class Registre
         'tonji:resume-quotidien'       => 'chaque jour à 20:00',
         'tonji:agreger-evenements'     => 'chaque jour à 02:00',
         'tonji:sante'                  => 'chaque jour à 07:00',
+        'queue:work'                   => 'chaque minute',
     ];
 
     /**
@@ -282,6 +283,7 @@ final class Registre
         'tonji:resume-quotidien'       => 93600,  // 26 h
         'tonji:agreger-evenements'     => 93600,  // 26 h
         'tonji:sante'                  => 93600,  // 26 h
+        'queue:work'                   => 300,    // 5 min
     ];
 
     /**

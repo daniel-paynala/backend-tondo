@@ -123,3 +123,27 @@ Schedule::command(SanteCommand::class, ['--alerter'])
     ->withoutOverlapping()
     ->runInBackground();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Vidange de la file d'attente — chaque minute
+//
+// La file est en `database` et AUCUN worker ne tourne : un job mis en file y
+// restait indéfiniment, sans la moindre trace d'erreur. Les jobs WhatsApp
+// (`EnvoyerRecuJob`, `VerifierPaiementJob`) étaient dans ce cas, et la
+// notification d'un paiement marchand l'aurait été aussi.
+//
+// Vidanger depuis le planificateur plutôt que d'ajouter un service systemd :
+// l'instance a déjà son timer, c'est une dépendance de moins à poser sur une
+// machine partagée, et la file est courte par nature.
+//
+// `--stop-when-empty` rend la main dès qu'il n'y a plus rien ; `--max-time`
+// garantit de sortir avant la minute suivante ; `withoutOverlapping` empêche
+// deux vidanges de se marcher dessus.
+// ─────────────────────────────────────────────────────────────────────────────
+Schedule::command('queue:work', [
+        '--stop-when-empty',
+        '--max-time=50',
+        '--tries=1',
+    ])
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->runInBackground();

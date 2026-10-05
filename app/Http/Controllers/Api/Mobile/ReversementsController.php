@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Mail\DisbursementFailedMail;
 use App\Models\TondoCagnotte;
+use App\Services\PaiementMarchandNotifier;
 use App\Services\PaynalaPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +31,7 @@ class ReversementsController extends Controller
 {
     public function __construct(
         private readonly PaynalaPaymentService $paynala,
+        private readonly PaiementMarchandNotifier $notifier,
     ) {}
 
     /**
@@ -329,6 +331,20 @@ class ReversementsController extends Controller
                 'response'     => json_encode($disburseData),
                 'updated_at'   => now(),
             ]);
+
+        // Paiement marchand : prévenir l'enseigne. La prise est atomique et
+        // sans effet si un autre chemin a déjà notifié — tout chemin qui
+        // confirme un paiement peut donc appeler ceci sans se coordonner.
+        // Un échec ici ne doit pas faire croire à un transfert raté : l'argent
+        // est parti, la réponse doit le dire.
+        try {
+            $this->notifier->signaler($payoutId);
+        } catch (\Throwable $e) {
+            Log::error('[reversement] notification marchand non déclenchée', [
+                'payout_id' => $payoutId,
+                'erreur'    => $e->getMessage(),
+            ]);
+        }
 
         $cagnotte->refresh();
 
