@@ -78,6 +78,7 @@ class MarchandsController extends Controller
         $projectId = $request->user()->project_id;
 
         $request->merge(['numero_tel' => self::versE164($request->input('numero_tel'))]);
+        self::normaliserCode($request);
         $data = $request->validate($this->regles($projectId));
 
         $verdict = $verification->verifier($data['numero_tel'], $projectId);
@@ -130,7 +131,8 @@ class MarchandsController extends Controller
         if ($request->has('numero_tel')) {
             $request->merge(['numero_tel' => self::versE164($request->input('numero_tel'))]);
         }
-        $data = $request->validate($this->regles($projectId, partiel: true));
+        self::normaliserCode($request);
+        $data = $request->validate($this->regles($projectId, partiel: true, ignoreId: $id));
 
         // Changer le numéro change la destination de l'argent : le titulaire
         // affiché doit suivre, sinon la fiche afficherait le nom de l'ancien
@@ -294,13 +296,53 @@ class MarchandsController extends Controller
             : '+241' . ltrim($chiffres, '0');
     }
 
+    /**
+     * Ramene le code saisi a sa forme stockee : sans espaces, et null quand le
+     * champ est laisse vide.
+     *
+     * Une chaine vide passerait la contrainte d'unicite autant de fois qu'on
+     * veut en base, mais echouerait le CHECK de format : autant la traduire
+     * tout de suite en « pas de code ».
+     */
+    private static function normaliserCode(Request $request): void
+    {
+        if (! $request->has('code_marchand')) {
+            return;
+        }
+        $code = trim((string) $request->input('code_marchand'));
+        $request->merge(['code_marchand' => $code === '' ? null : $code]);
+    }
+
     /** @return array<string, mixed> */
-    private function regles(string $projectId, bool $partiel = false): array
+    private function regles(string $projectId, bool $partiel = false, ?string $ignoreId = null): array
     {
         $requis = $partiel ? 'sometimes' : 'required';
 
         return [
             'nom'           => [$requis, 'string', 'min:2', 'max:120'],
+            // Code que l'enseigne communique a ses clients. Il ne vient pas de
+            // nous : on le stocke tel quel, d'ou un format volontairement
+            // permissif. Il sert a designer UNE fiche quand plusieurs
+            // partagent un numero (cf. 031), donc il doit rester unique par
+            // projet — sans tenir compte de la casse, puisque le client le
+            // tapera comme il l'aura lu.
+            'code_marchand' => [
+                'sometimes', 'nullable', 'string',
+                'regex:/^[A-Za-z0-9][A-Za-z0-9._-]{1,31}$/',
+                function (string $attribut, mixed $valeur, callable $erreur) use ($projectId, $ignoreId) {
+                    if ($valeur === null || $valeur === '') {
+                        return;
+                    }
+                    $pris = DB::table(project_table('marchands'))
+                        ->where('project_id', $projectId)
+                        ->whereRaw('upper(code_marchand) = ?', [mb_strtoupper((string) $valeur)])
+                        ->when($ignoreId !== null, fn ($q) => $q->where('id', '!=', $ignoreId))
+                        ->exists();
+                    if ($pris) {
+                        $erreur('Ce code marchand est deja attribue a une autre fiche.');
+                    }
+                },
+            ],
             // Format : miroir du CHECK en base, pour un message lisible plutôt
             // qu'une erreur Postgres. En revanche, un numéro peut porter
             // plusieurs fiches : une chaîne encaisse sur
@@ -342,6 +384,7 @@ class MarchandsController extends Controller
         return [
             'id'                   => $m->id,
             'nom'                  => $m->nom,
+            'code_marchand'        => $m->code_marchand,
             'numero_tel'           => $m->numero_tel,
             'titulaire'            => $m->titulaire,
             'titulaire_verifie_at' => optional($m->titulaire_verifie_at)->toIso8601String(),

@@ -340,5 +340,7 @@ Route::prefix('mobile')->group(function () {
         Route::post('/reversements', [MobileReversementsController::class, 'store']);
         // Destinations marchandes proposées au moment d'un transfert.
         Route::get('/marchands', [MobileMarchandsController::class, 'index']);
+        // Resolution d'une saisie client : numero OU code de l'enseigne.
+        Route::get('/marchands/resoudre', [MobileMarchandsController::class, 'resoudre']);
     });
 });

@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\DB;
  * @property string  $id
  * @property string  $project_id
  * @property string  $nom                   Nom commercial affiché au client.
+ * @property ?string $code_marchand         Code de l'enseigne, saisi au dashboard.
  * @property string  $numero_tel            Numéro Airtel qui encaisse, en E.164.
  * @property ?string $titulaire             Nom renvoyé par le KYC Airtel.
  * @property ?string $type_paynala          entreprise => B2B, particulier => B2C.
