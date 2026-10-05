@@ -15,8 +15,12 @@
     body  { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #14202E; }
     .entete     { border-bottom: 2px solid #0A6847; padding-bottom: 10px; }
     .titre      { font-size: 15px; font-weight: bold; color: #0A6847; }
-    .ref        { font-family: DejaVu Sans Mono, monospace; font-size: 13px;
-                  font-weight: bold; letter-spacing: 1px; }
+    /* Une SEULE famille de police dans tout le document : DomPDF embarque le
+       fichier complet pour chacune, et une seconde famille faisait passer ce
+       reçu de 70 Ko a 1,15 Mo — un poids qui se paye au telechargement sur
+       une connexion mobile gabonaise. L'espacement suffit a detacher la
+       reference sans police a chasse fixe. */
+    .ref        { font-size: 13px; font-weight: bold; letter-spacing: 2px; }
     .montant    { font-size: 26px; font-weight: bold; color: #0A6847; }
     .bloc       { border: 1px solid #E8EDE9; border-radius: 6px; padding: 10px 12px; margin-top: 12px; }
     .bloc h2    { font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
