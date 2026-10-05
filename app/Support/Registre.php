@@ -59,6 +59,108 @@ final class Registre
     ];
 
     /**
+     * Code court de chaque préfixe, pour la référence communiquée aux gens.
+     *
+     * `TONJIMERCHANTBPU2JID53` devient `TM-BPU2JID53` : 22 caractères à 12,
+     * lisibles dans un SMS et recopiables sans erreur. La deuxième lettre dit
+     * le SENS et non le mot, parce que « payin » et « payout » s'abrègent
+     * tous les deux en « TP » — `TI` pour ce qui entre, `TO` pour ce qui sort.
+     *
+     * **La réécriture est sans perte** : le code court se redéveloppe en
+     * préfixe long de façon déterministe. La référence courte n'est donc pas
+     * un second identifiant — c'est un format d'affichage. Rien n'est stocké,
+     * rien ne peut diverger, et une recherche se fait en redéveloppant puis en
+     * interrogeant l'index existant sur `trans_id`.
+     *
+     * Les préfixes bannis ont leur code eux aussi : ils survivent dans des
+     * lignes de production, et une réconciliation qui ne les couvrirait pas
+     * laisserait l'historique de côté. Leur initiale `D` rappelle « TONDO ».
+     *
+     * Les anciens préfixes à tirets (`TONDO-WA-`, `TONJI-COTISATION-`…) n'y
+     * figurent pas : leur forme est trop éloignée pour qu'un code de deux
+     * lettres reste parlant. {@see court()} rend alors null et l'appelant
+     * affiche la référence longue, qui reste parfaitement valide.
+     */
+    public const CODES_COURTS = [
+        'TONJIPAYIN'        => 'TI', // entrée
+        'TONJIPAYOUT'       => 'TO', // sortie
+        'TONJIAUTO'         => 'TA',
+        'TONJISUPPR'        => 'TS',
+        'TONJIDISBURSEMENT' => 'TD',
+        'TONJICASH'         => 'TC',
+        'TONJIMERCHANT'     => 'TM',
+        'TONDOPAYIN'        => 'DI',
+        'TONDOPAYOUT'       => 'DO',
+        'TONDOAUTO'         => 'DA',
+        'TONDOSUPPR'        => 'DS',
+        'TONDODISBURSEMENT' => 'DD',
+    ];
+
+    /**
+     * Référence courte d'une transaction, ou null si son préfixe est inconnu.
+     *
+     * Null est un refus volontaire : inventer un code pour un préfixe non
+     * déclaré donnerait une référence qu'on ne saurait pas redévelopper.
+     * L'appelant affiche alors le `trans_id` complet.
+     */
+    public static function court(string $transId): ?string
+    {
+        foreach (self::prefixesParLongueur() as $prefixe => $code) {
+            if (str_starts_with($transId, $prefixe)) {
+                return $code . '-' . substr($transId, strlen($prefixe));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Redéveloppe une référence courte en `trans_id`, ou null si elle est
+     * malformée ou porte un code inconnu.
+     *
+     * Le découpage se fait sur le PREMIER tiret seulement, et tout est remis
+     * en majuscules — la casse d'une référence recopiée ne doit pas décider
+     * du succès d'une recherche.
+     */
+    public static function long(string $court): ?string
+    {
+        $tiret = strpos($court, '-');
+        if ($tiret === false) {
+            return null;
+        }
+
+        // Tout est remis en majuscules, suffixe compris : les `trans_id` sont
+        // stockés ainsi, et une référence recopiée d'un SMS arrive souvent en
+        // minuscules. Sans ça, la recherche du portail ne trouverait rien.
+        $code    = strtoupper(substr($court, 0, $tiret));
+        $suffixe = strtoupper(substr($court, $tiret + 1));
+        if ($suffixe === '') {
+            return null;
+        }
+
+        $prefixe = array_search($code, self::CODES_COURTS, strict: true);
+
+        return $prefixe === false ? null : $prefixe . $suffixe;
+    }
+
+    /**
+     * Préfixes triés du plus long au plus court.
+     *
+     * Aucun préfixe déclaré n'est aujourd'hui le début d'un autre, mais ce tri
+     * rend l'ordre de déclaration sans conséquence : le jour où l'on ajoutera
+     * un `TONJIPAY`, il ne volera pas les `TONJIPAYIN`.
+     *
+     * @return array<string, string>
+     */
+    private static function prefixesParLongueur(): array
+    {
+        $prefixes = self::CODES_COURTS;
+        uksort($prefixes, static fn (string $a, string $b) => strlen($b) <=> strlen($a));
+
+        return $prefixes;
+    }
+
+    /**
      * Drapeaux de fonctionnalité qui doivent porter la même valeur sur les
      * trois canaux. Un drapeau ouvert d'un côté et fermé de l'autre donne une
      * application qui propose ce que le serveur refuse.
