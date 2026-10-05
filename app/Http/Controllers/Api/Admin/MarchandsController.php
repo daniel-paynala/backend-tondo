@@ -97,6 +97,11 @@ class MarchandsController extends Controller
             ], 422);
         }
 
+        $type = self::typeSelonOperateur($data['numero_tel']);
+        if ($refus = self::refusSiPasEntreprise($type)) {
+            return response()->json($refus[0], $refus[1]);
+        }
+
         $marchand = new TondoMarchand();
         // id généré en PHP : Eloquent ne relit pas la valeur du DEFAULT.
         $marchand->id = (string) Str::uuid();
@@ -104,7 +109,7 @@ class MarchandsController extends Controller
             'project_id'           => $projectId,
             'titulaire'            => $verdict['titulaire'],
             'titulaire_verifie_at' => $verdict['titulaire'] ? now() : null,
-            'type_paynala'         => self::typeSelonOperateur($data['numero_tel']),
+            'type_paynala'         => $type,
         ]);
         $marchand->save();
 
@@ -147,11 +152,19 @@ class MarchandsController extends Controller
                 ], 422);
             }
 
+            // Le routage suit le nouveau numéro : garder l'ancien ferait partir
+            // un B2B vers un compte personnel, ou l'inverse. Et le nouveau
+            // numéro doit lui aussi être une entreprise — sans ce contrôle,
+            // une modification serait le chemin détourné pour inscrire un
+            // compte particulier que la création refuse.
+            $type = self::typeSelonOperateur($data['numero_tel']);
+            if ($refus = self::refusSiPasEntreprise($type)) {
+                return response()->json($refus[0], $refus[1]);
+            }
+
             $data['titulaire']            = $verdict['titulaire'];
             $data['titulaire_verifie_at'] = $verdict['titulaire'] ? now() : null;
-            // Le routage suit le nouveau numéro : garder l'ancien ferait partir
-            // un B2B vers un compte personnel, ou l'inverse.
-            $data['type_paynala']         = self::typeSelonOperateur($data['numero_tel']);
+            $data['type_paynala']         = $type;
         }
 
         $avant = $marchand->only(array_keys($data));
@@ -272,15 +285,48 @@ class MarchandsController extends Controller
     /**
      * Type de compte tel que l'opérateur le voit, jamais tel qu'on le déclare.
      *
-     * Le grade Airtel a été mis en cache par la vérification qui précède. En
-     * son absence — cache expiré, opérateur muet — on retient « particulier » :
-     * un B2C vers un compte professionnel passe, l'inverse échoue.
+     * Le grade Airtel a été mis en cache par la vérification qui précède.
+     *
+     * Retourne **null** quand le grade est introuvable — cache expiré,
+     * opérateur muet. Ce cas ne retombe plus sur « particulier » : depuis que
+     * seuls les comptes entreprise sont acceptés, confondre « ce n'est pas une
+     * entreprise » avec « on ne sait pas » donnerait au super admin un refus
+     * qu'il ne saurait pas corriger. Le premier se règle chez Airtel, le
+     * second en réessayant.
      */
-    private static function typeSelonOperateur(string $numeroE164): string
+    private static function typeSelonOperateur(string $numeroE164): ?string
     {
         $local = '0' . substr($numeroE164, 4);
 
-        return app(PaynalaPaymentService::class)->resolveTypeClientFromKyc($local) ?? 'particulier';
+        return app(PaynalaPaymentService::class)->resolveTypeClientFromKyc($local);
+    }
+
+    /**
+     * Refus motivé quand le compte n'est pas une entreprise, null s'il l'est.
+     *
+     * **Règle actée par Daniel (2026-10-05)** : un marchand doit être un compte
+     * Airtel Money **entreprise**. L'ouverture aux comptes particuliers est
+     * fermée — un décaissement B2C vers un compte personnel présenté comme un
+     * commerce brouille la trace de l'argent, et c'est exactement ce que la
+     * fiche marchand existe pour tenir.
+     *
+     * @return array{0: array<string, string>, 1: int}|null
+     */
+    private static function refusSiPasEntreprise(?string $type): ?array
+    {
+        if ($type === 'entreprise') {
+            return null;
+        }
+
+        return $type === null
+            ? [[
+                'message' => "Le type de ce compte Airtel n'a pas pu être déterminé. Réessayez dans un instant : sans ce verdict, la fiche ne peut pas être enregistrée.",
+                'code'    => 'type_indetermine',
+            ], 422]
+            : [[
+                'message' => "Ce numéro est un compte Airtel Money particulier. Seul un compte entreprise peut être enregistré comme marchand.",
+                'code'    => 'compte_particulier',
+            ], 422];
     }
 
     /**
