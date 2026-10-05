@@ -102,9 +102,23 @@ class ReceiptMarchandService
     {
         $donnees = $this->donnees($transId);
 
-        return $donnees === null
-            ? null
-            : Pdf::loadView('receipts.marchand.pdf', $donnees)->setPaper('a4')->output();
+        if ($donnees === null) {
+            return null;
+        }
+
+        return Pdf::loadView('receipts.marchand.pdf', $donnees)
+            ->setPaper('A4', 'portrait')
+            ->setOptions([
+                // Sans cette ligne, DomPDF embarque SA police par défaut EN
+                // PLUS de celle demandée par la feuille de style : le fichier
+                // complet de chaque famille est inclus, et le reçu pesait
+                // 915 Ko au lieu de 70. Le reçu de cotisation fixe la même.
+                'defaultFont'     => 'DejaVu Sans',
+                // Aucune requête sortante pendant le rendu : tout ce que le
+                // gabarit affiche est déjà embarqué en data URI.
+                'isRemoteEnabled' => false,
+            ])
+            ->output();
     }
 
     /**
