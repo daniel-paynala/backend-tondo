@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ReceiptMarchandViewController;
 use App\Http\Controllers\ReceiptViewController;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -22,6 +23,16 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(function () {
                     Route::get('/{transId}',     [ReceiptViewController::class, 'show']);
                     Route::get('/{transId}/pdf', [ReceiptViewController::class, 'pdf']);
+                });
+
+            // Boucle distincte pour les paiements marchands : un reçu
+            // commercial n'a ni les mêmes données ni la même forme qu'un reçu
+            // de cotisation, et on ne touche pas à ce qui marche déjà.
+            Route::middleware([])
+                ->prefix('recu-marchand')
+                ->group(function () {
+                    Route::get('/{transId}',     [ReceiptMarchandViewController::class, 'show']);
+                    Route::get('/{transId}/pdf', [ReceiptMarchandViewController::class, 'pdf']);
                 });
         },
     )
