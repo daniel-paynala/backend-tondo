@@ -37,6 +37,8 @@ use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookContro
 use App\Http\Controllers\Api\WhatsApp\StatusController as WhatsAppStatusController;
 use App\Http\Controllers\Api\Ussd\UssdController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\Marchand\SessionController as MarchandSessionController;
+use App\Http\Controllers\Api\Marchand\SuiviController as MarchandSuiviController;
 
 // ============================================================================
 //  Health check public
@@ -342,5 +344,29 @@ Route::prefix('mobile')->group(function () {
         Route::get('/marchands', [MobileMarchandsController::class, 'index']);
         // Resolution d'une saisie client : numero OU code de l'enseigne.
         Route::get('/marchands/resoudre', [MobileMarchandsController::class, 'resoudre']);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Portail marchand — suivi des encaissements
+|--------------------------------------------------------------------------
+|
+| Pas de compte : le marchand entre son numéro, reçoit un code par e-mail, et
+| consulte. Le jeton rendu est sans état et de courte durée ; c'est lui qui
+| porte le numéro, de sorte qu'aucun appel ne peut viser un autre commerce.
+|
+| Les deux premières routes sont PUBLIQUES et répondent la même chose quel que
+| soit le numéro : dire « ce numéro n'est pas marchand » ferait de cette entrée
+| un annuaire des commerces affiliés.
+*/
+Route::prefix('marchand')->group(function () {
+    Route::post('/otp', [MarchandSessionController::class, 'demanderCode'])
+        ->middleware('throttle:marchand-otp');
+    Route::post('/session', [MarchandSessionController::class, 'ouvrir'])
+        ->middleware('throttle:marchand-session');
+
+    Route::middleware('jeton.marchand')->group(function () {
+        Route::get('/transactions', [MarchandSuiviController::class, 'index']);
     });
 });

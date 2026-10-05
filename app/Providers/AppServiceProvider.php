@@ -107,6 +107,28 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Portail marchand, demande de code : borne les e-mails envoyés et
+        // freine l'énumération des numéros marchands. Plus serré que l'OTP
+        // client — un commerçant ne se connecte pas dix fois par heure.
+        RateLimiter::for('marchand-otp', function (Request $request) {
+            $numero = preg_replace('/\D/', '', (string) $request->input('numero')) ?? '';
+            return [
+                Limit::perMinutes(10, 2)->by("motp:num:{$numero}"),
+                Limit::perHour(6)->by("motph:num:{$numero}"),
+                Limit::perMinute(20)->by("motp:ip:{$request->ip()}"),
+            ];
+        });
+
+        // Vérification du code : le compteur d'essais vit déjà avec le code,
+        // ceci borne en plus le brute-force qui tournerait sur plusieurs codes.
+        RateLimiter::for('marchand-session', function (Request $request) {
+            $numero = preg_replace('/\D/', '', (string) $request->input('numero')) ?? '';
+            return [
+                Limit::perMinutes(10, 10)->by("msess:num:{$numero}"),
+                Limit::perMinute(30)->by("msess:ip:{$request->ip()}"),
+            ];
+        });
+
         // KYC check (public) : freine l'énumération de numéros Airtel/Tonji.
         RateLimiter::for('kyc-check', function (Request $request) {
             $phone = $this->cleNumero($request);

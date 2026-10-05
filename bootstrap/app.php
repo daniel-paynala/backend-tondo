@@ -63,6 +63,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Terminaux des agents de retrait : clé du partenaire, puis contrôle de
         // l'agent à chaque appel.
         $middleware->alias([
+            // Portail marchand : le numéro vient du jeton, jamais de la requête.
+            'jeton.marchand'  => \App\Http\Middleware\JetonMarchandRequis::class,
             'partenaire'         => \App\Http\Middleware\AuthentifiePartenaire::class,
             'agent.operationnel' => \App\Http\Middleware\AgentOperationnel::class,
         ]);
