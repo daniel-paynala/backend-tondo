@@ -30,6 +30,8 @@
 -- le type de bénéficiaire, le marchand et son nom.
 --
 -- ⚠️ TEST (`tondo_`). Miroir de `029_tonji_marchands.sql`, à jouer sur la base de recette.
+-- ⚠️ DÉPEND DE `TEST_028_tondo_retrait_agents.sql` (colonnes `canal` et
+-- `agent_id` sur `tondo_payout`), à jouer AVANT celui-ci.
 -- IDEMPOTENT. À jouer dans le SQL Editor Supabase.
 -- ============================================================================
 
