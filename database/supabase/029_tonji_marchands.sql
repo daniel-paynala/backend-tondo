@@ -29,6 +29,18 @@
 -- d'un transfert Mobile Money. La vue expose désormais le canal réel, l'agent,
 -- le type de bénéficiaire, le marchand et son nom.
 --
+-- ⚠️ DÉPEND DE `028_tonji_retrait_agents.sql`, à jouer AVANT celui-ci.
+-- 028 ajoute `tonji_payout.canal` et `tonji_payout.agent_id` ; ce script pose
+-- une contrainte sur `canal` et expose `agent_id` dans la vue unifiée. Sans
+-- 028, l'exécution échoue sur :
+--   ERROR 42703: column "canal" does not exist
+--
+-- Attention au faux ami : `013_tonji_canal_transid.sql` ajoute bien une colonne
+-- `canal`, mais à `tonji_payin` et `tonji_paiements` — PAS à `tonji_payout`.
+--
+-- Pour lire l'état réel d'une base avant de jouer quoi que ce soit :
+-- `controles/etat_schema_prod.sql` (lecture seule).
+--
 -- ⚠️ PROD (`tonji_`). En TEST, jouer `TEST_029_tondo_marchands.sql`.
 -- IDEMPOTENT. À jouer dans le SQL Editor Supabase.
 -- ============================================================================
