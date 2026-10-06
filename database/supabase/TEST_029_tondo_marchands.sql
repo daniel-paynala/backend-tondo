@@ -173,7 +173,12 @@ CREATE INDEX IF NOT EXISTS tondo_payout_marchand_idx
 --     CREATE OR REPLACE VIEW : agent, type de bénéficiaire, marchand, et nom
 --     du marchand pour éviter une jointure supplémentaire côté dashboard.
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.tondo_transactions_unified AS
+-- `security_invoker` : la vue s'exécute avec les droits de CELUI QUI
+-- l'interroge, donc la RLS des tables sources s'applique. Sans cette option,
+-- une vue tourne avec les droits de son propriétaire et contourne la RLS —
+-- signalé CRITIQUE par le linter Supabase, et corrigé par 038.
+CREATE OR REPLACE VIEW public.tondo_transactions_unified
+  WITH (security_invoker = on) AS
  SELECT tondo_payin.id,
     'payin'::text AS type,
     tondo_payin.project_id,
@@ -257,7 +262,10 @@ COMMENT ON VIEW public.tondo_transactions_unified IS
 -- ----------------------------------------------------------------------------
 GRANT ALL ON public.tondo_marchands TO service_role;
 
-GRANT SELECT ON public.tondo_transactions_unified TO authenticated;
+-- Pas de droit à `anon` ni `authenticated` : les seuls lecteurs sont le backend
+-- Laravel et le dashboard, tous deux en service_role et côté serveur. Un droit
+-- accordé « au cas où » sur une vue qui agrège toutes les transactions de tous
+-- les projets, c'est une fuite qui attend.
 GRANT SELECT ON public.tondo_transactions_unified TO service_role;
 
 
