@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\DB;
  * @property string  $project_id
  * @property string  $nom                   Nom commercial affiché au client.
  * @property ?string $code_marchand         Code de l'enseigne, saisi au dashboard.
+ * @property ?float  $frais_taux            Taux négocié. Null = celui du projet.
  * @property string  $numero_tel            Numéro Airtel qui encaisse, en E.164.
  * @property ?string $titulaire             Nom renvoyé par le KYC Airtel.
  * @property ?string $type_paynala          entreprise => B2B, particulier => B2C.
@@ -42,7 +43,25 @@ class TondoMarchand extends Model
     protected $casts = [
         'actif'                => 'boolean',
         'titulaire_verifie_at' => 'datetime',
+        // Null préservé : il distingue « comme tout le monde » de « exonéré ».
+        'frais_taux'           => 'float',
     ];
+
+    /**
+     * Taux de frais qui s'applique réellement à un paiement vers ce marchand.
+     *
+     * La fiche l'emporte sur le projet quand elle en porte un. **Zéro est une
+     * valeur, pas une absence** : un partenaire exonéré reste à zéro même si
+     * le taux du projet change, alors qu'une fiche à null suit le projet.
+     * C'est toute la raison pour laquelle la colonne est nullable plutôt que
+     * d'avoir un drapeau à côté.
+     *
+     * @param  float $tauxProjet  `frais_marchand` de la config projet.
+     */
+    public function tauxApplicable(float $tauxProjet): float
+    {
+        return $this->frais_taux ?? $tauxProjet;
+    }
 
     /**
      * Nombre de paiements et total encaissé, pour une liste de marchands.

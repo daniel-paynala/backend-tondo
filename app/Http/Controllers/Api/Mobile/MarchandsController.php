@@ -38,7 +38,7 @@ class MarchandsController extends Controller
             ->get(self::colonnes($marchands, $categories));
 
         return response()->json([
-            'marchands' => $lignes->map(fn ($m) => self::presenter($m)),
+            'marchands' => $lignes->map(fn ($m) => self::presenter($m, $tauxProjet)),
             // Le client range la liste par catégorie ; l'ordre vient d'ici pour
             // que l'app n'ait pas à le deviner.
             'categories' => $lignes->pluck('categorie')->filter()->unique()->sort()->values(),
@@ -61,6 +61,8 @@ class MarchandsController extends Controller
      */
     public function resoudre(Request $request): JsonResponse
     {
+        $tauxProjet = self::tauxProjet($request);
+
         $data = $request->validate([
             'saisie' => ['required', 'string', 'max:32'],
         ]);
@@ -99,8 +101,19 @@ class MarchandsController extends Controller
             ->get(self::colonnes($marchands, $categories));
 
         return response()->json([
-            'marchands' => $lignes->map(fn ($m) => self::presenter($m))->values(),
+            'marchands' => $lignes->map(fn ($m) => self::presenter($m, $tauxProjet))->values(),
         ]);
+    }
+
+    /**
+     * Taux de frais du projet — repli quand la fiche n'en porte pas.
+     */
+    private static function tauxProjet(Request $request): float
+    {
+        $cfg = app(\App\Services\TondoConfigService::class)
+            ->getOperatorConfig($request->user()->project_id);
+
+        return (float) ($cfg['frais_marchand'] ?? 0);
     }
 
     /**
@@ -114,6 +127,7 @@ class MarchandsController extends Controller
             "{$marchands}.id",
             "{$marchands}.nom",
             "{$marchands}.code_marchand",
+            "{$marchands}.frais_taux",
             "{$marchands}.numero_tel",
             "{$marchands}.titulaire",
             "{$marchands}.ville",
@@ -128,12 +142,18 @@ class MarchandsController extends Controller
      *
      * @return array<string, mixed>
      */
-    private static function presenter(object $m): array
+    private static function presenter(object $m, float $tauxProjet): array
     {
         return [
             'id'        => $m->id,
             'nom'       => $m->nom,
             'code'      => $m->code_marchand,
+            // Taux RÉSOLU, pas le brut : l'app n'a pas à savoir qu'il existe
+            // un taux de projet et d'éventuelles exceptions négociées. Elle
+            // affiche ce qui sera prélevé pour CE commerce.
+            //
+            // `??` et non `?:` — zéro est une exonération, pas une absence.
+            'frais'     => (float) ($m->frais_taux ?? $tauxProjet),
             // Numéro affiché au client : c'est ce qui sera débité, il doit
             // pouvoir le lire avant de valider.
             'numero'    => $m->numero_tel,

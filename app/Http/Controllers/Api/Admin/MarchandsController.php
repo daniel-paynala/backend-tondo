@@ -399,6 +399,10 @@ class MarchandsController extends Controller
             // « Santé » / « santé » / « Pharmacie » pour la même réalité.
             'categorie_id'  => ['sometimes', 'nullable', 'uuid',
                 Rule::exists(project_table('categories_marchands'), 'id')->where('project_id', $projectId)],
+            // Taux négocié avec CE marchand. NULL = celui du projet ; 0 =
+            // exonéré, ce qui n'est pas la même chose. Borné comme la
+            // commission : au-delà de 25 %, c'est une faute de frappe.
+            'frais_taux'    => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:0.25'],
             'ville'         => ['sometimes', 'nullable', 'string', 'max:60'],
             'contact_nom'   => ['sometimes', 'nullable', 'string', 'max:120'],
             'contact_tel'   => ['sometimes', 'nullable', 'string', 'max:16'],
@@ -431,6 +435,9 @@ class MarchandsController extends Controller
             'id'                   => $m->id,
             'nom'                  => $m->nom,
             'code_marchand'        => $m->code_marchand,
+            // Null est transmis tel quel : le dashboard doit pouvoir
+            // distinguer « taux du projet » de « exonéré ».
+            'frais_taux'           => $m->frais_taux,
             'numero_tel'           => $m->numero_tel,
             'titulaire'            => $m->titulaire,
             'titulaire_verifie_at' => optional($m->titulaire_verifie_at)->toIso8601String(),
