@@ -85,4 +85,5 @@ class MessagePaiementMarchandTest extends TestCase
         $this->assertSame('Paiement effectué', $titre);
         $this->assertSame('150 000 FCFA payés à TRAITEUR LE BARACHOIS.', $corps);
     }
+
 }

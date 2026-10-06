@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Tonji — Airtel Money",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

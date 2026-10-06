@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\Taux;
+
 /**
  * Génère les conditions d'utilisation à partir de la configuration opérateur.
  *
@@ -240,12 +242,10 @@ class CguService
         return substr(md5(json_encode([$resume, $blocs], JSON_UNESCAPED_UNICODE)), 0, 12);
     }
 
-    /** 0.02 → « 2 % ». Deux décimales au plus, sans zéros inutiles. */
+    /** 0.02 → « 2 % ». Délégué à {@see Taux}, partagé avec le bot WhatsApp. */
     private function pourcentage(float $taux): string
     {
-        $valeur = rtrim(rtrim(number_format($taux * 100, 2, ',', ' '), '0'), ',');
-
-        return $valeur . ' %';
+        return Taux::pourcentage($taux);
     }
 
     /** 500000 → « 500 000 FCFA ». */

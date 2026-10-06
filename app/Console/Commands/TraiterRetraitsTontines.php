@@ -74,7 +74,48 @@ class TraiterRetraitsTontines extends Command
         $traites = 0;
         $ignores = 0;
 
+        // Même verrou que l'app, le web et le cron des cagnottes : il n'y a
+        // qu'un seul endroit qui décide si l'argent peut sortir d'une collecte.
+        $sorties = app(\App\Services\SortiesAutorisees::class);
+
         foreach ($tontines as $cagnotte) {
+            // ── Verrou des sorties ───────────────────────────────────────────
+            //
+            // Une tontine reverse d'elle-même au tour de chacun : c'est la
+            // forme automatique du transfert, et un verrou qu'elle
+            // contournerait ne verrouillerait rien — il suffirait d'attendre
+            // le tour suivant.
+            //
+            // La lecture est isolée PAR TONTINE. Sans ce filet, une colonne
+            // manquante ferait lever dès la première et tuerait la passe
+            // entière : plus aucun retrait pour personne, cette nuit-là et les
+            // suivantes. En cas d'échec de lecture on saute CELLE-CI et on
+            // continue — refuser un retrait à tort se rattrape au prochain
+            // passage, le laisser passer alors qu'un verrou existe peut-être, non.
+            try {
+                $autorise = $sorties->pour($cagnotte->id, $cagnotte->project_id)['transfert'];
+            } catch (\Throwable $e) {
+                $this->error("  → [{$cagnotte->reference}] verrou illisible — retrait suspendu.");
+                Log::error('[retraits-tontines] verrou illisible, tontine sautée', [
+                    'cagnotte' => $cagnotte->reference,
+                    'erreur'   => $e->getMessage(),
+                ]);
+                $ignores++;
+                continue;
+            }
+
+            if (! $autorise) {
+                // Avertissement et non information : une mise qui ne part pas
+                // au tour de son bénéficiaire doit se voir dans les journaux.
+                $this->warn("  → [{$cagnotte->reference}] transfert verrouillé — retrait suspendu.");
+                Log::warning('[retraits-tontines] tontine verrouillée, retrait suspendu', [
+                    'cagnotte' => $cagnotte->reference,
+                    'montant'  => (int) $cagnotte->montant_collecte,
+                ]);
+                $ignores++;
+                continue;
+            }
+
             // Nombre de cycles réglés = nombre de payouts 'succes' enregistrés.
             $cyclesCompletes = (int) DB::table(project_table('payout'))
                 ->where('cagnotte_id', $cagnotte->id)
@@ -254,13 +295,28 @@ class TraiterRetraitsTontines extends Command
                     reference:      $reference,
                     type:           $disburseType,
                 );
-            } catch (\RuntimeException $e) {
+            } catch (\Throwable $e) {
                 // Paynala KO — NE PAS restaurer le solde, alerter les admins.
+                //
+                // Le statut distingue les deux issues, parce que l'écran de
+                // réconciliation ne les traite pas pareil :
+                //   - refus affirmé → `echec`, le dossier est clos côté
+                //     opérateur, il reste à remettre la mise en jeu ;
+                //   - issue inconnue → `en_cours`, à vérifier auprès de
+                //     l'opérateur avant toute nouvelle tentative.
+                //
+                // Dans les deux cas le solde reste amputé : la rotation d'une
+                // tontine ne se recrédite pas sur une supposition.
+                $refusAffirme = $e instanceof \App\Services\DecaissementRefuse;
+
                 DB::table(project_table('payout'))
                     ->where('id', $payoutId)
                     ->update([
-                        'statut'     => 'echec',
-                        'response'   => json_encode(['error' => $e->getMessage()]),
+                        'statut'     => $refusAffirme ? 'echec' : 'en_cours',
+                        'response'   => json_encode(array_filter([
+                            'error' => $e->getMessage(),
+                            'issue' => $refusAffirme ? null : 'inconnue',
+                        ])),
                         'updated_at' => now(),
                     ]);
 

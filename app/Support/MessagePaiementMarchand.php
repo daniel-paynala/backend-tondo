@@ -11,9 +11,6 @@ namespace App\Support;
  */
 final class MessagePaiementMarchand
 {
-    /** Constructeur privé : composition pure, pas d'instance. */
-    private function __construct() {}
-
     /**
      * SMS et e-mail reçus par le marchand.
      *

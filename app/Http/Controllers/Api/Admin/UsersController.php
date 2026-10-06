@@ -137,6 +137,13 @@ class UsersController extends Controller
      *    identifiants sont neutralisés. C'est ce qu'annonce la page d'aide publique
      *    (« l'historique des transactions est conservé, dissocié de votre identité »).
      *
+     * **Seul chemin de sortie exempté du verrou**, et volontairement. Le verrou
+     * des sorties existe pour immobiliser l'argent d'une collecte suspecte ;
+     * ici c'est l'inverse qui est demandé — on ferme le compte et on rend ce
+     * qui lui appartient. Le lui appliquer rendrait toute collecte verrouillée
+     * indéfiniment non supprimable, avec les fonds coincés. L'action est
+     * réservée au super admin, qui est justement celui qui pose les verrous.
+     *
      * Rapatriement préalable des fonds : si l'utilisateur gère des cagnottes qui
      * détiennent encore de l'argent, le solde est d'abord reversé sur le numéro
      * de retrait de chaque cagnotte. **Si un seul reversement échoue, RIEN n'est

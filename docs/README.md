@@ -10,10 +10,26 @@ Le backend Tondo (Laravel 13) expose **deux familles d'API** strictement sépar�
 | `/api/mobile/*` | App Flutter | **Supabase JWT** (phone OTP) — middleware à brancher | 🚧 Stubs 501 |
 | `/api/health` | Monitoring | Public | ✅ |
 
-## Collection Postman
+## Collections d'API
+
+| Collection | Cible | Format | Guide |
+|---|---|---|---|
+| [bruno/tonji-airtel/](bruno/tonji-airtel/) | **API Airtel Money (Paynala)** : jeton, KYC, push de paiement, statut, décaissement B2C/B2B | Bruno (dossier à ouvrir) | [airtel-collection.md](airtel-collection.md) |
+| [postman/tonji-airtel.postman_collection.json](postman/tonji-airtel.postman_collection.json) | la même, pour Postman | Postman + environnement | [airtel-collection.md](airtel-collection.md) |
+| [postman/tondo.postman_collection.json](postman/tondo.postman_collection.json) | API Tonji elle-même (`/api/admin`, `/api/mobile`) | Postman | ci-dessous |
+
+La collection Airtel est **automatisée** : jeton obtenu et renouvelé tout seul
+(cache 160 s, comme `PaynalaPaymentService`), références de transaction générées
+avec les préfixes du registre, routage B2C/B2B déduit du grade KYC, attente du
+résultat d'un push en boucle. Elle touche de l'**argent réel** — il n'existe pas
+de bac à sable Paynala — d'où un plafond de montant et une autorisation
+explicite pour les décaissements. Détail dans son guide.
+
+### Collection API Tonji
 
 Une collection globale `Tondo` est versionnée dans
 [postman/tondo.postman_collection.json](postman/tondo.postman_collection.json).
+Son nom porte encore l'ancienne marque.
 
 ### Import
 

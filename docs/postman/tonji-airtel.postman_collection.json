@@ -1,0 +1,1096 @@
+{
+  "info": {
+    "name": "Tonji — Airtel Money",
+    "_postman_id": "7b1f9c62-5a3e-4d81-9f20-0c6a8d3e4f51",
+    "description": "Tout ce qui touche à **Airtel Money** chez Tonji, via l'agrégateur Paynala :\njeton OAuth, KYC du numéro, push de paiement (encaissement), lecture du statut,\ndécaissement B2C/B2B et rejeu d'idempotence.\n\n**Automatisée** : le jeton est obtenu et renouvelé tout seul (cache 160 s, comme\n`PaynalaPaymentService`), les références de transaction sont générées avec les\npréfixes du registre (`App\\Support\\Registre`), le grade KYC décide du routage\nB2C/B2B des décaissements, et l'attente du résultat d'un push se rejoue toute\nseule tant que l'opérateur répond PENDING.\n\n**Réponses brutes par défaut** : `mode_brut = oui` laisse passer la réponse du\nserveur telle quelle, sans aucune vérification, et `tracer_brut = oui` écrit requête\net réponse dans la console. Passer `mode_brut` à `non` rallume les vérifications.\nL'enchaînement des variables, lui, marche dans les deux cas.\n\n⚠️ **Il n'existe aucun bac à sable Paynala** : `testapi.paynala.com` ne résout pas,\nseul `api.paynala.com` existe. Chaque requête touche de l'argent réel. D'où deux\ngarde-fous : un plafond de montant (`plafond_montant_test`) et une autorisation\nexplicite pour les décaissements (`autoriser_decaissement = oui`).\n\nGuide : `backend/docs/airtel-collection.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{airtel_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Jeton OAuth automatique — aucune étape manuelle de connexion.",
+          "//",
+          "// L'API Paynala expire le jeton à 170 s. On le garde 160 s, exactement comme",
+          "// PaynalaPaymentService::getToken(), pour ne jamais présenter un jeton périmé",
+          "// en transit. Toutes les requêtes héritent du Bearer {{airtel_token}}.",
+          "const lire = (cle) => pm.environment.get(cle) || pm.collectionVariables.get(cle);",
+          "",
+          "const manquantes = [\"airtel_base_url\", \"airtel_client_id\", \"airtel_client_secret\"]",
+          "    .filter((cle) => !lire(cle));",
+          "",
+          "if (manquantes.length) {",
+          "    throw new Error(",
+          "        \"Variables à renseigner dans l'environnement Tonji — Airtel : \" + manquantes.join(\", \")",
+          "    );",
+          "}",
+          "",
+          "// Le jeton en cache est-il encore valide ?",
+          "const expireLe = Number(pm.collectionVariables.get(\"airtel_token_expire_ms\") || 0);",
+          "if (pm.collectionVariables.get(\"airtel_token\") && Date.now() < expireLe) {",
+          "    return;",
+          "}",
+          "",
+          "pm.sendRequest({",
+          "    url: lire(\"airtel_base_url\") + \"/oauth_token_v2\",",
+          "    method: \"POST\",",
+          "    header: { \"Content-Type\": \"application/json\" },",
+          "    body: {",
+          "        mode: \"raw\",",
+          "        raw: JSON.stringify({",
+          "            grant_type: \"client_credentials\",",
+          "            client_id: lire(\"airtel_client_id\"),",
+          "            client_secret: lire(\"airtel_client_secret\"),",
+          "        }),",
+          "    },",
+          "}, (erreur, reponse) => {",
+          "    // On ne lève pas d'exception depuis ce retour asynchrone : la requête",
+          "    // partirait quand même. Sans jeton elle répondra 401, et le test de la",
+          "    // requête le dira.",
+          "    if (erreur) {",
+          "        console.error(\"[airtel] oauth_token_v2 injoignable : \" + erreur);",
+          "        return;",
+          "    }",
+          "    if (reponse.code !== 200) {",
+          "        console.error(\"[airtel] oauth_token_v2 a répondu \" + reponse.code + \" : \" + reponse.text());",
+          "        return;",
+          "    }",
+          "    const corps = reponse.json();",
+          "    pm.collectionVariables.set(\"airtel_token\", corps.access_token || \"\");",
+          "    // 160 s : la marge de 10 s couvre le temps de transit.",
+          "    pm.collectionVariables.set(\"airtel_token_expire_ms\", String(Date.now() + 160000));",
+          "    console.log(\"[airtel] nouveau jeton obtenu, valable 160 s\");",
+          "});"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Réponse brute du serveur — aucune interprétation.",
+          "//",
+          "// Visible dans la console Postman (View → Show Postman Console) et dans la",
+          "// sortie de newman. Mettre tracer_brut = non pour couper la trace.",
+          "if (String(pm.variables.get(\"tracer_brut\") || \"oui\").toLowerCase() === \"oui\") {",
+          "    const entetes = {};",
+          "    pm.request.headers.each((h) => {",
+          "        // Un log finit souvent recopié dans un ticket : les secrets n'y vont pas.",
+          "        entetes[h.key] = /authorization|operator-key/i.test(h.key) ? \"«masqué»\" : h.value;",
+          "    });",
+          "",
+          "    console.log(\"───────────────────────────────────────────────\");",
+          "    console.log(pm.request.method + \" \" + pm.request.url.toString());",
+          "    console.log(\"en-têtes envoyés : \" + JSON.stringify(entetes));",
+          "    if (pm.request.body && pm.request.body.raw) {",
+          "        console.log(\"corps envoyé : \" + pm.request.body.raw);",
+          "    }",
+          "    console.log(\"→ HTTP \" + pm.response.code + \" \" + (pm.response.status || \"\") +",
+          "        \" en \" + pm.response.responseTime + \" ms\");",
+          "    console.log(\"→ réponse : \" + pm.response.text());",
+          "    console.log(\"───────────────────────────────────────────────\");",
+          "}",
+          "",
+          "// « merchant not active » ne vient jamais de la collection : c'est la réponse de",
+          "// Paynala quand le profil marchand derrière les identifiants n'est pas activé.",
+          "// Le backend la traite comme « service indisponible » (troisième branche de",
+          "// checkKyc), ce qui explique un KYC « indisponible » côté app.",
+          "if (/merchant\\s*not\\s*active/i.test(pm.response.text())) {",
+          "    console.warn(\"[airtel] « merchant not active » = réponse de Paynala, pas un contrôle local. \" +",
+          "        \"Vérifier la paire client_id/client_secret utilisée (recette vs production) et, pour \" +",
+          "        \"disburse, la clé x-operator-key. Rien à corriger dans la collection.\");",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "airtel_base_url",
+      "value": "https://api.paynala.com/functions/v1",
+      "description": "Seule adresse qui existe. testapi.paynala.com ne résout pas."
+    },
+    {
+      "key": "airtel_msisdn",
+      "value": "077730634",
+      "description": "Numéro local 9 chiffres (0XXXXXXXX), jamais E.164 : l'API Airtel attend le format local."
+    },
+    {
+      "key": "airtel_msisdn_inconnu",
+      "value": "074000000",
+      "description": "Témoin négatif du KYC : numéro sans compte Airtel Money."
+    },
+    {
+      "key": "montant_push",
+      "value": "100",
+      "description": "FCFA, entier."
+    },
+    {
+      "key": "montant_decaissement",
+      "value": "100",
+      "description": "FCFA, entier."
+    },
+    {
+      "key": "plafond_montant_test",
+      "value": "500",
+      "description": "Au-delà, la requête est sautée. Argent réel."
+    },
+    {
+      "key": "autoriser_decaissement",
+      "value": "non",
+      "description": "« oui » débloque les requêtes du dossier 3. Tout le reste les saute."
+    },
+    {
+      "key": "prefixe_payin",
+      "value": "TONJIPAYIN",
+      "description": "Registre::PREFIXES['payin']"
+    },
+    {
+      "key": "prefixe_payout",
+      "value": "TONJIPAYOUT",
+      "description": "Registre::PREFIXES['payout_manuel']"
+    },
+    {
+      "key": "type_decaissement",
+      "value": "B2C",
+      "description": "Posé automatiquement par le KYC."
+    },
+    {
+      "key": "statut_max_essais",
+      "value": "20",
+      "description": "Tentatives d'attente avant abandon."
+    },
+    {
+      "key": "mode_brut",
+      "value": "oui",
+      "description": "« oui » : les réponses passent telles quelles, sans aucune vérification. « non » : les tests automatiques reprennent."
+    },
+    {
+      "key": "tracer_brut",
+      "value": "oui",
+      "description": "« oui » : chaque requête et chaque réponse sont écrites brutes dans la console."
+    },
+    {
+      "key": "airtel_token",
+      "value": ""
+    },
+    {
+      "key": "airtel_token_expire_ms",
+      "value": "0"
+    },
+    {
+      "key": "request_id",
+      "value": ""
+    },
+    {
+      "key": "payment_id",
+      "value": ""
+    },
+    {
+      "key": "statut_essais",
+      "value": "0"
+    },
+    {
+      "key": "statut_final",
+      "value": ""
+    },
+    {
+      "key": "idempotency_key",
+      "value": ""
+    },
+    {
+      "key": "idempotency_key_rejeu",
+      "value": ""
+    },
+    {
+      "key": "trans_id_payout",
+      "value": ""
+    },
+    {
+      "key": "reference_decaissement",
+      "value": ""
+    },
+    {
+      "key": "airtel_money_id",
+      "value": ""
+    },
+    {
+      "key": "kyc_grade",
+      "value": ""
+    },
+    {
+      "key": "kyc_nom",
+      "value": ""
+    },
+    {
+      "key": "kyc_prenom",
+      "value": ""
+    },
+    {
+      "key": "type_client",
+      "value": ""
+    },
+    {
+      "key": "type_compte",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1 · KYC Airtel",
+      "description": "`POST /kyc` — le numéro a-t-il un compte Airtel Money actif ?\n\nAppelé **avant l'envoi de l'OTP** à l'inscription, et à chaque vérification de bénéficiaire. Le `grade` retourné sert deux fois : type de compte Tonji (SUBS/TEMP → particulier, MERCHVIP/HMERA → association) et routage du décaissement (particulier → B2C, entreprise → B2B).",
+      "item": [
+        {
+          "name": "KYC — numéro du scénario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{airtel_base_url}}/kyc",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "kyc"
+              ]
+            },
+            "description": "Pose kyc_nom, kyc_prenom, kyc_grade, type_client et type_decaissement pour toute la suite de la collection.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"msisdn\": \"{{airtel_msisdn}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "// Le grade Airtel décide de tout en aval : type de compte Tonji (particulier /",
+                  "// association) ET routage du décaissement (B2C / B2B). Mêmes listes que",
+                  "// PaynalaPaymentService — si Airtel introduit un grade inconnu, ce test le dit",
+                  "// avant que l'inscription ne soit bloquée en production.",
+                  "const GRADES_PARTICULIER = [\"SUBS\", \"TEMP\"];",
+                  "const GRADES_ASSOCIATION = [\"MERCHVIP\", \"HMERA\"];",
+                  "",
+                  "verifier(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const corps = pm.response.json();",
+                  "",
+                  "if (corps.success === true && corps.status === \"FOUND\") {",
+                  "    const donnees = corps.data || {};",
+                  "    const grade = donnees.grade || \"\";",
+                  "",
+                  "    verifier(\"grade reconnu par le backend (\" + grade + \")\", function () {",
+                  "        pm.expect(GRADES_PARTICULIER.concat(GRADES_ASSOCIATION)).to.include(grade);",
+                  "    });",
+                  "",
+                  "    // typeCompteDepuisGrade() : null hors des deux listes → inscription bloquée.",
+                  "    const typeClient = GRADES_PARTICULIER.indexOf(grade) !== -1 ? \"particulier\" : \"entreprise\";",
+                  "    const typeCompte = GRADES_PARTICULIER.indexOf(grade) !== -1",
+                  "        ? \"particulier\"",
+                  "        : (GRADES_ASSOCIATION.indexOf(grade) !== -1 ? \"association\" : null);",
+                  "",
+                  "    // Ces variables alimentent les requêtes suivantes : le push est pré-rempli",
+                  "    // avec le nom du titulaire, et le décaissement part en B2C ou B2B selon le",
+                  "    // grade — c'est exactement ce que fait resolveDisburseType().",
+                  "    pm.collectionVariables.set(\"kyc_grade\", grade);",
+                  "    pm.collectionVariables.set(\"kyc_prenom\", donnees.first_name || \"\");",
+                  "    pm.collectionVariables.set(\"kyc_nom\", donnees.last_name || \"\");",
+                  "    pm.collectionVariables.set(\"type_client\", typeClient);",
+                  "    pm.collectionVariables.set(\"type_compte\", typeCompte === null ? \"\" : typeCompte);",
+                  "    pm.collectionVariables.set(\"type_decaissement\", typeClient === \"entreprise\" ? \"B2B\" : \"B2C\");",
+                  "",
+                  "    console.log(",
+                  "        \"[airtel] compte trouvé : \" + (donnees.first_name || \"?\") + \" \" + (donnees.last_name || \"?\") +",
+                  "        \" | grade \" + grade + \" | type_client \" + typeClient +",
+                  "        \" | décaissement \" + (typeClient === \"entreprise\" ? \"B2B\" : \"B2C\")",
+                  "    );",
+                  "    return;",
+                  "}",
+                  "",
+                  "if (corps.success === false && corps.status === \"FAILED\") {",
+                  "    pm.collectionVariables.set(\"kyc_grade\", \"\");",
+                  "    pm.collectionVariables.set(\"type_client\", \"\");",
+                  "    pm.collectionVariables.set(\"type_decaissement\", \"\");",
+                  "    verifier(\"numéro sans compte Airtel Money (FAILED) — inscription à bloquer\", function () {",
+                  "        pm.expect(corps.status).to.eql(\"FAILED\");",
+                  "    });",
+                  "    console.log(\"[airtel] aucun compte Airtel Money pour ce numéro\");",
+                  "    return;",
+                  "}",
+                  "",
+                  "// Troisième cas : ni FOUND ni FAILED. C'est ce que le backend traite comme",
+                  "// « service indisponible » (agrégateur injoignable, format inattendu) et qui le fait",
+                  "// laisser passer sans vérifier. À remonter à Paynala quand ça arrive.",
+                  "verifier(\"réponse KYC exploitable (FOUND ou FAILED)\", function () {",
+                  "    pm.expect.fail(\"réponse inattendue : \" + JSON.stringify(corps));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KYC — numéro sans compte (témoin négatif)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{airtel_base_url}}/kyc",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "kyc"
+              ]
+            },
+            "description": "Vérifie le chemin FAILED : c'est lui qui empêche une inscription sur un numéro sans compte Mobile Money.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"msisdn\": \"{{airtel_msisdn_inconnu}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "verifier(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const corps = pm.response.json();",
+                  "",
+                  "// Le chemin négatif compte autant que le positif : c'est lui qui empêche une",
+                  "// inscription sur un numéro sans compte Mobile Money.",
+                  "verifier(\"success = false\", function () {",
+                  "    pm.expect(corps.success).to.eql(false);",
+                  "});",
+                  "",
+                  "verifier(\"status = FAILED\", function () {",
+                  "    pm.expect(corps.status).to.eql(\"FAILED\");",
+                  "});",
+                  "",
+                  "// Si ce numéro finit par être attribué, le test tombe et il faudra en changer.",
+                  "if (corps.status === \"FOUND\") {",
+                  "    console.warn(\"[airtel] le numéro témoin a désormais un compte : changer airtel_msisdn_inconnu\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · Push de paiement (encaissement)",
+      "description": "`POST /create_payment_v2` — pousse une demande de paiement sur le téléphone du cotisant, qui valide par son code Airtel Money. L'API répond immédiatement ; le résultat arrive ensuite, d'où la lecture du statut.\n\nLe `request_id` est généré ici avec le préfixe `TONJIPAYIN` du registre : c'est ce texte que le cotisant voit sur son relevé Airtel.",
+      "item": [
+        {
+          "name": "Push — create_payment_v2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{airtel_base_url}}/create_payment_v2",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "create_payment_v2"
+              ]
+            },
+            "description": "Montant brut en FCFA (frais inclus, à la charge du cotisant). Nom et prénom pré-remplis depuis le KYC.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"amount\": {{montant_push}},\n  \"phone\": \"{{airtel_msisdn}}\",\n  \"first_name\": \"{{kyc_prenom}}\",\n  \"last_name\": \"{{kyc_nom}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Référence de transaction, générée comme le backend : préfixe du registre",
+                  "// (App\\Support\\Registre::PREFIXES['payin']) + 9 caractères alphanumériques",
+                  "// majuscules. Pas de tiret — l'API refuse, et le champ accepte 4 à 64 chars.",
+                  "const ALPHABET = \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\";",
+                  "let suffixe = \"\";",
+                  "for (let i = 0; i < 9; i++) {",
+                  "    suffixe += ALPHABET.charAt(Math.floor(Math.random() * ALPHABET.length));",
+                  "}",
+                  "const requestId = (pm.variables.get(\"prefixe_payin\") || \"TONJIPAYIN\") + suffixe;",
+                  "pm.collectionVariables.set(\"request_id\", requestId);",
+                  "",
+                  "// Remise à zéro du compteur d'attente utilisé par la requête de polling.",
+                  "pm.collectionVariables.set(\"statut_essais\", \"0\");",
+                  "pm.collectionVariables.set(\"statut_final\", \"\");",
+                  "",
+                  "// Garde-fou montant. Il n'existe AUCUN bac à sable Paynala :",
+                  "// testapi.paynala.com ne résout pas, seul api.paynala.com existe. Ce push",
+                  "// débite donc un vrai compte Airtel Money.",
+                  "const montant = Number(pm.variables.get(\"montant_push\") || 0);",
+                  "const plafond = Number(pm.variables.get(\"plafond_montant_test\") || 500);",
+                  "",
+                  "if (!(montant > 0)) {",
+                  "    throw new Error(\"montant_push doit être un entier > 0\");",
+                  "}",
+                  "",
+                  "if (montant > plafond) {",
+                  "    const message = \"Push de \" + montant + \" FCFA refusé : plafond de test = \" + plafond +",
+                  "        \" FCFA (variable plafond_montant_test). Argent réel, pas de bac à sable.\";",
+                  "    console.error(\"[airtel] \" + message);",
+                  "    if (pm.execution && pm.execution.skipRequest) {",
+                  "        pm.execution.skipRequest();",
+                  "    } else {",
+                  "        throw new Error(message);",
+                  "    }",
+                  "}",
+                  "",
+                  "console.log(\"[airtel] push \" + montant + \" FCFA vers \" + pm.variables.get(\"airtel_msisdn\") +",
+                  "    \" — request_id \" + requestId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "verifier(\"HTTP 2xx\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "",
+                  "const corps = pm.response.json();",
+                  "",
+                  "// L'API peut répondre 200 avec success:false sur une erreur métier : le",
+                  "// backend vérifie les deux, la collection aussi.",
+                  "verifier(\"success = true\", function () {",
+                  "    pm.expect(corps.success, JSON.stringify(corps)).to.eql(true);",
+                  "});",
+                  "",
+                  "const donnees = corps.data || {};",
+                  "",
+                  "verifier(\"un identifiant de paiement est retourné\", function () {",
+                  "    pm.expect(donnees).to.have.property(\"paymentId\");",
+                  "});",
+                  "",
+                  "verifier(\"le request_id renvoyé est bien celui envoyé\", function () {",
+                  "    const envoye = pm.collectionVariables.get(\"request_id\");",
+                  "    pm.expect(donnees.requestId || envoye).to.eql(envoye);",
+                  "});",
+                  "",
+                  "if (donnees.paymentId) {",
+                  "    pm.collectionVariables.set(\"payment_id\", donnees.paymentId);",
+                  "}",
+                  "",
+                  "console.log(\"[airtel] push accepté — statut initial \" + (donnees.status || \"?\") +",
+                  "    \" | le client doit maintenant valider sur son téléphone\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Statut — une lecture",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{airtel_base_url}}/payment_status_v2?request_id={{request_id}}",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "payment_status_v2"
+              ],
+              "query": [
+                {
+                  "key": "request_id",
+                  "value": "{{request_id}}"
+                }
+              ]
+            },
+            "description": "`GET /payment_status_v2` — PENDING / SUCCESS / FAILED. Un 404 signifie que l'API ne connaît pas ce request_id : le paiement n'a jamais existé."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "const requestId = pm.collectionVariables.get(\"request_id\");",
+                  "",
+                  "// 404 = l'API ne connaît pas ce request_id : le paiement n'a jamais existé.",
+                  "// Le backend le traduit en FAILED, pas en erreur.",
+                  "if (pm.response.code === 404) {",
+                  "    pm.collectionVariables.set(\"statut_final\", \"FAILED\");",
+                  "    verifier(\"request_id inconnu de l'API (404) → traité comme FAILED\", function () {",
+                  "        pm.expect(requestId, \"aucun request_id en mémoire : jouer le push d'abord\").to.not.be.empty;",
+                  "    });",
+                  "    return;",
+                  "}",
+                  "",
+                  "verifier(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const corps = pm.response.json();",
+                  "const donnees = corps.data || {};",
+                  "// data absent = toujours en attente, même lecture que checkStatus().",
+                  "const statut = donnees.status || \"PENDING\";",
+                  "",
+                  "pm.collectionVariables.set(\"statut_final\", statut);",
+                  "",
+                  "verifier(\"statut parmi PENDING / SUCCESS / FAILED (\" + statut + \")\", function () {",
+                  "    pm.expect([\"PENDING\", \"SUCCESS\", \"FAILED\"]).to.include(statut);",
+                  "});",
+                  "",
+                  "console.log(\"[airtel] \" + requestId + \" → \" + statut);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Statut — attente du résultat (boucle)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{airtel_base_url}}/payment_status_v2?request_id={{request_id}}",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "payment_status_v2"
+              ],
+              "query": [
+                {
+                  "key": "request_id",
+                  "value": "{{request_id}}"
+                }
+              ]
+            },
+            "description": "Se rejoue tant que l'opérateur répond PENDING, jusqu'à statut_max_essais. Régler le délai dans l'outil : Runner → « Delay » 3000 ms, newman → --delay-request 3000."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Premier passage : initialise le compteur. Les passages suivants viennent du",
+                  "// postman.setNextRequest() placé dans l'onglet Tests.",
+                  "if (!pm.collectionVariables.get(\"statut_essais\")) {",
+                  "    pm.collectionVariables.set(\"statut_essais\", \"0\");",
+                  "}",
+                  "",
+                  "if (!pm.collectionVariables.get(\"request_id\")) {",
+                  "    throw new Error(\"Aucun request_id en mémoire : jouer « Push de paiement » d'abord.\");",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "// Attente active du résultat du push : la requête se rejoue elle-même tant que",
+                  "// l'opérateur répond PENDING. C'est le pendant de la tâche planifiée",
+                  "// tondo:verifier-paiements, qui interroge l'API toutes les 5 secondes.",
+                  "//",
+                  "// Le délai entre deux passages se règle dans l'outil, pas ici :",
+                  "//   Runner Postman → champ « Delay » = 3000 ms",
+                  "//   newman          → --delay-request 3000",
+                  "const max = Number(pm.collectionVariables.get(\"statut_max_essais\") || 20);",
+                  "let essais = Number(pm.collectionVariables.get(\"statut_essais\") || 0) + 1;",
+                  "pm.collectionVariables.set(\"statut_essais\", String(essais));",
+                  "",
+                  "let statut = \"PENDING\";",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    statut = \"FAILED\";",
+                  "} else if (pm.response.code === 200) {",
+                  "    const donnees = pm.response.json().data || {};",
+                  "    statut = donnees.status || \"PENDING\";",
+                  "}",
+                  "",
+                  "console.log(\"[airtel] attente \" + essais + \"/\" + max + \" → \" + statut);",
+                  "",
+                  "if (statut === \"PENDING\" && essais < max) {",
+                  "    postman.setNextRequest(pm.info.requestName);",
+                  "    return;",
+                  "}",
+                  "",
+                  "pm.collectionVariables.set(\"statut_essais\", \"0\");",
+                  "pm.collectionVariables.set(\"statut_final\", statut);",
+                  "",
+                  "verifier(\"l'opérateur a tranché avant \" + max + \" tentatives\", function () {",
+                  "    pm.expect(statut, \"toujours PENDING : client qui ne valide pas, ou confirmation perdue\")",
+                  "        .to.not.eql(\"PENDING\");",
+                  "});",
+                  "",
+                  "verifier(\"paiement encaissé (SUCCESS)\", function () {",
+                  "    pm.expect(statut).to.eql(\"SUCCESS\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · Décaissement (argent réel)",
+      "description": "`POST /disburse` — sortie d'argent vers un bénéficiaire. En-tête `x-operator-key` obligatoire, et le backend force un jeton frais avant chaque appel (cet endpoint rejette les jetons gardés trop longtemps).\n\n**Les trois requêtes sont sautées** tant que `autoriser_decaissement` ne vaut pas `oui`. Le `type` (B2C/B2B) doit correspondre au grade du compte : un B2B vers un compte particulier répond « Transaction Ambiguous » et l'argent reste bloqué le temps de la régularisation.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// ─── Garde-fou ────────────────────────────────────────────────────────────",
+              "// Un décaissement sort de l'argent réel : il n'existe aucun bac à sable",
+              "// Paynala. La requête ne part que si l'environnement porte explicitement",
+              "// autoriser_decaissement = oui.",
+              "const autorise = String(pm.variables.get(\"autoriser_decaissement\") || \"\").toLowerCase();",
+              "const montant = Number(pm.variables.get(\"montant_decaissement\") || 0);",
+              "const plafond = Number(pm.variables.get(\"plafond_montant_test\") || 500);",
+              "",
+              "let refus = null;",
+              "",
+              "if (autorise !== \"oui\") {",
+              "    refus = \"autoriser_decaissement != oui — requête sautée (argent réel, aucun bac à sable).\";",
+              "} else if (!(montant > 0)) {",
+              "    refus = \"montant_decaissement doit être un entier > 0.\";",
+              "} else if (montant > plafond) {",
+              "    refus = \"Décaissement de \" + montant + \" FCFA refusé : plafond de test = \" + plafond + \" FCFA.\";",
+              "} else if (!pm.variables.get(\"airtel_operator_key\")) {",
+              "    refus = \"airtel_operator_key manquante : l'endpoint disburse refuse sans x-operator-key.\";",
+              "}",
+              "",
+              "if (refus) {",
+              "    console.warn(\"[airtel] \" + refus);",
+              "    if (pm.execution && pm.execution.skipRequest) {",
+              "        pm.execution.skipRequest();",
+              "    } else {",
+              "        throw new Error(refus);",
+              "    }",
+              "    return;",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Décaissement — B2C / B2B selon le KYC",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-operator-key",
+                "value": "{{airtel_operator_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{airtel_base_url}}/disburse",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "disburse"
+              ]
+            },
+            "description": "Utilise type_decaissement posé par la requête KYC. Clé d'idempotence = trans_id du payout (préfixe TONJIPAYOUT). Pour forcer un routage sans repasser par le KYC, poser type_decaissement à B2C ou B2B dans l'environnement.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"msisdn\": \"{{airtel_msisdn}}\",\n  \"amount\": {{montant_decaissement}},\n  \"reference\": \"{{reference_decaissement}}\",\n  \"idempotency_key\": \"{{idempotency_key}}\",\n  \"type\": \"{{type_decaissement}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// ─── Identifiants de la sortie ────────────────────────────────────────────",
+                  "// Clé d'idempotence = le trans_id du payout, comme en base. Elle était dérivée",
+                  "// d'un COUNT(*) + 1 : deux décaissements simultanés tombaient sur la même clé",
+                  "// et l'un écrasait l'autre (incident du 2026-08-31).",
+                  "const ALPHABET = \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\";",
+                  "let suffixe = \"\";",
+                  "for (let i = 0; i < 9; i++) {",
+                  "    suffixe += ALPHABET.charAt(Math.floor(Math.random() * ALPHABET.length));",
+                  "}",
+                  "",
+                  "const prefixe = pm.variables.get(\"prefixe_payout\") || \"TONJIPAYOUT\";",
+                  "const transId = prefixe + suffixe;",
+                  "",
+                  "pm.collectionVariables.set(\"idempotency_key\", transId);",
+                  "pm.collectionVariables.set(\"trans_id_payout\", transId);",
+                  "// Référence lisible transmise à l'opérateur, format du backend.",
+                  "pm.collectionVariables.set(\"reference_decaissement\", \"TONJIDISBURSEMENT\" + Date.now());",
+                  "",
+                  "console.log(\"[airtel] décaissement \" + pm.variables.get(\"montant_decaissement\") + \" FCFA vers \" + pm.variables.get(\"airtel_msisdn\") +",
+                  "    \" en \" + pm.variables.get(\"type_decaissement\") + \" — clé \" + transId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "verifier(\"HTTP 2xx\", () => pm.expect(pm.response.code).to.be.within(200, 299));",
+                  "",
+                  "const corps = pm.response.json();",
+                  "",
+                  "verifier(\"success = true\", function () {",
+                  "    pm.expect(corps.success, JSON.stringify(corps)).to.eql(true);",
+                  "});",
+                  "",
+                  "// « Transaction Ambiguous » = routage B2B vers un compte particulier (ou",
+                  "// l'inverse). C'est le grade KYC qui tranche, pas une préférence : la requête",
+                  "// KYC a posé type_decaissement.",
+                  "if (corps.success !== true) {",
+                  "    const message = (corps.error && corps.error.message) || corps.message || pm.response.text();",
+                  "    if (String(message).toLowerCase().indexOf(\"ambiguous\") !== -1) {",
+                  "        console.error(\"[airtel] routage B2B/B2C incorrect pour ce numéro — relancer le KYC et \" +",
+                  "            \"vérifier type_decaissement (actuel : \" + pm.variables.get(\"type_decaissement\") + \")\");",
+                  "    }",
+                  "}",
+                  "",
+                  "const donnees = corps.data || corps;",
+                  "",
+                  "if (donnees.airtel_money_id) {",
+                  "    pm.collectionVariables.set(\"airtel_money_id\", donnees.airtel_money_id);",
+                  "    // Mémorisé pour le rejeu d'idempotence.",
+                  "    pm.collectionVariables.set(\"idempotency_key_rejeu\", pm.collectionVariables.get(\"idempotency_key\"));",
+                  "    console.log(\"[airtel] décaissement accepté — airtel_money_id \" + donnees.airtel_money_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Décaissement — rejeu de la même clé (idempotence)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-operator-key",
+                "value": "{{airtel_operator_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{airtel_base_url}}/disburse",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "disburse"
+              ]
+            },
+            "description": "Renvoie la dernière clé acceptée. L'API doit rendre la même transaction ou refuser le doublon — jamais sortir l'argent une seconde fois.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"msisdn\": \"{{airtel_msisdn}}\",\n  \"amount\": {{montant_decaissement}},\n  \"reference\": \"{{reference_decaissement}}\",\n  \"idempotency_key\": \"{{idempotency_key}}\",\n  \"type\": \"{{type_decaissement}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Rejeu volontaire de la DERNIÈRE clé d'idempotence acceptée.",
+                  "//",
+                  "// Ce que ça vérifie : l'API ne doit pas sortir l'argent deux fois. C'est le",
+                  "// filet qui manquait quand la clé était dérivée d'un COUNT(*) + 1.",
+                  "const cle = pm.collectionVariables.get(\"idempotency_key_rejeu\");",
+                  "",
+                  "if (!cle) {",
+                  "    const refus = \"Aucun décaissement réussi à rejouer : lancer « B2C » ou « B2B » d'abord.\";",
+                  "    console.warn(\"[airtel] \" + refus);",
+                  "    if (pm.execution && pm.execution.skipRequest) {",
+                  "        pm.execution.skipRequest();",
+                  "    } else {",
+                  "        throw new Error(refus);",
+                  "    }",
+                  "    return;",
+                  "}",
+                  "",
+                  "// Même clé, même montant, même numéro : seule la référence change, comme si le",
+                  "// backend relançait après un timeout réseau.",
+                  "pm.collectionVariables.set(\"idempotency_key\", cle);",
+                  "pm.collectionVariables.set(\"reference_decaissement\", \"TONJIDISBURSEMENT\" + Date.now());",
+                  "console.log(\"[airtel] rejeu de la clé \" + cle);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "const corps = pm.response.json();",
+                  "const donnees = corps.data || corps;",
+                  "const precedent = pm.collectionVariables.get(\"airtel_money_id\");",
+                  "",
+                  "// Deux comportements acceptables : l'API rend la MÊME transaction, ou elle",
+                  "// refuse explicitement le doublon. Ce qui serait grave, c'est une seconde",
+                  "// transaction avec un nouvel identifiant : l'argent serait sorti deux fois.",
+                  "const memeTransaction = donnees.airtel_money_id && donnees.airtel_money_id === precedent;",
+                  "const refusExplicite = corps.success === false;",
+                  "",
+                  "verifier(\"la clé rejouée ne crée pas un second décaissement\", function () {",
+                  "    pm.expect(",
+                  "        memeTransaction || refusExplicite,",
+                  "        \"réponse : \" + JSON.stringify(corps) + \" | airtel_money_id attendu : \" + precedent",
+                  "    ).to.be.true;",
+                  "});",
+                  "",
+                  "if (memeTransaction) {",
+                  "    console.log(\"[airtel] idempotence respectée : même airtel_money_id retourné\");",
+                  "} else if (refusExplicite) {",
+                  "    console.log(\"[airtel] doublon refusé explicitement par l'API\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Annexe · Jeton OAuth (inspection)",
+      "description": "`POST /oauth_token_v2` — la collection le fait déjà toute seule avant chaque requête. Celle-ci existe pour lire la réponse telle quelle (durée de validité, message d'erreur d'identifiants).",
+      "item": [
+        {
+          "name": "Jeton — client_credentials",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{airtel_base_url}}/oauth_token_v2",
+              "host": [
+                "{{airtel_base_url}}"
+              ],
+              "path": [
+                "oauth_token_v2"
+              ]
+            },
+            "description": "Sans Bearer : c'est la requête qui le produit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"client_credentials\",\n  \"client_id\": \"{{airtel_client_id}}\",\n  \"client_secret\": \"{{airtel_client_secret}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mode brut (défaut) : la réponse du serveur passe telle quelle, aucune",
+                  "// vérification n'est jouée. Mettre mode_brut = non pour les réactiver.",
+                  "//",
+                  "// L'enchaînement des variables n'est pas concerné : le nom du titulaire, le",
+                  "// routage B2C/B2B et le request_id continuent d'être posés pour les requêtes",
+                  "// suivantes.",
+                  "const brut = String(pm.variables.get(\"mode_brut\") || \"\").toLowerCase() === \"oui\";",
+                  "const verifier = brut",
+                  "    ? function () {}",
+                  "    : function (nom, fonction) { return pm.test(nom, fonction); };",
+                  "",
+                  "verifier(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const corps = pm.response.json();",
+                  "",
+                  "verifier(\"un access_token est retourné\", function () {",
+                  "    pm.expect(corps).to.have.property(\"access_token\").that.is.a(\"string\").and.not.empty;",
+                  "});",
+                  "",
+                  "// Le jeton de cette requête alimente aussi le cache de la collection : utile",
+                  "// quand on la lance seule pour inspecter la réponse d'authentification.",
+                  "if (corps.access_token) {",
+                  "    pm.collectionVariables.set(\"airtel_token\", corps.access_token);",
+                  "    pm.collectionVariables.set(\"airtel_token_expire_ms\", String(Date.now() + 160000));",
+                  "}",
+                  "",
+                  "// L'API annonce 170 s. Si elle change un jour, le cache de 160 s de",
+                  "// PaynalaPaymentService devient faux — ce test le fera remarquer.",
+                  "if (corps.expires_in !== undefined) {",
+                  "    verifier(\"expiration annoncée >= 170 s (cache backend : 160 s)\", function () {",
+                  "        pm.expect(Number(corps.expires_in)).to.be.at.least(170);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

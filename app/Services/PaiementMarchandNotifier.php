@@ -113,7 +113,7 @@ class PaiementMarchandNotifier
         try {
             $this->mail->envoyer(
                 $adresse,
-                'Tonji — paiement de ' . MessagePaiementMarchand::montant($d->montant) . ' FCFA reçu',
+                'Tonji — paiement de ' . MessagePaiementMarchand::montant($d->montant) . ' FCFA',
                 '<pre style="font-family:inherit;font-size:15px">' . e($texte) . '</pre>',
             );
         } catch (\Throwable $e) {

@@ -4,13 +4,10 @@ namespace App\Services\WhatsApp;
 
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
-use App\Services\PaynalaPaymentService;
+use App\Services\SortieArgent;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use App\Support\Registre;
 
 /**
  * Gestion des cagnottes et tontines existantes via le canal WhatsApp.
@@ -18,15 +15,17 @@ use App\Support\Registre;
  * Expose trois fonctionnalités principales :
  *   1. Consultation des cagnottes gérées par un utilisateur et de leur historique.
  *   2. Génération d'un PDF récapitulatif des transactions (DomPDF).
- *   3. Initiation d'un reversement (payout) vers le bénéficiaire via Paynala.
+ *   3. Sortie d'argent vers un bénéficiaire ou un commerce.
  *
- * Le reversement suit un protocole en 3 phases pour garantir la cohérence
- * même en cas d'erreur pendant l'appel externe à Paynala.
+ * La sortie d'argent elle-même n'est PAS écrite ici : elle est déléguée à
+ * {@see \App\Services\SortieArgent}, le point d'entrée unique partagé avec
+ * l'app et le web. Le bot avait sa propre copie, qui avait silencieusement
+ * divergé — notamment en ignorant le verrou des sorties.
  */
 class GererCagnotteService
 {
     public function __construct(
-        private readonly PaynalaPaymentService $paynala,
+        private readonly SortieArgent $sortie,
     ) {}
 
     /**
@@ -119,156 +118,56 @@ class GererCagnotteService
     }
 
     /**
-     * Initie un reversement (payout) depuis une cagnotte vers un bénéficiaire.
+     * Fait sortir de l'argent d'une collecte depuis WhatsApp.
      *
-     * Protocole en 3 phases pour garantir la cohérence base/opérateur :
+     * **Enveloppe, et non implémentation.** Ce service recopiait son propre
+     * décaissement, et cette copie avait dérivé : elle ne consultait pas le
+     * verrou des sorties, ne restaurait pas le solde quand l'opérateur refusait,
+     * n'alertait aucun administrateur et ne savait pas payer un commerce. Tout
+     * cela est désormais celui de {@see SortieArgent}, le même que l'app et le
+     * web — ce qui reste ici n'est que la traduction du résultat en exception,
+     * forme attendue par les écrans du bot.
      *
-     * Phase 1 — Réservation atomique (dans une transaction DB) :
-     *   - Verrouille la ligne tondo_cagnottes (lockForUpdate) pour éviter les doubles dépenses.
-     *   - Vérifie que le solde disponible couvre le montant demandé.
-     *   - Insère une ligne tondo_payout avec statut 'initie' (clé d'idempotence = le trans_id).
-     *   - Décrémente montant_collecte de la cagnotte.
-     *
-     * Phase 2 — Appel Paynala HORS transaction (pour ne pas bloquer la DB pendant l'appel réseau) :
-     *   - Appelle PaynalaPaymentService::disburse().
-     *   - En cas d'échec : marque le payout 'echec', log une alerte CRITICAL
-     *     (intervention manuelle nécessaire car le solde a déjà été décrémenté).
-     *
-     * Phase 3 — Confirmation (si Phase 2 réussit) :
-     *   - Met à jour le payout à 'succes' avec l'identifiant opérateur retourné.
-     *
-     * @param  TondoCagnotte $cagnotte   Cagnotte source du reversement
-     * @param  TondoUser     $gerant     Gérant initiant le reversement (pour audit)
-     * @param  string        $numeroE164 Numéro bénéficiaire au format E.164
-     * @param  int           $montant    Montant à reverser (FCFA, doit être ≤ montant_collecte)
+     * @param  TondoCagnotte $cagnotte   Collecte débitée.
+     * @param  TondoUser     $gerant     Gérant à l'origine de l'opération (trace).
+     * @param  string        $numeroE164 Bénéficiaire. Ignoré pour un commerce :
+     *                                   c'est sa fiche qui porte le numéro
+     *                                   encaisseur.
+     * @param  int           $montant    FCFA.
+     * @param  object|null   $marchand   Fiche marchande pour un paiement
+     *                                   commerce (id, nom, numero_tel,
+     *                                   type_paynala), null pour un transfert.
      * @return array{trans_id: string, montant: int, numero: string}
      *
-     * @throws \RuntimeException Si le solde est insuffisant ou si Paynala échoue
+     * @throws \RuntimeException Message destiné à l'écran : verrou posé, solde
+     *                           insuffisant, refus de l'opérateur, issue inconnue.
      */
     public function initierReversement(
         TondoCagnotte $cagnotte,
         TondoUser $gerant,
         string $numeroE164,
         int $montant,
+        ?object $marchand = null,
     ): array {
-        // Convertir E.164 en format local Airtel (0XXXXXXXX) requis par l'API
-        $msisdnLocal    = str_starts_with($numeroE164, '+241')
-            ? '0' . substr($numeroE164, 4)   // supprime le préfixe +241, ajoute 0
-            : ltrim($numeroE164, '+');
-
-        $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
-        $payoutId       = (string) Str::uuid();
-        $transId        = Registre::nouvelleReference('payout_manuel');
-
-        // Clé d'idempotence = la référence de la transaction elle-même : le
-        // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la
-        // recette parle au même Paynala que la production.
-        $idempotencyKey = $transId;
-
-        // Rechercher le compte bénéficiaire pour renseigner user_id et type_client
-        $benefUser = DB::table('users')
-            ->where('numero', $numeroE164)
-            ->select(['id', 'type_client'])
-            ->first();
-
-        // Environnement de test : refuser AVANT de réserver. Plus bas, un échec
-        // de Paynala laisse le solde décrémenté pour vérification manuelle.
-        PaynalaPaymentService::assurerOperationsReellesAutorisees('transfert');
-
-        // ── Phase 1 — réserver sous row-lock ─────────────────────────────────
-        DB::transaction(function () use (
-            $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,
-            $reference, $numeroE164, $benefUser
-        ) {
-            // Verrouiller la ligne pour empêcher deux reversements simultanés
-            $solde = DB::table(project_table('cagnottes'))
-                ->where('id', $cagnotte->id)
-                ->lockForUpdate()
-                ->value('montant_collecte');
-
-            if ((int) $solde < $montant) {
-                throw new \RuntimeException(
-                    'Solde insuffisant. Disponible : '
-                    . number_format((int) $solde, 0, ',', ' ') . ' FCFA.'
-                );
-            }
-
-            // Insérer le payout avec statut 'initie' avant tout appel externe
-            DB::table(project_table('payout'))->insert([
-                'id'            => $payoutId,
-                'project_id'    => $cagnotte->project_id,
-                'cagnotte_id'   => $cagnotte->id,
-                'user_id'       => $benefUser?->id,
-                'trans_id'      => $transId,
-                'operateur_id'  => null,   // sera renseigné après confirmation Paynala
-                'numero_tel'    => $numeroE164,
-                'montant'       => $montant,
-                'statut'        => 'initie',
-                'request'       => json_encode([
-                    'idempotency_key'     => $idempotencyKey,
-                    'reference'           => $reference,
-                    'numero_beneficiaire' => $numeroE164,
-                    'montant'             => $montant,
-                    'canal'               => 'whatsapp',
-                ]),
-                'date_creation' => now(),
-                'created_at'    => now(),
-                'updated_at'    => now(),
-            ]);
-
-            // Décrémenter le solde de la cagnotte (montant réservé)
-            DB::table(project_table('cagnottes'))
-                ->where('id', $cagnotte->id)
-                ->update([
-                    'montant_collecte' => DB::raw('montant_collecte - ' . $montant),
-                    'updated_at'       => now(),
-                ]);
-        });
-
-        // ── Phase 2 — appel Paynala (hors transaction pour ne pas bloquer la DB) ──
-        $disburseType = $this->paynala->resolveDisburseType(
-            msisdnLocal: $msisdnLocal,
-            msisdnE164:  $numeroE164,
-            userId:      $benefUser?->id,
+        $resultat = $this->sortie->executer(
+            cagnotte:   $cagnotte,
+            montant:    $montant,
+            canal:      'whatsapp',
+            numeroE164: $numeroE164,
+            marchand:   $marchand,
+            // Qui a lancé l'opération, pour l'audit : le bot n'a pas de session
+            // authentifiée comme l'API, c'est la seule trace du gérant.
+            trace:      ['gerant_id' => $gerant->id],
         );
 
-        try {
-            $disburseData = $this->paynala->disburse(
-                idempotencyKey: $idempotencyKey,
-                amount:         $montant,
-                msisdn:         $msisdnLocal,   // format local requis par Airtel
-                reference:      $reference,
-                type:           $disburseType,
-            );
-        } catch (\RuntimeException $e) {
-            // Échec Paynala : marquer 'echec' en DB
-            // ATTENTION : le solde a déjà été décrémenté — intervention manuelle requise
-            DB::table(project_table('payout'))->where('id', $payoutId)->update([
-                'statut'     => 'echec',
-                'response'   => json_encode(['error' => $e->getMessage()]),
-                'updated_at' => now(),
-            ]);
-            Log::critical('[gerer/reversement] échec Paynala — INTERVENTION MANUELLE REQUISE', [
-                'payout_id' => $payoutId,
-                'trans_id'  => $transId,
-                'montant'   => $montant,
-                'beneficiaire' => $numeroE164,
-            ]);
-            throw $e;
+        if (! $resultat['ok']) {
+            throw new \RuntimeException($resultat['message'] ?? 'Transfert impossible.');
         }
 
-        // ── Phase 3 — confirmer le succès ─────────────────────────────────────
-        DB::table(project_table('payout'))->where('id', $payoutId)->update([
-            'statut'       => 'succes',
-            'operateur_id' => $disburseData['airtel_money_id'] ?? null,   // ID retourné par Airtel
-            'response'     => json_encode($disburseData),
-            'updated_at'   => now(),
-        ]);
-
         return [
-            'trans_id' => $transId,
-            'montant'  => $montant,
-            'numero'   => $numeroE164,
+            'trans_id' => $resultat['trans_id'],
+            'montant'  => $resultat['montant'],
+            'numero'   => $resultat['numero'],
         ];
     }
 }

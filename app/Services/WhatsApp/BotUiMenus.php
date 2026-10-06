@@ -34,10 +34,14 @@ class BotUiMenus
      * la LISTE des cagnottes (contenu variable) et l'ATTENTE de paiement
      * retournent null volontairement : elles restent en texte.
      *
-     * @param  string|null $etape  Étape courante de la session (lue APRÈS traiter()).
+     * @param  string|null $etape     Étape courante de la session (lue APRÈS traiter()).
+     * @param  array<string, mixed> $contexte  Données de session. Le bot y range
+     *        ce que le menu texte vient d'afficher, pour que la version
+     *        tappable propose exactement les mêmes options — ce fichier n'a
+     *        accès ni à la collecte ni aux verrous.
      * @return array{type:string,bouton?:string,texte?:string,boutons?:array<int,array{id:string,titre:string}>,sections?:array<int,array{titre:string,lignes:array<int,array{id:string,titre:string,desc?:string}>}>}|null
      */
-    public static function pour(?string $etape): ?array
+    public static function pour(?string $etape, array $contexte = []): ?array
     {
         return match ($etape) {
             // 'menu' en PAUSE : menu principal gardé en TEXTE le temps de trancher
@@ -52,7 +56,7 @@ class BotUiMenus
             'creer.tontine.jour_mois'    => self::jourDuMois(),
             'creer.recap'                => self::confirmationCreation(),
             'gerer.certification'        => self::certificationMajorite(),
-            'gerer.cagnotte'             => self::menuCagnotte(),
+            'gerer.cagnotte'             => self::menuCagnotte($contexte),
             'gerer.fermer.confirm'       => self::confirmationFermeture(),
             default                      => null,   // pas de version interactive → texte
         };
@@ -180,23 +184,45 @@ class BotUiMenus
     }
 
     /**
-     * Menu d'une cagnotte gérée : Historique (1), Reversement (2), Fermer (3),
-     * Retour à la liste (4). 4 options → liste. (Le nom de la cagnotte reste
-     * dans le corps, via le texte nettoyé du bot.)
+     * Menu d'une cagnotte gérée : Historique (1), Transférer (2), Payer (3),
+     * Fermer (4), Retour à la liste (5).
+     *
+     * **Les identifiants sont ceux du bot texte, et ils ne glissent pas.**
+     * « Payer » dépend de l'interrupteur du dashboard : quand le service est
+     * fermé la ligne disparaît, mais Fermer reste 4 et Retour reste 5.
+     * Renuméroter aurait fait pointer la liste tappable vers une autre action
+     * que celle annoncée par le texte — exactement le genre d'écart qui envoie
+     * de l'argent au mauvais endroit.
+     *
+     * L'état vient de la session (`menu_marchand_actif`), posé par le bot au
+     * moment où il a rendu le menu texte. Le relire ici depuis la base serait
+     * une seconde lecture, qui pourrait donner un autre résultat que celle du
+     * texte et désaligner les deux rendus du MÊME message.
+     *
+     * Le nom de la cagnotte reste dans le corps, via le texte nettoyé du bot.
+     *
+     * @param array<string, mixed> $contexte Données de session.
      */
-    private static function menuCagnotte(): array
+    private static function menuCagnotte(array $contexte = []): array
     {
+        $lignes = [
+            ['id' => '1', 'titre' => 'Historique', 'desc' => 'Qui a payé, combien'],
+            ['id' => '2', 'titre' => 'Transférer', 'desc' => 'Envoyer à une personne'],
+        ];
+
+        if ($contexte['menu_marchand_actif'] ?? false) {
+            $lignes[] = ['id' => '3', 'titre' => 'Payer', 'desc' => 'Régler un commerce'];
+        }
+
+        $lignes[] = ['id' => '4', 'titre' => 'Fermer la cagnotte'];
+        $lignes[] = ['id' => '5', 'titre' => '◀️ Retour à la liste'];
+
         return [
             'type'     => 'liste',
             'bouton'   => 'Actions',
             'sections' => [[
                 'titre'  => 'Cette cagnotte',
-                'lignes' => [
-                    ['id' => '1', 'titre' => 'Historique', 'desc' => 'Qui a payé, combien'],
-                    ['id' => '2', 'titre' => 'Transfert', 'desc' => 'Envoyer à un bénéficiaire'],
-                    ['id' => '3', 'titre' => 'Fermer la cagnotte'],
-                    ['id' => '4', 'titre' => '◀️ Retour à la liste'],
-                ],
+                'lignes' => $lignes,
             ]],
         ];
     }

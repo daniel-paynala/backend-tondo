@@ -393,7 +393,36 @@ class PaynalaPaymentService
                 ?? $response->json('message')
                 ?? $response->json('detail')
                 ?? ('Erreur Paynala disburse (HTTP ' . $response->status() . '): ' . $response->body());
-            throw new \RuntimeException($msg);
+
+            // ── Refus explicite, ou issue inconnue ? ─────────────────────────
+            //
+            // L'appelant doit pouvoir trancher, parce que la réponse à cette
+            // question décide s'il remet l'argent dans la collecte. Et le code
+            // HTTP seul ne suffit pas : cette API répond 200 avec
+            // `success:false` sur ses erreurs métier (voir `payment()`).
+            //
+            // On n'affirme le refus que dans deux cas :
+            //
+            //   - **2xx + success:false** : la passerelle a traité la demande
+            //     et répond non. C'est un refus métier, rien n'est parti.
+            //   - **4xx** : la demande a été rejetée avant de devenir une
+            //     transaction — msisdn invalide, jeton refusé, validation.
+            //     Hypothèse résiduelle assumée : un 4xx ne survient pas APRÈS
+            //     une action partielle côté opérateur.
+            //
+            // Tout le reste — 5xx, réponse illisible — reste une
+            // `RuntimeException` nue, qui vaut « je ne sais pas ». Un 502 de
+            // passerelle ne prouve pas qu'Airtel n'a rien fait.
+            //
+            // Les coupures réseau ne passent pas ici du tout : `Http::post()`
+            // lève une `ConnectionException` que cette méthode ne capture pas,
+            // et qui remonte telle quelle à l'appelant.
+            $refusExplicite = ($response->successful() && $response->json('success') === false)
+                || $response->clientError();
+
+            throw $refusExplicite
+                ? new DecaissementRefuse($msg)
+                : new \RuntimeException($msg);
         }
 
         return $response->json();

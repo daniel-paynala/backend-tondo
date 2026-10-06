@@ -1,0 +1,129 @@
+auth {
+  mode: bearer
+}
+
+auth:bearer {
+  token: {{airtel_token}}
+}
+
+script:pre-request {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Jeton OAuth automatique.
+  //
+  // L'API Paynala expire le jeton à 170 s. On le garde 160 s, exactement comme
+  // PaynalaPaymentService::getToken(). Toutes les requêtes héritent du Bearer
+  // {{airtel_token}} (auth: inherit).
+  //
+  // La requête du jeton elle-même doit sortir de ce script, sinon elle se
+  // rappellerait indéfiniment.
+  if (String(req.getUrl() || "").indexOf("oauth_token_v2") !== -1) {
+    return;
+  }
+
+  const manquantes = ["airtel_base_url", "airtel_client_id", "airtel_client_secret"]
+    .filter((cle) => !lire(cle, ""));
+
+  if (manquantes.length) {
+    throw new Error("Variables à renseigner dans l'environnement : " + manquantes.join(", "));
+  }
+
+  const expireLe = Number(bru.getVar("airtel_token_expire_ms") || 0);
+  if (bru.getVar("airtel_token") && Date.now() < expireLe) {
+    return;
+  }
+
+  // `bru.runRequest` existe à partir de Bruno 1.28. Sur une version plus ancienne,
+  // lancer « Jeton — client_credentials » à la main : il pose le même jeton.
+  if (typeof bru.runRequest !== "function") {
+    console.warn("[airtel] cette version de Bruno ne sait pas enchaîner les requêtes : " +
+      "jouer « 0 · Jeton » une fois, le jeton vaut 160 s.");
+    return;
+  }
+
+  await bru.runRequest("0-jeton/jeton-client-credentials.bru");
+}
+
+script:post-response {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Réponse brute du serveur — aucune interprétation.
+  //
+  // Bruno affiche déjà la réponse non modifiée dans son panneau ; cette trace sert
+  // au mode Runner et à `bru run` en ligne de commande, où seuls les logs sortent.
+  const tracer = String(lire("tracer_brut", "oui")).toLowerCase() === "oui";
+  const corpsRecu = res.getBody();
+  const texte = typeof corpsRecu === "string" ? corpsRecu : JSON.stringify(corpsRecu);
+
+  if (tracer) {
+    const entetes = {};
+    Object.entries(req.getHeaders() || {}).forEach(([cle, valeur]) => {
+      // Une trace finit souvent recopiée dans un ticket : les secrets n'y vont pas.
+      entetes[cle] = /authorization|operator-key/i.test(cle) ? "«masqué»" : valeur;
+    });
+
+    console.log("───────────────────────────────────────────────");
+    console.log(req.getMethod() + " " + req.getUrl());
+    console.log("en-têtes envoyés : " + JSON.stringify(entetes));
+    const corpsEnvoye = req.getBody();
+    if (corpsEnvoye) {
+      console.log("corps envoyé : " +
+        (typeof corpsEnvoye === "string" ? corpsEnvoye : JSON.stringify(corpsEnvoye)));
+    }
+    console.log("→ HTTP " + res.getStatus() + " " + (res.statusText || "") +
+      " en " + (res.responseTime || "?") + " ms");
+    console.log("→ réponse : " + texte);
+    console.log("───────────────────────────────────────────────");
+  }
+
+  // « merchant not active » ne vient jamais de la collection : c'est la réponse de
+  // Paynala quand le profil marchand derrière les identifiants n'est pas activé.
+  // Le backend la classe en « service indisponible » (troisième branche de
+  // checkKyc), ce qui explique un KYC « indisponible » côté app.
+  if (/merchant\s*not\s*active/i.test(texte)) {
+    console.warn("[airtel] « merchant not active » = réponse de Paynala, pas un contrôle local. " +
+      "Vérifier la paire client_id/client_secret utilisée (recette vs production) et, pour " +
+      "disburse, la clé x-operator-key. Rien à corriger dans la collection.");
+  }
+}
+
+docs {
+  Tout ce qui touche à Airtel Money chez Tonji, via l'agrégateur Paynala :
+  jeton OAuth, KYC du numéro, push de paiement, lecture du statut, décaissement
+  B2C/B2B et rejeu d'idempotence.
+
+  Automatisée : le jeton est obtenu et renouvelé tout seul (160 s, comme
+  PaynalaPaymentService), les références de transaction portent les préfixes du
+  registre (App\Support\Registre), et le grade rendu par le KYC décide du
+  routage B2C/B2B des décaissements.
+
+  Réponses brutes par défaut : mode_brut = oui laisse passer la réponse du
+  serveur sans aucune vérification, tracer_brut = oui l'écrit dans la console.
+  mode_brut = non rallume les vérifications. L'enchaînement des variables
+  fonctionne dans les deux cas.
+
+  ATTENTION : il n'existe aucun bac à sable Paynala. testapi.paynala.com ne
+  résout pas, seul api.paynala.com existe. Chaque requête touche de l'argent
+  réel — d'où le plafond de montant et l'autorisation explicite des
+  décaissements.
+
+  Guide : backend/docs/airtel-collection.md
+}

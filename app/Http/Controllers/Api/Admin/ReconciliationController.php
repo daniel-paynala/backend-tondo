@@ -60,14 +60,45 @@ class ReconciliationController extends Controller
             ->where('statut', 'succes')
             ->sum('montant');
 
-        // Payouts bloqués en statut 'initie' depuis plus de 15 minutes
-        // (fenêtre API Paynala) — suspects : Paynala a peut-être répondu mais
-        // le backend a planté entre la phase 2 et la phase 3.
+        // Payouts à régulariser : deux statuts, pas un.
+        //
+        //  - 'initie'   : réservé, et on ne sait pas si l'appel a eu lieu —
+        //                 le backend a pu planter entre la phase 2 et la 3.
+        //                 On attend 15 minutes (fenêtre API Paynala) avant de
+        //                 s'en inquiéter.
+        //  - 'en_cours' : l'appel a eu lieu et l'issue est INCONNUE (5xx,
+        //                 timeout). Le solde n'a volontairement pas été
+        //                 restauré — décision du 2026-10-06 : dans le doute
+        //                 l'argent ne revient pas, le cas se règle avec
+        //                 l'opérateur. Pas de délai de grâce : cette ligne
+        //                 attend un humain dès la seconde où elle existe.
+        //  - 'echec' SANS `solde_restaure` : de vrais fonds en l'air. Un échec
+        //                 portant ce marqueur est au contraire une situation
+        //                 CLOSE — l'argent est revenu dans la collecte — et
+        //                 n'a rien à faire ici.
+        //
+        // 'en_cours' manquait, et c'était une impasse : le code garait les cas
+        // douteux dans un statut que cet écran ne regardait pas. L'argent était
+        // immobilisé sans que personne ne puisse le voir.
         $payoutsInitieAnciens = DB::table(project_table('payout'))
             ->where('cagnotte_id', $cagnotte->id)
-            ->where('statut', 'initie')
-            ->where('date_creation', '<', now()->subMinutes(15))
-            ->get(['id', 'trans_id', 'montant', 'numero_tel', 'date_creation']);
+            ->where(function ($q) {
+                $q->where(function ($r) {
+                    $r->where('statut', 'initie')
+                      ->where('date_creation', '<', now()->subMinutes(15));
+                })
+                ->orWhere('statut', 'en_cours')
+                ->orWhere(function ($r) {
+                    $r->where('statut', 'echec')
+                      ->where(function ($t) {
+                          // Marqueur absent OU explicitement faux : le solde
+                          // n'est pas revenu, le montant est en l'air.
+                          $t->whereNull('response')
+                            ->orWhereRaw("response::text NOT LIKE '%\"solde_restaure\":true%'");
+                      });
+                });
+            })
+            ->get(['id', 'trans_id', 'montant', 'numero_tel', 'date_creation', 'statut']);
 
         // Payins initiés depuis plus de 10 minutes — le mobile a probablement
         // arrêté de poller. À investiguer manuellement si le montant est élevé.

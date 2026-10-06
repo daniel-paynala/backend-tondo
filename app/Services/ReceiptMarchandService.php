@@ -21,10 +21,12 @@ use Illuminate\Support\Facades\DB;
  * aurait donné deux générateurs de QR à maintenir pour aucun bénéfice.
  *
  * Les deux reçus n'ont d'ailleurs pas le même sens. Une cotisation est une
- * ENTRÉE, avec des frais à la charge du cotisant et un montant net inférieur
- * au montant débité. Un paiement marchand est une SORTIE : le montant est
- * celui qui part, il n'y a pas de frais côté payeur, et les rôles sont
- * inversés — c'est l'enseigne qui encaisse.
+ * ENTRÉE ; un paiement marchand est une SORTIE, et les rôles sont inversés —
+ * c'est l'enseigne qui encaisse.
+ *
+ * Le montant imprimé est celui de la transaction, tel qu'il est parti. Les
+ * frais sont traités par l'opérateur dans la transaction elle-même : Tonji n'en
+ * calcule aucun et sa réponse n'en détaille aucun.
  */
 class ReceiptMarchandService
 {
