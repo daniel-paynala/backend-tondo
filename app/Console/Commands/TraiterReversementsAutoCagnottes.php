@@ -80,10 +80,31 @@ class TraiterReversementsAutoCagnottes extends Command
         $traites = 0;
         $ignores = 0;
 
+        $sorties = app(\App\Services\SortiesAutorisees::class);
+
         foreach ($cagnottes as $cagnotte) {
             $mode = $this->determinerMode($cagnotte, $today);
 
             if (! $mode) {
+                $ignores++;
+                continue;
+            }
+
+            // Verrou des sorties — décidé par Daniel le 2026-10-06 : si le
+            // transfert est verrouillé, le reversement automatique l'est
+            // aussi. Un verrou que le cron de 18 h contournerait ne
+            // verrouillerait rien : il suffirait d'attendre la nuit.
+            //
+            // Contrepartie assumée : l'argent reste dans la collecte tant que
+            // le verrou tient. D'où un AVERTISSEMENT et non une ligne
+            // d'information — un solde immobilisé doit se voir dans les
+            // journaux, sinon personne ne saura pourquoi rien n'est parti.
+            if (! $sorties->pour($cagnotte->id, $cagnotte->project_id)['transfert']) {
+                $this->warn("  → [{$cagnotte->reference}] transfert verrouillé — reversement suspendu.");
+                Log::warning('[reversements-auto] collecte verrouillée, reversement suspendu', [
+                    'cagnotte'  => $cagnotte->reference,
+                    'montant'   => (int) $cagnotte->montant_collecte,
+                ]);
                 $ignores++;
                 continue;
             }

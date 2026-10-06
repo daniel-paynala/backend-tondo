@@ -83,6 +83,10 @@ class PlafondsController extends Controller
             // Taux sur un paiement marchand. Zéro = aucun prélèvement, et le
             // texte des conditions le dira de lui-même.
             'frais_marchand' => (float) ($config['frais_marchand'] ?? 0),
+            // Verrous globaux des sorties, par type de compte. Ils ferment un
+            // canal d'un coup, pour tous les comptes de ce type.
+            'sorties_bloquees' => $config['sorties_bloquees']
+                ?? TondoProjectConfig::VERROUS_OUVERTS,
         ]);
     }
 
@@ -105,6 +109,13 @@ class PlafondsController extends Controller
             // Borne à 25 %, comme la commission — au-delà, c'est une erreur de
             // saisie, pas une décision commerciale.
             'frais_marchand'                     => ['sometimes', 'numeric', 'min:0', 'max:0.25'],
+            // Verrous globaux — facultatifs eux aussi : un appel qui ne règle
+            // que les taux ne doit pas rouvrir un canal qu'on vient de fermer.
+            'sorties_bloquees'                          => ['sometimes', 'array'],
+            'sorties_bloquees.particulier.transfert'    => ['required_with:sorties_bloquees', 'boolean'],
+            'sorties_bloquees.particulier.marchand'     => ['required_with:sorties_bloquees', 'boolean'],
+            'sorties_bloquees.association.transfert'    => ['required_with:sorties_bloquees', 'boolean'],
+            'sorties_bloquees.association.marchand'     => ['required_with:sorties_bloquees', 'boolean'],
         ]);
 
         // Normalise en float et applique à la config projet.
@@ -127,6 +138,21 @@ class PlafondsController extends Controller
         ];
         if (array_key_exists('frais_marchand', $data)) {
             $champs['frais_marchand'] = (float) $data['frais_marchand'];
+        }
+        if (array_key_exists('sorties_bloquees', $data)) {
+            // Normalisé en booléens : un « false » arrivé en chaîne depuis un
+            // formulaire deviendrait vrai en base, et fermerait un canal que
+            // personne n'a demandé de fermer.
+            $champs['sorties_bloquees'] = json_encode([
+                'particulier' => [
+                    'transfert' => (bool) $data['sorties_bloquees']['particulier']['transfert'],
+                    'marchand'  => (bool) $data['sorties_bloquees']['particulier']['marchand'],
+                ],
+                'association' => [
+                    'transfert' => (bool) $data['sorties_bloquees']['association']['transfert'],
+                    'marchand'  => (bool) $data['sorties_bloquees']['association']['marchand'],
+                ],
+            ]);
         }
 
         $maj = TondoProjectConfig::where('project_id', Project::tondoId())->update($champs);

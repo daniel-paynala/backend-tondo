@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
+use App\Http\Controllers\Api\Admin\Concerns\GereRetraitAgents;
 use App\Http\Controllers\Controller;
 use App\Models\TondoCagnotte;
 use App\Models\TondoUser;
@@ -18,6 +19,9 @@ use Illuminate\Http\Request;
  */
 class CagnottesController extends Controller
 {
+    // Journalisation partagée avec les autres écrans d'administration.
+    use GereRetraitAgents;
+
     /**
      * GET /api/admin/cagnottes/moderation?statut=en_attente
      * File de modération (par défaut : les cagnottes en attente).
@@ -71,6 +75,69 @@ class CagnottesController extends Controller
     public function suspendre(Request $request, string $reference): JsonResponse
     {
         return $this->decision($request, $reference, 'suspendue');
+    }
+
+    /**
+     * PATCH /api/admin/cagnottes/{reference}/verrous — { transfert?, marchand? }
+     *
+     * Verrouille ou libère les sorties d'argent de CETTE collecte.
+     *
+     * Réservé aux super admins et journalisé : interdire à quelqu'un de
+     * disposer de son argent est une décision lourde, et il faut pouvoir dire
+     * plus tard qui l'a prise et quand.
+     *
+     * Les deux verrous sont indépendants et chacun facultatif : on peut fermer
+     * le paiement marchand en laissant le transfert ouvert, et un appel qui ne
+     * porte qu'un champ ne touche pas à l'autre.
+     */
+    public function verrous(Request $request, string $reference): JsonResponse
+    {
+        abort_unless(
+            $request->user()->role === 'super_admin',
+            403,
+            'Action réservée aux super admins.',
+        );
+
+        $data = $request->validate([
+            'transfert' => ['sometimes', 'boolean'],
+            'marchand'  => ['sometimes', 'boolean'],
+        ]);
+
+        $c = TondoCagnotte::where('reference', $reference)->first();
+        if (! $c) {
+            return response()->json(['message' => 'Collecte introuvable.'], 404);
+        }
+
+        $avant = [
+            'transfert' => (bool) $c->transfert_bloque,
+            'marchand'  => (bool) $c->paiement_marchand_bloque,
+        ];
+
+        if (array_key_exists('transfert', $data)) {
+            $c->transfert_bloque = (bool) $data['transfert'];
+        }
+        if (array_key_exists('marchand', $data)) {
+            $c->paiement_marchand_bloque = (bool) $data['marchand'];
+        }
+        $c->save();
+
+        $apres = [
+            'transfert' => (bool) $c->transfert_bloque,
+            'marchand'  => (bool) $c->paiement_marchand_bloque,
+        ];
+
+        if ($avant !== $apres) {
+            $this->journaliser($request, 'cagnotte_verrous', "Verrous de {$reference}", 'warning', [
+                'cagnotte' => $reference,
+                'avant'    => $avant,
+                'apres'    => $apres,
+            ]);
+        }
+
+        return response()->json([
+            'message'  => 'Verrous mis à jour.',
+            'verrous'  => $apres,
+        ]);
     }
 
     /**

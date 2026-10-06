@@ -135,6 +135,8 @@ Route::prefix('admin')->group(function () {
         Route::post('/cagnottes/{reference}/approuver',  [AdminCagnottesController::class, 'approuver']);
         Route::post('/cagnottes/{reference}/rejeter',    [AdminCagnottesController::class, 'rejeter']);
         Route::post('/cagnottes/{reference}/suspendre',  [AdminCagnottesController::class, 'suspendre']);
+        // Verrous des sorties d'argent d'une collecte — super_admin.
+        Route::patch('/cagnottes/{reference}/verrous',   [AdminCagnottesController::class, 'verrous']);
 
         // Modération des ASSOCIATIONS (validation des dossiers)
         Route::post('/organisations/{id}/approuver',            [AdminOrganisationsController::class, 'approuver']);
