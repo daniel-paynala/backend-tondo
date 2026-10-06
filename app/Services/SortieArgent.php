@@ -1,0 +1,400 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\TondoCagnotte;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use App\Support\Registre;
+
+/**
+ * Sortie d'argent d'une collecte — **le seul chemin**, pour tous les canaux.
+ *
+ * App, web et WhatsApp écrivaient chacun leur propre décaissement. Trois
+ * implémentations veut dire trois comportements : le bot ne consultait pas le
+ * verrou des sorties, ne restaurait pas le solde sur un refus de l'opérateur,
+ * n'alertait pas les administrateurs et ne savait pas payer un commerce. Rien
+ * de tout cela n'était un choix — c'était la dérive mécanique de trois copies.
+ *
+ * Ce service porte donc tout ce qui touche à l'argent et ne laisse aux appelants
+ * que ce qui leur est propre : la validation de leur formulaire et la mise en
+ * forme de leur réponse.
+ *
+ * ── Ordre des contrôles ──────────────────────────────────────────────────────
+ * Le verrou est consulté AVANT toute réservation et avant tout appel externe.
+ * C'est le seul contrôle qui compte : une interface peut masquer un bouton,
+ * elle ne protège rien. Un verrou posé pendant que le client remplissait son
+ * formulaire est donc respecté — il ne découvre le refus qu'à la validation,
+ * mais l'argent n'a pas bougé.
+ *
+ * ── Les trois issues d'un décaissement ───────────────────────────────────────
+ *   - **succès** : payout `succes`, solde définitivement amputé.
+ *   - **refus explicite** (l'opérateur a répondu non) : payout `echec` et solde
+ *     RESTAURÉ dans la même transaction. L'argent n'est pas parti, la collecte
+ *     le récupère.
+ *   - **issue inconnue** (timeout réseau) : on ne sait PAS si l'argent est
+ *     parti. Recréditer ouvrirait la porte à un second décaissement du même
+ *     montant : le solde reste amputé, le payout reste `en_cours` et attend une
+ *     régularisation. C'est volontairement le cas le plus désagréable des
+ *     trois — c'est aussi le seul où se tromper coûte deux fois le montant.
+ */
+class SortieArgent
+{
+    public function __construct(
+        private readonly PaynalaPaymentService $paynala,
+        private readonly PaiementMarchandNotifier $notifier,
+        private readonly SortiesAutorisees $verrou,
+    ) {}
+
+    /**
+     * Fait sortir [$montant] de [$cagnotte] vers une personne ou un commerce.
+     *
+     * @param  TondoCagnotte $cagnotte   Collecte débitée.
+     * @param  int           $montant    FCFA, strictement positif.
+     * @param  string        $canal      'app', 'web', 'whatsapp' — tracé dans
+     *                                   `payout.request.canal`. Surtout PAS
+     *                                   dans la colonne `payout.canal`, qui
+     *                                   désigne le rail du décaissement et
+     *                                   n'accepte que 'mobile_money' ou
+     *                                   'especes'.
+     * @param  string|null   $numeroE164 Bénéficiaire, quand ce n'est pas un
+     *                                   commerce. Ignoré si [$marchand] est
+     *                                   fourni : c'est sa fiche qui encaisse.
+     * @param  string|null   $beneficiaireUserId Compte Tonji du bénéficiaire,
+     *                                   quand il en a un.
+     * @param  object|null   $marchand   Fiche marchande (id, nom, numero_tel,
+     *                                   type_paynala) pour un paiement commerce.
+     * @param  bool          $cloturer   Clôture la collecte après un succès.
+     * @param  array<string, mixed> $trace Champs fusionnés dans `payout.request`.
+     *
+     * @return array{
+     *   ok: bool, code: string, message: ?string, montant: int,
+     *   payout_id: ?string, trans_id: ?string, numero: ?string
+     * }
+     *   `code` est stable et destiné aux appelants : 'succes', 'verrou',
+     *   'operations_bloquees', 'solde_insuffisant', 'reservation', 'refus',
+     *   'issue_inconnue'.
+     */
+    public function executer(
+        TondoCagnotte $cagnotte,
+        int $montant,
+        string $canal,
+        ?string $numeroE164 = null,
+        ?string $beneficiaireUserId = null,
+        ?object $marchand = null,
+        bool $cloturer = false,
+        array $trace = [],
+    ): array {
+        $echec = fn (string $code, string $message, array $extra = []): array => array_merge([
+            'ok' => false, 'code' => $code, 'message' => $message, 'montant' => $montant,
+            'payout_id' => null, 'trans_id' => null, 'numero' => $numeroE164,
+        ], $extra);
+
+        if ($montant <= 0) {
+            return $echec('solde_insuffisant', 'Montant invalide.');
+        }
+
+        // Un commerce encaisse sur le numéro de SA fiche, jamais sur un numéro
+        // saisi : c'est une donnée administrée, et c'est ce qui fait qu'un
+        // paiement marchand ne peut pas être détourné vers un tiers.
+        if ($marchand !== null) {
+            $numeroE164 = $marchand->numero_tel;
+            // Le bénéficiaire est un commerce, pas un compte Tonji : même si le
+            // numéro correspond à un utilisateur, la ligne ne lui appartient pas.
+            $beneficiaireUserId = null;
+        }
+
+        if (empty($numeroE164)) {
+            return $echec('solde_insuffisant', 'Aucun numéro bénéficiaire — transfert impossible.');
+        }
+
+        // ── 1. Verrou des sorties ────────────────────────────────────────────
+        $action = $marchand !== null ? 'marchand' : 'transfert';
+        if ($refus = $this->verrou->refus($cagnotte->id, $cagnotte->project_id, $action)) {
+            return $echec('verrou', $refus['message'], ['code_verrou' => $refus['code']]);
+        }
+
+        // ── 2. Environnement de test ─────────────────────────────────────────
+        // Refuser AVANT de réserver : plus bas, une issue inconnue laisse le
+        // solde amputé, il ne faut pas en arriver là pour une sortie désactivée.
+        if (PaynalaPaymentService::operationsReellesBloquees()) {
+            return $echec(
+                'operations_bloquees',
+                'Les transferts sont désactivés sur l\'environnement de test.',
+            );
+        }
+
+        // Numéro local 0XXXXXXXX attendu par l'API Airtel.
+        $msisdnLocal = str_starts_with($numeroE164, '+241')
+            ? '0' . substr($numeroE164, 4)
+            : ltrim($numeroE164, '+');
+
+        $reference = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
+        $payoutId  = (string) Str::uuid();
+
+        // Un paiement marchand se reconnaît à sa référence, comme les retraits
+        // en espèces ou le transfert automatique.
+        $transId = Registre::nouvelleReference($marchand ? 'payout_marchand' : 'payout_manuel');
+
+        // Clé d'idempotence = la référence de la transaction elle-même. Le
+        // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la
+        // recette parle au même Paynala que la production.
+        $idempotencyKey = $transId;
+
+        // ── 3. Réservation sous row-lock ─────────────────────────────────────
+        try {
+            DB::transaction(function () use (
+                $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,
+                $reference, $numeroE164, $beneficiaireUserId, $marchand, $canal, $trace
+            ) {
+                $solde = (int) DB::table(project_table('cagnottes'))
+                    ->where('id', $cagnotte->id)
+                    ->lockForUpdate()
+                    ->value('montant_collecte');
+
+                if ($solde < $montant) {
+                    throw new SoldeInsuffisant(
+                        'Solde insuffisant. Disponible : '
+                        . number_format($solde, 0, ',', ' ') . ' FCFA.'
+                    );
+                }
+
+                DB::table(project_table('payout'))->insert([
+                    'id'            => $payoutId,
+                    'project_id'    => $cagnotte->project_id,
+                    'cagnotte_id'   => $cagnotte->id,
+                    'user_id'       => $beneficiaireUserId,   // bénéficiaire, pas le gérant
+                    'trans_id'      => $transId,
+                    'operateur_id'  => null,
+                    'numero_tel'    => $numeroE164,
+                    'montant'       => $montant,
+                    'statut'        => 'initie',
+                    // ⚠️ La colonne `canal` n'est PAS le canal d'origine : elle
+                    // dit le RAIL du décaissement — 'mobile_money' ou
+                    // 'especes' — et une contrainte CHECK n'accepte que ces
+                    // deux valeurs. Y écrire « app » ou « whatsapp » ferait
+                    // échouer chaque transfert. On la laisse donc à son défaut
+                    // ('mobile_money') et le canal d'origine part dans
+                    // `request.canal`, où il était déjà.
+                    //
+                    // Les deux colonnes suivantes disent la même chose et une
+                    // contrainte l'exige : elles se posent ensemble.
+                    'type_beneficiaire' => $marchand ? 'marchand' : 'particulier',
+                    'marchand_id'       => $marchand?->id,
+                    'request'       => json_encode(array_filter(array_merge([
+                        'idempotency_key'     => $idempotencyKey,
+                        'reference'           => $reference,
+                        'cagnotte_reference'  => $cagnotte->reference,
+                        'numero_beneficiaire' => $numeroE164,
+                        'montant'             => $montant,
+                        'canal'               => $canal,
+                        'marchand'            => $marchand?->nom,
+                    ], $trace))),
+                    'date_creation' => now(),
+                    'created_at'    => now(),
+                    'updated_at'    => now(),
+                ]);
+
+                DB::table(project_table('cagnottes'))
+                    ->where('id', $cagnotte->id)
+                    ->update([
+                        'montant_collecte' => DB::raw('montant_collecte - ' . $montant),
+                        'updated_at'       => now(),
+                    ]);
+            });
+        } catch (SoldeInsuffisant $e) {
+            return $echec('solde_insuffisant', $e->getMessage());
+        } catch (\Throwable $e) {
+            Log::error('[sortie] échec de la réservation', [
+                'cagnotte' => $cagnotte->reference,
+                'canal'    => $canal,
+                'erreur'   => $e->getMessage(),
+            ]);
+
+            return $echec('reservation', 'Erreur lors de la réservation des fonds.');
+        }
+
+        // ── 4. Décaissement Paynala (hors transaction DB) ────────────────────
+        // Pour un marchand, le type vient de sa fiche : c'est une donnée
+        // administrée, plus fiable qu'une déduction à partir du KYC.
+        $disburseType = $marchand
+            ? PaynalaPaymentService::modeDisburse($marchand->type_paynala)
+            : $this->paynala->resolveDisburseType(
+                msisdnLocal: $msisdnLocal,
+                msisdnE164:  $numeroE164,
+                userId:      $beneficiaireUserId,
+            );
+
+        try {
+            $disburseData = $this->paynala->disburse(
+                idempotencyKey: $idempotencyKey,
+                amount:         $montant,
+                msisdn:         $msisdnLocal,
+                reference:      $reference,
+                type:           $disburseType,
+            );
+        } catch (ConnectionException $e) {
+            // ISSUE INCONNUE — la requête n'a pas abouti, mais elle a pu être
+            // reçue et traitée côté opérateur. Restaurer le solde ici ouvrirait
+            // la porte à un second décaissement du même montant.
+            DB::table(project_table('payout'))->where('id', $payoutId)->update([
+                'statut'     => 'en_cours',
+                'response'   => json_encode(['error' => $e->getMessage(), 'issue' => 'inconnue']),
+                'updated_at' => now(),
+            ]);
+
+            Log::critical('[sortie] Paynala injoignable — issue inconnue, régularisation requise', [
+                'cagnotte'        => $cagnotte->reference,
+                'canal'           => $canal,
+                'payout_id'       => $payoutId,
+                'trans_id'        => $transId,
+                'idempotency_key' => $idempotencyKey,
+                'montant'         => $montant,
+                'erreur'          => $e->getMessage(),
+            ]);
+
+            $this->alerterAdmins($cagnotte, $montant, $numeroE164, $transId, $canal, $e->getMessage(), false);
+
+            return [
+                'ok' => false, 'code' => 'issue_inconnue', 'montant' => $montant,
+                'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
+                'message' => 'L\'opérateur est injoignable et l\'issue du transfert est inconnue. '
+                    . 'Les administrateurs ont été alertés — ne relancez pas le transfert.',
+            ];
+        } catch (\RuntimeException $e) {
+            // REFUS EXPLICITE — l'opérateur a répondu non : l'argent n'est pas
+            // parti. La réservation est compensée dans la même transaction que
+            // le passage en `echec`, pour que le solde ne reste jamais amputé
+            // d'un montant qui n'a pas quitté la collecte.
+            DB::transaction(function () use ($payoutId, $cagnotte, $montant, $e) {
+                DB::table(project_table('payout'))->where('id', $payoutId)->update([
+                    'statut'     => 'echec',
+                    'response'   => json_encode(['error' => $e->getMessage(), 'solde_restaure' => true]),
+                    'updated_at' => now(),
+                ]);
+
+                DB::table(project_table('cagnottes'))
+                    ->where('id', $cagnotte->id)
+                    ->update([
+                        'montant_collecte' => DB::raw('montant_collecte + ' . $montant),
+                        'updated_at'       => now(),
+                    ]);
+            });
+
+            Log::warning('[sortie] décaissement refusé — solde restauré', [
+                'cagnotte'  => $cagnotte->reference,
+                'canal'     => $canal,
+                'payout_id' => $payoutId,
+                'trans_id'  => $transId,
+                'montant'   => $montant,
+                'erreur'    => $e->getMessage(),
+            ]);
+
+            $this->alerterAdmins($cagnotte, $montant, $numeroE164, $transId, $canal, $e->getMessage(), true);
+
+            return [
+                'ok' => false, 'code' => 'refus', 'montant' => $montant,
+                'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
+                'message' => 'Le transfert a été refusé par l\'opérateur. '
+                    . 'Le montant est revenu dans la collecte.',
+            ];
+        }
+
+        // ── 5. Confirmation ──────────────────────────────────────────────────
+        DB::transaction(function () use ($payoutId, $disburseData, $cagnotte, $cloturer) {
+            DB::table(project_table('payout'))->where('id', $payoutId)->update([
+                'statut'       => 'succes',
+                'operateur_id' => $disburseData['airtel_money_id'] ?? null,
+                'response'     => json_encode($disburseData),
+                'updated_at'   => now(),
+            ]);
+
+            if ($cloturer) {
+                DB::table(project_table('cagnottes'))
+                    ->where('id', $cagnotte->id)
+                    ->update(['statut' => 'cloturee', 'updated_at' => now()]);
+            }
+        });
+
+        // Paiement marchand : prévenir l'enseigne. La prise est atomique et
+        // sans effet si un autre chemin a déjà notifié — tout canal peut donc
+        // appeler ceci sans se coordonner. Un échec ici ne doit pas faire
+        // croire à un transfert raté : l'argent est parti, la réponse le dit.
+        if ($marchand !== null) {
+            try {
+                $this->notifier->signaler($payoutId);
+            } catch (\Throwable $e) {
+                Log::error('[sortie] notification marchand non déclenchée', [
+                    'payout_id' => $payoutId,
+                    'erreur'    => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return [
+            'ok' => true, 'code' => 'succes', 'message' => null, 'montant' => $montant,
+            'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
+        ];
+    }
+
+    /**
+     * Alerte les administrateurs abonnés aux « problèmes techniques ».
+     *
+     * Posée ici et non chez l'appelant : le bot WhatsApp se contentait d'un
+     * log, que personne ne lit. Un transfert bloqué doit sortir du serveur quel
+     * que soit le canal qui l'a lancé.
+     *
+     * @param bool $soldeRestaure Dit à l'administrateur s'il doit régulariser
+     *                            un solde ou seulement constater un refus.
+     */
+    private function alerterAdmins(
+        TondoCagnotte $cagnotte,
+        int $montant,
+        string $numeroE164,
+        string $transId,
+        string $canal,
+        string $erreur,
+        bool $soldeRestaure,
+    ): void {
+        try {
+            $ref        = e($cagnotte->reference);
+            $montantFmt = number_format($montant, 0, ',', ' ') . ' FCFA';
+            $benef      = e($numeroE164);
+            $err        = e($erreur);
+            $suite      = $soldeRestaure
+                ? '<p>Le montant a été <strong>remis dans la collecte</strong> : aucune régularisation de solde n\'est nécessaire, mais la cause du refus mérite un coup d\'œil.</p>'
+                : '<p><strong>Le solde n\'a pas été restauré</strong> et l\'issue du décaissement est inconnue. Vérifiez chez l\'opérateur <em>avant</em> toute nouvelle tentative.</p>';
+
+            $corps = <<<HTML
+            <p>Un <strong>transfert a échoué</strong> et n'a pas pu être envoyé au bénéficiaire.</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#FFF0EE;border:1px solid #F3C9C3;border-radius:12px;margin:8px 0;">
+              <tr><td style="padding:16px;font-size:14px;line-height:1.7;">
+                <strong>Collecte :</strong> {$ref}<br>
+                <strong>Montant :</strong> {$montantFmt}<br>
+                <strong>Bénéficiaire :</strong> {$benef}<br>
+                <strong>Transaction :</strong> {$transId}<br>
+                <strong>Canal :</strong> {$canal}<br>
+                <strong>Erreur :</strong> {$err}
+              </td></tr>
+            </table>
+            {$suite}
+            HTML;
+
+            app(\App\Services\Mail\AdminNotifier::class)->notifier(
+                $cagnotte->project_id,
+                'problemes',
+                'Échec de transfert — action requise',
+                'Échec de transfert',
+                $corps,
+                'Ouvrir la réconciliation',
+                rtrim((string) config('services.admin_dashboard_url'), '/') . '/reconciliation',
+            );
+        } catch (\Throwable $e) {
+            Log::error('[sortie] impossible d\'envoyer l\'alerte admin', [
+                'mail_error' => $e->getMessage(),
+            ]);
+        }
+    }
+}

@@ -1818,6 +1818,10 @@ class BotService
             'gerer.revers.num'       => $this->handleGererReversementNum($numero, $texte),
             'gerer.revers.mont'      => $this->handleGererReversementMontant($numero, $texte),
             'gerer.revers.otp'       => $this->handleGererReversementOtp($numero, $texte),
+            'gerer.payer.saisie'     => $this->handleGererPayerSaisie($numero, $texte),
+            'gerer.payer.choix'      => $this->handleGererPayerChoix($numero, $texte),
+            'gerer.payer.mont'       => $this->handleGererPayerMontant($numero, $texte),
+            'gerer.payer.otp'        => $this->handleGererPayerOtp($numero, $texte),
             'gerer.fermer.confirm'   => $this->handleGererFermerConfirm($numero, $texte),
             'gerer.fermer.num'       => $this->handleGererFermerNum($numero, $texte),
             'gerer.fermer.otp'       => $this->handleGererFermerOtp($numero, $texte),
@@ -2078,27 +2082,89 @@ class BotService
 
         $this->session->set($numero, 'gerer.cagnotte', $newData);
 
+        $options = $this->optionsMenuCagnotte($this->sortiesDe($cagnotte));
+
         return <<<TXT
         💼 *{$cagnotte->titre}* · N°{$ref}
         Solde disponible : *{$collecte} FCFA*
 
         Que souhaitez-vous faire ?
 
-        1️⃣  *Historique* des transactions
-        2️⃣  *Initier* un transfert
-        3️⃣  *Fermer* la cagnotte
-        4️⃣  Retour à la liste
+        {$options}
 
         #️⃣ _pour revenir en arrière_
         TXT;
     }
 
     /**
-     * Menu principal d'une cagnotte sélectionnée (historique, reversement, fermeture).
-     * Options : 1=historique, 2=reversement, 3=fermer, 4=retour liste.
+     * Options du menu d'une cagnotte, avec leurs numéros FIXES.
+     *
+     * Les numéros ne glissent pas quand une entrée disparaît : « Payer » est
+     * derrière un drapeau, et si son absence décalait « Fermer » de 4 à 3, les
+     * identifiants de la liste interactive ({@see BotUiMenus::menuCagnotte})
+     * ne correspondraient plus à ce que le texte annonce. Une option fermée
+     * est donc simplement absente de l'affichage, son numéro reste réservé.
+     *
+     * L'état du verrou est dit ICI plutôt qu'au clic : l'utilisateur voit
+     * tout de suite ce qui est suspendu, comme l'app grise ses boutons.
+     *
+     * @param  array{transfert: bool, marchand: bool} $sorties
+     */
+    private function optionsMenuCagnotte(array $sorties): string
+    {
+        $lignes = ['1️⃣  *Historique* des transactions'];
+
+        // Verrouillé : l'option reste listée, barrée d'une mention. La retirer
+        // laisserait croire à une panne, et le gérant appellerait le support.
+        $lignes[] = $sorties['transfert']
+            ? '2️⃣  *Transférer* à une personne'
+            : '2️⃣  ~Transférer~ _(momentanément suspendu)_';
+
+        if (config('tondo.paiement_marchand_actif')) {
+            $lignes[] = $sorties['marchand']
+                ? '3️⃣  *Payer* un commerce'
+                : '3️⃣  ~Payer un commerce~ _(momentanément suspendu)_';
+        }
+
+        $lignes[] = '4️⃣  *Fermer* la cagnotte';
+        $lignes[] = '5️⃣  Retour à la liste';
+
+        return implode("\n", $lignes);
+    }
+
+    /**
+     * Ce que cette cagnotte autorise comme sortie d'argent, à cet instant.
+     *
+     * Même service que l'app, le web et les crons : un seul endroit décide.
+     * La lecture est isolée — une config illisible ne doit pas empêcher
+     * d'ouvrir le menu, mais elle doit alors tout fermer : un verrou qu'on ne
+     * sait pas lire se traite comme un verrou posé.
+     *
+     * @return array{transfert: bool, marchand: bool}
+     */
+    private function sortiesDe(TondoCagnotte $cagnotte): array
+    {
+        try {
+            return app(\App\Services\SortiesAutorisees::class)
+                ->pour($cagnotte->id, $cagnotte->project_id);
+        } catch (\Throwable $e) {
+            Log::error('[bot] verrou des sorties illisible', [
+                'cagnotte' => $cagnotte->reference,
+                'erreur'   => $e->getMessage(),
+            ]);
+
+            return ['transfert' => false, 'marchand' => false];
+        }
+    }
+
+    /**
+     * Menu d'une cagnotte gérée : historique, transfert, paiement, fermeture.
+     *
+     * Les numéros suivent {@see optionsMenuCagnotte} : 1 historique,
+     * 2 transférer, 3 payer un commerce, 4 fermer, 5 retour.
      *
      * @param  string $numero  Numéro E.164
-     * @param  string $texte   Choix (1-4)
+     * @param  string $texte   Choix saisi
      * @return string
      */
     private function handleGererCagnotte(string $numero, string $texte): string
@@ -2110,11 +2176,11 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
         }
 
-        if ($texte === '4') {
+        if ($texte === '5') {
             return $this->retourListeCagnottes($numero, $data);
         }
 
-        if ($texte === '3') {
+        if ($texte === '4') {
             $solde = (int) $cagnotte->montant_collecte;
 
             if ($solde === 0) {
@@ -2162,15 +2228,14 @@ class BotService
 
             if ($paiements->isEmpty()) {
                 $this->session->set($numero, 'gerer.cagnotte', $data);
+                $options = $this->optionsMenuCagnotte($this->sortiesDe($cagnotte));
+
                 return <<<TXT
                 📊 *Historique — {$cagnotte->titre}*
 
                 Aucune transaction confirmée pour le moment.
 
-                1️⃣  *Historique* des transactions
-                2️⃣  *Initier* un transfert
-                3️⃣  *Fermer* la cagnotte
-                4️⃣  Retour à la liste
+                {$options}
                 TXT;
             }
 
@@ -2212,6 +2277,7 @@ class BotService
             TXT;
         }
 
+        // ── 2 · Transférer à une personne ────────────────────────────────────
         if ($texte === '2') {
             $collecte = (int) $cagnotte->montant_collecte;
 
@@ -2219,11 +2285,20 @@ class BotService
                 return $this->erreurEtMenu($numero, "❌ Solde nul — aucun transfert possible.");
             }
 
+            // Verrou relu AU MOMENT DU CLIC, comme l'app : il a pu tomber
+            // pendant que le menu était affiché. Sans ce second contrôle, le
+            // gérant saisirait un numéro et un montant pour s'entendre refuser
+            // à la validation.
+            if (! $this->sortiesDe($cagnotte)['transfert']) {
+                return "🔒 Le transfert est *momentanément suspendu* sur cette cagnotte.\n\n"
+                    . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            }
+
             $collecteFmt = number_format($collecte, 0, ',', ' ');
             $this->session->set($numero, 'gerer.revers.dest', $data);
 
             return <<<TXT
-            💸 *Initier un transfert*
+            💸 *Transférer*
             Solde disponible : *{$collecteFmt} FCFA*
 
             Vers quel numéro ?
@@ -2235,7 +2310,38 @@ class BotService
             TXT;
         }
 
-        return "⚠️ Tapez *1*, *2*, *3* ou *4*.\n\n#️⃣ _pour revenir en arrière_";
+        // ── 3 · Payer un commerce ────────────────────────────────────────────
+        if ($texte === '3' && config('tondo.paiement_marchand_actif')) {
+            $collecte = (int) $cagnotte->montant_collecte;
+
+            if ($collecte <= 0) {
+                return $this->erreurEtMenu($numero, "❌ Solde nul — aucun paiement possible.");
+            }
+
+            if (! $this->sortiesDe($cagnotte)['marchand']) {
+                return "🔒 Le paiement d'un commerce est *momentanément suspendu* sur cette cagnotte.\n\n"
+                    . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+            }
+
+            $collecteFmt = number_format($collecte, 0, ',', ' ');
+            $this->session->set($numero, 'gerer.payer.saisie', $data);
+
+            return <<<TXT
+            🏪 *Payer un commerce*
+            Solde disponible : *{$collecteFmt} FCFA*
+
+            Entrez le *code du commerce* (affiché à la caisse) ou son *numéro* :
+            _(ex : BARACHOIS01 ou 0XXXXXXXX)_
+
+            #️⃣ _pour revenir en arrière_
+            TXT;
+        }
+
+        $attendus = config('tondo.paiement_marchand_actif')
+            ? '*1*, *2*, *3*, *4* ou *5*'
+            : '*1*, *2*, *4* ou *5*';
+
+        return "⚠️ Tapez {$attendus}.\n\n#️⃣ _pour revenir en arrière_";
     }
 
     // ── 4 — Gérer > Tontine ───────────────────────────────────────────────────
@@ -2669,11 +2775,16 @@ class BotService
         $data = $this->session->data($numero);
 
         if ($texte === '1') {
+            // Son propre numéro : il a été vérifié à l'inscription et porte la
+            // session en cours. Le revérifier ici ne protégerait de rien et
+            // rajouterait un appel opérateur — l'app ne vérifie pas davantage
+            // le numéro d'un membre choisi dans la liste.
             $this->session->set($numero, 'gerer.revers.mont', array_merge($data, [
                 'revers_numero' => $data['numero_payeur'],
+                'revers_nom'    => null,
             ]));
             $masque = $this->maskPhoneNum($data['numero_payeur'] ?? '');
-            return $this->demanderMontantReversement($masque);
+            return $this->demanderMontantReversement($masque, null);
         }
 
         if ($texte === '2') {
@@ -2698,25 +2809,60 @@ class BotService
             return "⚠️ Numéro invalide. Format : *0XXXXXXXX*\n\n#️⃣ _pour revenir en arrière_";
         }
 
+        // ── Vérification du compte bénéficiaire ──────────────────────────────
+        //
+        // Même règle que l'app depuis la refonte du transfert : **tant que le
+        // compte n'est pas reconnu, on n'envoie pas**. Le bot acceptait
+        // n'importe quels neuf chiffres et laissait l'opérateur trancher —
+        // sauf que deux chiffres intervertis ne donnent pas une erreur, ils
+        // donnent un AUTRE numéro valide, et l'argent part chez quelqu'un
+        // d'autre sans retour possible.
+        //
+        // Un numéro refusé n'est pas réaffiché : on redemande le numéro
+        // complet. Laisser neuf chiffres faux à l'écran invite à les corriger
+        // un par un, alors que c'est le plus souvent le mauvais numéro qui a
+        // été dicté — c'est exactement ce que fait l'app, qui vide le champ.
+        $kyc = $this->verifierKycAirtel($numeroSaisi);
+
+        if ($kyc['bloque']) {
+            return $kyc['message'] . "\n\nEntrez un *autre numéro* Mobile Money :\n_(format : *0XXXXXXXX*)_\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        // Nom du titulaire : dernier filet avant l'envoi. Il est affiché à
+        // chaque écran qui suit, comme le bouton de l'app affiche
+        // « Transférer à Daniel » plutôt qu'un verbe seul.
+        $nomComplet = trim(($kyc['prenom'] ?? '') . ' ' . ($kyc['nom'] ?? ''));
+
         $data = $this->session->data($numero);
         $this->session->set($numero, 'gerer.revers.mont', array_merge($data, [
             'revers_numero' => $numeroSaisi,
+            'revers_nom'    => $nomComplet !== '' ? $nomComplet : null,
+            'revers_prenom' => trim($kyc['prenom'] ?? '') ?: null,
         ]));
 
         $masque = $this->maskPhoneNum($numeroSaisi);
-        return $this->demanderMontantReversement($masque);
+        return $this->demanderMontantReversement($masque, $nomComplet !== '' ? $nomComplet : null);
     }
 
     /**
-     * Retourne le message demandant le montant à reverser.
+     * Demande le montant du transfert, en nommant le bénéficiaire.
      *
-     * @param  string $masque  Numéro bénéficiaire masqué (pour affichage)
+     * Le nom du titulaire est affiché dès qu'il est connu : c'est le contrôle
+     * qui rattrape deux chiffres intervertis, lesquels ne produisent pas une
+     * erreur mais un autre numéro parfaitement valide.
+     *
+     * @param  string      $masque  Numéro bénéficiaire masqué (pour affichage)
+     * @param  string|null $nom     Titulaire du compte, quand l'opérateur l'a donné
      * @return string
      */
-    private function demanderMontantReversement(string $masque): string
+    private function demanderMontantReversement(string $masque, ?string $nom): string
     {
+        $beneficiaire = $nom !== null
+            ? "*{$nom}* · {$masque}"
+            : "*{$masque}*";
+
         return <<<TXT
-        Bénéficiaire : *{$masque}*
+        Bénéficiaire : {$beneficiaire}
 
         Quel *montant* souhaitez-vous transférer ? (en FCFA)
         _(min 100 — ne peut pas dépasser le solde disponible)_
@@ -2763,11 +2909,16 @@ class BotService
         $masque     = $this->maskPhoneNum($data['revers_numero'] ?? '');
         $montantFmt = number_format($montant, 0, ',', ' ');
         $gerantNum  = $this->maskPhoneNum($numeroGerant);
+        // Le destinataire est nommé en toutes lettres sur l'écran de
+        // confirmation, avec le numéro qui encaissera — c'est là que se
+        // prévient l'erreur de saisie, pas dans le libellé du menu d'entrée.
+        $nom          = $data['revers_nom'] ?? null;
+        $destinataire = $nom !== null ? "*{$nom}* ({$masque})" : "*{$masque}*";
 
         return <<<TXT
         🔐 *Confirmation requise*
 
-        Transfert de *{$montantFmt} FCFA* vers *{$masque}*
+        Transfert de *{$montantFmt} FCFA* à {$destinataire}
 
         Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
@@ -2825,13 +2976,287 @@ class BotService
         }
 
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
+        $nom        = $data['revers_nom'] ?? null;
+        $beneficiaire = $nom !== null ? "*{$nom}* · {$masque}" : "*{$masque}*";
 
         return <<<TXT
         ✅ *Transfert effectué !*
 
         Montant : *{$montantFmt} FCFA*
-        Bénéficiaire : *{$masque}*
+        Bénéficiaire : {$beneficiaire}
         Référence : `{$result['trans_id']}`
+
+        TXT . "\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+    }
+
+    // ── 4ter — Gérer > Payer un commerce ──────────────────────────────────────
+
+    /**
+     * Résout la saisie du client : code d'enseigne ou numéro du commerce.
+     *
+     * Même service que l'app et le web ({@see \App\Services\CarnetMarchands}) :
+     * un commerce payable depuis l'app doit l'être depuis WhatsApp, au même
+     * taux. On ne devine pas si le client a tapé un code ou un numéro — les
+     * deux pistes sont cherchées.
+     *
+     * Plusieurs fiches peuvent répondre : une chaîne encaisse sur un seul
+     * numéro pour plusieurs points de vente. Dans ce cas on NE choisit PAS à sa
+     * place — le nom confirmé doit être celui qu'il a désigné.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Code ou numéro saisi
+     * @return string
+     */
+    private function handleGererPayerSaisie(string $numero, string $texte): string
+    {
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $saisie = trim($texte);
+        if ($saisie === '') {
+            return "⚠️ Entrez le *code* du commerce ou son *numéro*.\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        $trouves = app(\App\Services\CarnetMarchands::class)
+            ->resoudre($cagnotte->project_id, $saisie);
+
+        if ($trouves->isEmpty()) {
+            return <<<TXT
+            ❌ Aucun commerce ne correspond à *{$saisie}*.
+
+            Vérifiez le code affiché à la caisse, ou entrez le *numéro* du commerce :
+
+            #️⃣ _pour revenir en arrière_
+            TXT;
+        }
+
+        if ($trouves->count() === 1) {
+            return $this->retenirMarchandPuisDemanderMontant($numero, $cagnotte, $data, $trouves->first());
+        }
+
+        // Plusieurs points de vente sur le même numéro : au client de désigner.
+        $this->session->set($numero, 'gerer.payer.choix', array_merge($data, [
+            'payer_candidats' => $trouves->all(),
+        ]));
+
+        $lignes = $trouves->values()
+            ->map(function (array $m, int $i) {
+                $ville = $m['ville'] ? " · {$m['ville']}" : '';
+                return ($i + 1) . "️⃣  *{$m['nom']}*{$ville}";
+            })
+            ->implode("\n");
+
+        return <<<TXT
+        🏪 *Plusieurs commerces* encaissent sur ce numéro.
+
+        Lequel payez-vous ?
+
+        {$lignes}
+
+        #️⃣ _pour revenir en arrière_
+        TXT;
+    }
+
+    /**
+     * Retient le point de vente désigné parmi ceux qui partagent un numéro.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Position choisie dans la liste
+     * @return string
+     */
+    private function handleGererPayerChoix(string $numero, string $texte): string
+    {
+        $data       = $this->session->data($numero);
+        $candidats  = $data['payer_candidats'] ?? [];
+        $cagnotte   = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+        $n          = count($candidats);
+        $choix      = (int) preg_replace('/\D/', '', $texte);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        if ($choix < 1 || $choix > $n) {
+            return "⚠️ Tapez un chiffre entre *1* et *{$n}*.\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        return $this->retenirMarchandPuisDemanderMontant(
+            $numero, $cagnotte, $data, $candidats[$choix - 1],
+        );
+    }
+
+    /**
+     * Enregistre l'enseigne retenue et demande le montant.
+     *
+     * Le taux de frais du commerce est AFFICHÉ — c'est le taux résolu, celui
+     * qui sera effectivement appliqué, négocié ou non. Rien de son calcul n'est
+     * exposé : seule la part annoncée l'est, comme sur les autres canaux.
+     *
+     * @param  array<string, mixed> $data      Données de session
+     * @param  array<string, mixed> $marchand  Fiche présentée par le carnet
+     * @return string
+     */
+    private function retenirMarchandPuisDemanderMontant(
+        string $numero,
+        TondoCagnotte $cagnotte,
+        array $data,
+        array $marchand,
+    ): string {
+        $this->session->set($numero, 'gerer.payer.mont', array_merge($data, [
+            'payer_marchand_id'  => $marchand['id'],
+            'payer_marchand_nom' => $marchand['nom'],
+            // Candidats effacés : la destination est tranchée, les garder
+            // laisserait un choix périmé réutilisable au retour en arrière.
+            'payer_candidats'    => null,
+        ]));
+
+        $collecteFmt = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+        $ville       = $marchand['ville'] ? " · {$marchand['ville']}" : '';
+        $frais       = (float) ($marchand['frais'] ?? 0);
+        $ligneFrais  = $frais > 0
+            ? "\n_Des frais de " . rtrim(rtrim(number_format($frais, 2, ',', ' '), '0'), ',') . " % seront appliqués au moment du paiement._"
+            : '';
+
+        return <<<TXT
+        🏪 Commerce : *{$marchand['nom']}*{$ville}
+        Solde disponible : *{$collecteFmt} FCFA*
+
+        Quel *montant* souhaitez-vous payer ? (en FCFA)
+        _(min 100 — ne peut pas dépasser le solde disponible)_{$ligneFrais}
+
+        #️⃣ _pour revenir en arrière_
+        TXT;
+    }
+
+    /**
+     * Collecte le montant du paiement puis envoie un OTP au gérant.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Montant saisi
+     * @return string
+     */
+    private function handleGererPayerMontant(string $numero, string $texte): string
+    {
+        $montant = (int) preg_replace('/\D/', '', $texte);
+        if ($montant < 100) {
+            return "⚠️ Montant minimum : *100 FCFA*.\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        $data     = $this->session->data($numero);
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+
+        if (! $cagnotte) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        if ((int) $cagnotte->montant_collecte < $montant) {
+            $dispo = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+            return "⚠️ Solde insuffisant. Disponible : *{$dispo} FCFA*.\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        $numeroGerant = $data['numero_payeur'] ?? '';
+        [$otp, $hint] = $this->envoyerOtp($numeroGerant);
+
+        $this->session->set($numero, 'gerer.payer.otp', array_merge($data, [
+            'payer_montant' => $montant,
+            'otp'           => $otp,
+        ]));
+
+        $montantFmt = number_format($montant, 0, ',', ' ');
+        $gerantNum  = $this->maskPhoneNum($numeroGerant);
+        $nom        = $data['payer_marchand_nom'] ?? 'ce commerce';
+
+        return <<<TXT
+        🔐 *Confirmation requise*
+
+        Paiement de *{$montantFmt} FCFA* à *{$nom}*
+
+        Un code a été envoyé au *{$gerantNum}*.{$hint}
+        Entrez le code à 6 chiffres pour valider :
+
+        #️⃣ _pour revenir en arrière_
+        TXT;
+    }
+
+    /**
+     * Valide l'OTP et exécute le paiement du commerce.
+     *
+     * La fiche est relue au moment de payer : une enseigne désactivée entre le
+     * choix et la validation ne doit pas encaisser. Le décaissement lui-même
+     * passe par le point de sortie unique, qui consulte le verrou, notifie
+     * l'enseigne et compense le solde si l'opérateur refuse.
+     *
+     * @param  string $numero  Numéro E.164
+     * @param  string $texte   Code OTP à 6 chiffres
+     * @return string
+     */
+    private function handleGererPayerOtp(string $numero, string $texte): string
+    {
+        $data = $this->session->data($numero);
+        $code = trim($texte);
+
+        if (! preg_match('/^\d{6}$/', $code)) {
+            return "⚠️ Entrez le code à *6 chiffres*.\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        if (! $this->verifierOtp($data['numero_payeur'] ?? '', $code, $data['otp'] ?? '')) {
+            return "❌ Code incorrect ou expiré.\nRessayez ou #️⃣ pour revenir en arrière.";
+        }
+
+        $cagnotte = TondoCagnotte::find($data['cagnotte_id'] ?? null);
+        $gerant   = TondoUser::find($data['user_id'] ?? null);
+
+        if (! $cagnotte || ! $gerant) {
+            return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
+        }
+
+        $fiche = app(\App\Services\CarnetMarchands::class)
+            ->fiche($cagnotte->project_id, (string) ($data['payer_marchand_id'] ?? ''));
+
+        if (! $fiche) {
+            return "❌ Ce commerce n'est plus disponible.\n\n"
+                . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+        }
+
+        $montant = (int) ($data['payer_montant'] ?? 0);
+
+        try {
+            $result = $this->gererCagnotteSvc->initierReversement(
+                cagnotte:   $cagnotte,
+                gerant:     $gerant,
+                numeroE164: $fiche->numero_tel,
+                montant:    $montant,
+                marchand:   $fiche,
+            );
+        } catch (\RuntimeException $e) {
+            return "❌ " . $e->getMessage() . "\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+        } catch (\Throwable $e) {
+            Log::error('handleGererPayerOtp: erreur inattendue', ['err' => $e->getMessage()]);
+            return "❌ Erreur technique. Contactez contact@tonji.ga.\n\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
+        }
+
+        $montantFmt = number_format($result['montant'], 0, ',', ' ');
+        $nom        = $fiche->nom;
+
+        // Reçu vérifiable par QR : la même boucle que l'app, sur la même URL.
+        // Un paiement en commerce se prouve à la caisse, pas sur un écran de
+        // conversation — le lien est donc donné tout de suite.
+        $recu = url('/recu-marchand/' . $result['trans_id']);
+
+        return <<<TXT
+        ✅ *Paiement effectué !*
+
+        Montant : *{$montantFmt} FCFA*
+        Commerce : *{$nom}*
+        Référence : `{$result['trans_id']}`
+
+        ————————————————
+        🧾 *Reçu à présenter*
+        {$recu}
 
         TXT . "\n" . $this->retourMenuCagnotte($numero, $cagnotte, $data);
     }
@@ -2940,22 +3365,36 @@ class BotService
             return $this->erreurEtMenu($numero, "❌ Session expirée. Recommencez.");
         }
 
+        // Fermer en versant ailleurs est un transfert comme un autre : il subit
+        // la même vérification de compte. C'était le second endroit où le bot
+        // acceptait neuf chiffres sans les confronter à l'opérateur — et celui
+        // qui envoie le solde ENTIER d'un coup.
+        $kyc = $this->verifierKycAirtel($numeroSaisi);
+
+        if ($kyc['bloque']) {
+            return $kyc['message'] . "\n\nEntrez un *autre numéro* Mobile Money :\n_(format : *0XXXXXXXX*)_\n\n#️⃣ _pour revenir en arrière_";
+        }
+
+        $nomComplet = trim(($kyc['prenom'] ?? '') . ' ' . ($kyc['nom'] ?? ''));
+
         $numeroGerant = $data['numero_payeur'] ?? '';
         [$otp, $hint] = $this->envoyerOtp($numeroGerant);
 
         $this->session->set($numero, 'gerer.fermer.otp', array_merge($data, [
             'fermer_numero' => $numeroSaisi,
+            'fermer_nom'    => $nomComplet !== '' ? $nomComplet : null,
             'otp'           => $otp,
         ]));
 
         $masque    = $this->maskPhoneNum($numeroSaisi);
         $gerantNum = $this->maskPhoneNum($numeroGerant);
         $soldeFmt  = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
+        $destinataire = $nomComplet !== '' ? "*{$nomComplet}* ({$masque})" : "*{$masque}*";
 
         return <<<TXT
         🔐 *Confirmation requise*
 
-        Fermeture + transfert de *{$soldeFmt} FCFA* vers *{$masque}*
+        Fermeture + transfert de *{$soldeFmt} FCFA* à {$destinataire}
 
         Un code a été envoyé au *{$gerantNum}*.{$hint}
         Entrez le code à 6 chiffres pour valider :
@@ -3022,11 +3461,15 @@ class BotService
 
         $masque     = $this->maskPhoneNum($numeroRetrait);
         $montantFmt = number_format($result['montant'], 0, ',', ' ');
+        // Nommer le destinataire jusque dans la confirmation : il n'y a plus
+        // d'écran après celui-ci pour rattraper une erreur de numéro.
+        $nom          = $data['fermer_nom'] ?? null;
+        $destinataire = $nom !== null ? "*{$nom}* ({$masque})" : "*{$masque}*";
 
         return <<<TXT
         ✅ *Cagnotte fermée !*
 
-        *{$montantFmt} FCFA* reversés vers *{$masque}*
+        *{$montantFmt} FCFA* transférés à {$destinataire}
         Référence : `{$result['trans_id']}`
 
         La cagnotte *{$cagnotte->titre}* a été clôturée.
@@ -3048,16 +3491,15 @@ class BotService
         $ref      = $cagnotte->reference;
         $this->session->set($numero, 'gerer.cagnotte', $data);
 
+        $options = $this->optionsMenuCagnotte($this->sortiesDe($cagnotte));
+
         return <<<TXT
         💼 *{$cagnotte->titre}* · N°{$ref}
         Solde disponible : *{$collecte} FCFA*
 
         Que souhaitez-vous faire ?
 
-        1️⃣  *Historique* des transactions
-        2️⃣  *Initier* un transfert
-        3️⃣  *Fermer* la cagnotte
-        4️⃣  Retour à la liste
+        {$options}
 
         #️⃣ _pour revenir en arrière_
         TXT;

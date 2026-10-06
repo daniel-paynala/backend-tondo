@@ -180,23 +180,38 @@ class BotUiMenus
     }
 
     /**
-     * Menu d'une cagnotte gérée : Historique (1), Reversement (2), Fermer (3),
-     * Retour à la liste (4). 4 options → liste. (Le nom de la cagnotte reste
-     * dans le corps, via le texte nettoyé du bot.)
+     * Menu d'une cagnotte gérée : Historique (1), Transférer (2), Payer (3),
+     * Fermer (4), Retour à la liste (5).
+     *
+     * **Les identifiants sont ceux du bot texte, et ils ne glissent pas.**
+     * « Payer » est derrière le drapeau `tondo.paiement_marchand_actif` : quand
+     * il est fermé la ligne disparaît, mais Fermer reste 4 et Retour reste 5.
+     * Renuméroter aurait fait pointer la liste tappable vers une autre action
+     * que celle annoncée par le texte — exactement le genre d'écart qui envoie
+     * de l'argent au mauvais endroit.
+     *
+     * Le nom de la cagnotte reste dans le corps, via le texte nettoyé du bot.
      */
     private static function menuCagnotte(): array
     {
+        $lignes = [
+            ['id' => '1', 'titre' => 'Historique', 'desc' => 'Qui a payé, combien'],
+            ['id' => '2', 'titre' => 'Transférer', 'desc' => 'Envoyer à une personne'],
+        ];
+
+        if (config('tondo.paiement_marchand_actif')) {
+            $lignes[] = ['id' => '3', 'titre' => 'Payer', 'desc' => 'Régler un commerce'];
+        }
+
+        $lignes[] = ['id' => '4', 'titre' => 'Fermer la cagnotte'];
+        $lignes[] = ['id' => '5', 'titre' => '◀️ Retour à la liste'];
+
         return [
             'type'     => 'liste',
             'bouton'   => 'Actions',
             'sections' => [[
                 'titre'  => 'Cette cagnotte',
-                'lignes' => [
-                    ['id' => '1', 'titre' => 'Historique', 'desc' => 'Qui a payé, combien'],
-                    ['id' => '2', 'titre' => 'Transfert', 'desc' => 'Envoyer à un bénéficiaire'],
-                    ['id' => '3', 'titre' => 'Fermer la cagnotte'],
-                    ['id' => '4', 'titre' => '◀️ Retour à la liste'],
-                ],
+                'lignes' => $lignes,
             ]],
         ];
     }
