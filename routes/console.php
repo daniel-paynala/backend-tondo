@@ -9,7 +9,6 @@ use App\Console\Commands\AgregerEvenementsCommand;
 use App\Console\Commands\TraiterReversementsAutoCagnottes;
 use App\Console\Commands\VerifierPaiementsEnAttenteCommand;
 use App\Console\Commands\ReconcilierPayinsCommand;
-use App\Console\Commands\ReglerFraisCommand;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -74,22 +73,6 @@ Schedule::command(VerifierPaiementsEnAttenteCommand::class)
  */
 Schedule::command(ReconcilierPayinsCommand::class)
     ->everyFiveMinutes()
-    ->withoutOverlapping();
-
-/*
- * Règlement des parts de frais accumulées — toutes les 15 min.
- *
- * La plupart des parts partent seules, juste après le reversement qui les a
- * créées. Cette tâche est là pour celles qui n'ont pas pu : 1 % de 3 000 FCFA
- * fait 30 FCFA, sous le plancher de l'opérateur, et ces parts s'accumulent
- * jusqu'à franchir le seuil.
- *
- * `withoutOverlapping` double la protection déjà offerte par la prise atomique
- * des lignes dues : deux passages simultanés ne peuvent pas régler deux fois
- * les mêmes parts, mais autant ne pas les lancer ensemble.
- */
-Schedule::command(ReglerFraisCommand::class)
-    ->everyFifteenMinutes()
     ->withoutOverlapping();
 
 /*

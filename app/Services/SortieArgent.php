@@ -22,16 +22,19 @@ use App\Support\Registre;
  * que ce qui leur est propre : la validation de leur formulaire et la mise en
  * forme de leur réponse.
  *
- * ── Ordre des opérations ─────────────────────────────────────────────────────
- *   1. verrou · 2. environnement · 3. répartition · 4. réservation du solde
- *   5. **commissions** · 6. décaissement du net au bénéficiaire
+ * ── Un seul décaissement ─────────────────────────────────────────────────────
  *
- * Les commissions partent AVANT le bénéficiaire : Paynala n'accepte qu'un
- * `msisdn` par appel, il faut enchaîner, et Daniel a voulu les petites parts
- * d'abord. Prix de cet ordre : un refus du décaissement principal survient
- * alors que des commissions sont déjà parties, et elles ne se rattrapent pas.
- * D'où la **restauration partielle** plus bas — on ne rend que ce qui n'a pas
- * quitté la caisse.
+ * Le montant demandé part tel quel : **c'est Paynala qui prélève ses frais**,
+ * d'après le type B2B/B2C transmis. Aucun calcul de notre côté, aucun
+ * décaissement supplémentaire. Les taux de la configuration servent à
+ * ANNONCER le prélèvement au client et à le contractualiser — ils ne pilotent
+ * aucun appel.
+ *
+ * Le bénéficiaire reçoit donc moins que le montant envoyé, et nous ne savons
+ * pas combien : la réponse de l'opérateur ne porte ni le net ni les frais.
+ *
+ * ── Ordre des opérations ─────────────────────────────────────────────────────
+ *   1. verrou · 2. environnement · 3. réservation du solde · 4. décaissement
  *
  * Le verrou est consulté AVANT toute réservation et avant tout appel externe.
  * C'est le seul contrôle qui compte : une interface peut masquer un bouton,
@@ -65,8 +68,6 @@ class SortieArgent
         private readonly PaynalaPaymentService $paynala,
         private readonly PaiementMarchandNotifier $notifier,
         private readonly SortiesAutorisees $verrou,
-        private readonly RepartitionFrais $repartition,
-        private readonly ReglementFrais $reglement,
     ) {}
 
     /**
@@ -164,43 +165,7 @@ class SortieArgent
         // recette parle au même Paynala que la production.
         $idempotencyKey = $transId;
 
-        // ── 3. Répartition des frais ─────────────────────────────────────────
-        //
-        // Calculée AVANT la réservation, parce qu'elle décide du montant
-        // réellement envoyé au bénéficiaire. La collecte est débitée de ce que
-        // le client a saisi ; le bénéficiaire reçoit ce qui reste une fois les
-        // parts retenues.
-        //
-        // Un taux négocié avec le marchand prime sur la somme des lignes : les
-        // parts sont alors mises à l'échelle, les mêmes comptes vivant d'un
-        // prélèvement plus faible. Sans fiche marchande, pas de taux imposé.
-        $tauxImpose = ($marchand !== null && $marchand->frais_taux !== null)
-            ? (float) $marchand->frais_taux
-            : null;
-
-        try {
-            $split = $this->repartition->pour(
-                $action === 'marchand' ? 'marchand' : 'transfert',
-                $cagnotte->project_id,
-                $montant,
-                $tauxImpose,
-            );
-        } catch (\Throwable $e) {
-            // Une répartition incohérente ne doit pas réserver de fonds : on
-            // refuse avant d'avoir touché au solde.
-            Log::critical('[sortie] répartition des frais invalide — sortie refusée', [
-                'cagnotte' => $cagnotte->reference,
-                'montant'  => $montant,
-                'erreur'   => $e->getMessage(),
-            ]);
-
-            return $echec('repartition', 'Configuration des frais invalide — transfert impossible. '
-                . 'Les administrateurs ont été alertés.');
-        }
-
-        $montantEnvoye = $split['net'];
-
-        // ── 4. Réservation sous row-lock ─────────────────────────────────────
+        // ── 3. Réservation sous row-lock ─────────────────────────────────────
         try {
             DB::transaction(function () use (
                 $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,
@@ -240,18 +205,18 @@ class SortieArgent
                     // contrainte l'exige : elles se posent ensemble.
                     'type_beneficiaire' => $marchand ? 'marchand' : 'particulier',
                     'marchand_id'       => $marchand?->id,
-                    // `montant` reste le montant DÉBITÉ de la collecte, pour
-                    // que la réconciliation retombe juste : solde attendu =
-                    // payins − payouts. Ce qui est réellement parti au
-                    // bénéficiaire est tracé à côté, avec les parts retenues.
+                    // `montant` est le montant demandé, débité de la collecte
+                    // et envoyé tel quel à l'opérateur. C'est Paynala qui
+                    // prélève ses frais sur cet envoi, selon le type B2B/B2C :
+                    // nous ne calculons rien, et nous ne connaissons donc pas
+                    // le net reçu par le bénéficiaire — leur réponse ne le dit
+                    // pas non plus.
                     'request'       => json_encode(array_filter(array_merge([
                         'idempotency_key'     => $idempotencyKey,
                         'reference'           => $reference,
                         'cagnotte_reference'  => $cagnotte->reference,
                         'numero_beneficiaire' => $numeroE164,
                         'montant'             => $montant,
-                        'montant_net'         => $montantEnvoye,
-                        'frais_total'         => $split['frais_total'],
                         'canal'               => $canal,
                         'marchand'            => $marchand?->nom,
                     ], $trace))),
@@ -279,28 +244,7 @@ class SortieArgent
             return $echec('reservation', 'Erreur lors de la réservation des fonds.');
         }
 
-        // ── 5. Commissions d'abord ───────────────────────────────────────────
-        //
-        // Paynala n'accepte qu'un `msisdn` par appel : il faut enchaîner. Ordre
-        // voulu par Daniel — de la plus petite part à la plus grande, donc les
-        // commissions avant le bénéficiaire.
-        //
-        // `fraisSortis` est ce qui a réellement quitté la caisse. Si le
-        // décaissement principal échoue plus bas, c'est exactement ce qu'il ne
-        // faudra PAS restaurer : recréditer la collecte de commissions déjà
-        // décaissées les ferait dépenser une seconde fois.
-        $fraisSortis = 0;
-
-        if ($split['parts'] !== []) {
-            $fraisSortis = $this->reglement->enregistrerEtRegler(
-                $split['parts'],
-                $cagnotte->project_id,
-                $payoutId,
-                $cagnotte->id,
-            )['sorti'];
-        }
-
-        // ── 6. Décaissement Paynala (hors transaction DB) ────────────────────
+        // ── 4. Décaissement Paynala (hors transaction DB) ────────────────────
         // Pour un marchand, le type vient de sa fiche : c'est une donnée
         // administrée, plus fiable qu'une déduction à partir du KYC.
         $disburseType = $marchand
@@ -314,9 +258,10 @@ class SortieArgent
         try {
             $disburseData = $this->paynala->disburse(
                 idempotencyKey: $idempotencyKey,
-                // Le NET : les parts de frais sont retenues sur le montant et
-                // partent vers leurs propres comptes, pas vers le bénéficiaire.
-                amount:         $montantEnvoye,
+                // Le montant demandé, tel quel. Paynala prélève ses frais sur
+                // cet envoi d'après le type B2B/B2C — aucun calcul de notre
+                // côté, et surtout aucun décaissement supplémentaire.
+                amount:         $montant,
                 msisdn:         $msisdnLocal,
                 reference:      $reference,
                 type:           $disburseType,
@@ -331,71 +276,37 @@ class SortieArgent
             // exception qui autorise à recréditer, elle doit donc être
             // reconnue en premier.
             //
-            // ⚠️ RESTAURATION PARTIELLE. Les commissions sont parties AVANT ce
-            // décaissement et ne se rattrapent pas — l'opérateur ne rembourse
-            // pas. On ne rend donc que ce qui n'a pas quitté la caisse.
-            // Restaurer la totalité recréditerait la collecte de commissions
-            // déjà décaissées, et la sortie suivante les dépenserait une
-            // seconde fois. C'est le prix de l'ordre « commissions d'abord ».
-            $aRestaurer = $montant - $fraisSortis;
-
-            DB::transaction(function () use ($payoutId, $cagnotte, $montant, $fraisSortis, $aRestaurer, $e) {
+            DB::transaction(function () use ($payoutId, $cagnotte, $montant, $e) {
                 DB::table(project_table('payout'))->where('id', $payoutId)->update([
                     'statut'     => 'echec',
-                    'response'   => json_encode([
-                        'error'          => $e->getMessage(),
-                        'solde_restaure' => $aRestaurer > 0,
-                        'montant_debite' => $montant,
-                        'frais_sortis'   => $fraisSortis,
-                        'montant_rendu'  => $aRestaurer,
-                    ]),
+                    'response'   => json_encode(['error' => $e->getMessage(), 'solde_restaure' => true]),
                     'updated_at' => now(),
                 ]);
 
-                if ($aRestaurer > 0) {
-                    DB::table(project_table('cagnottes'))
-                        ->where('id', $cagnotte->id)
-                        ->update([
-                            'montant_collecte' => DB::raw('montant_collecte + ' . $aRestaurer),
-                            'updated_at'       => now(),
-                        ]);
-                }
+                DB::table(project_table('cagnottes'))
+                    ->where('id', $cagnotte->id)
+                    ->update([
+                        'montant_collecte' => DB::raw('montant_collecte + ' . $montant),
+                        'updated_at'       => now(),
+                    ]);
             });
 
-            // CRITICAL dès qu'une commission est partie : le client a perdu de
-            // l'argent sur une opération qui a échoué, et quelqu'un doit le
-            // savoir sans attendre la réconciliation.
-            Log::log(
-                $fraisSortis > 0 ? 'critical' : 'warning',
-                '[sortie] décaissement refusé — solde restauré' . ($fraisSortis > 0 ? ' PARTIELLEMENT' : ''),
-                [
-                    'cagnotte'      => $cagnotte->reference,
-                    'canal'         => $canal,
-                    'payout_id'     => $payoutId,
-                    'trans_id'      => $transId,
-                    'montant'       => $montant,
-                    'frais_sortis'  => $fraisSortis,
-                    'montant_rendu' => $aRestaurer,
-                    'erreur'        => $e->getMessage(),
-                ],
-            );
+            Log::warning('[sortie] décaissement refusé — solde restauré', [
+                'cagnotte'  => $cagnotte->reference,
+                'canal'     => $canal,
+                'payout_id' => $payoutId,
+                'trans_id'  => $transId,
+                'montant'   => $montant,
+                'erreur'    => $e->getMessage(),
+            ]);
 
             $this->alerterAdmins($cagnotte, $montant, $numeroE164, $transId, $canal, $e->getMessage(), true);
 
             return [
                 'ok' => false, 'code' => 'refus', 'montant' => $montant,
                 'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
-                // Le message dit la vérité, y compris quand elle est
-                // désagréable : promettre un retour intégral alors que des
-                // frais sont partis ferait constater l'écart au solde suivant,
-                // sans explication.
-                'message' => $fraisSortis > 0
-                    ? 'Le transfert a été refusé par l\'opérateur. '
-                        . number_format($aRestaurer, 0, ',', ' ') . ' FCFA sont revenus dans la collecte ; '
-                        . number_format($fraisSortis, 0, ',', ' ') . ' FCFA de frais avaient déjà été prélevés. '
-                        . 'Les administrateurs ont été alertés.'
-                    : 'Le transfert a été refusé par l\'opérateur. '
-                        . 'Le montant est revenu dans la collecte.',
+                'message' => 'Le transfert a été refusé par l\'opérateur. '
+                    . 'Le montant est revenu dans la collecte.',
             ];
         } catch (ConnectionException | \RuntimeException $e) {
             // ISSUE INCONNUE — tout ce qui n'est pas un refus affirmé : coupure
@@ -467,13 +378,7 @@ class SortieArgent
         }
 
         return [
-            'ok' => true, 'code' => 'succes', 'message' => null,
-            // `montant` = débité de la collecte ; `montant_net` = reçu par le
-            // bénéficiaire. Les appelants qui annoncent un montant à l'écran
-            // doivent dire le net, sinon ils promettent ce qui n'arrive pas.
-            'montant' => $montant,
-            'montant_net' => $montantEnvoye,
-            'frais_total' => $split['frais_total'],
+            'ok' => true, 'code' => 'succes', 'message' => null, 'montant' => $montant,
             'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
         ];
     }

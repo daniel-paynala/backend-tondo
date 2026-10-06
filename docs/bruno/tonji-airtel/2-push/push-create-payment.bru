@@ -1,0 +1,142 @@
+meta {
+  name: Push — create_payment_v2
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{airtel_base_url}}/create_payment_v2
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "request_id": "{{request_id}}",
+    "amount": {{montant_push}},
+    "phone": "{{airtel_msisdn}}",
+    "first_name": "{{kyc_prenom}}",
+    "last_name": "{{kyc_nom}}"
+  }
+}
+
+script:pre-request {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Suffixe aléatoire de 9 caractères alphanumériques majuscules, comme
+  // Str::random(9) côté backend. Pas de tiret : l'API les refuse.
+  const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let suffixe = "";
+  for (let i = 0; i < 9; i++) {
+    suffixe += ALPHABET.charAt(Math.floor(Math.random() * ALPHABET.length));
+  }
+
+  // Référence de transaction, générée comme le backend : préfixe du registre
+  // (Registre::PREFIXES['payin']) + 9 caractères. C'est ce texte que le cotisant
+  // voit sur son relevé Airtel.
+  const requestId = lire("prefixe_payin", "TONJIPAYIN") + suffixe;
+  bru.setVar("request_id", requestId);
+
+  // Remise à zéro du compteur utilisé par la requête d'attente.
+  bru.setVar("statut_essais", "0");
+  bru.setVar("statut_final", "");
+
+  // Garde-fou montant. Il n'existe aucun bac à sable Paynala : ce push débite un
+  // vrai compte Airtel Money.
+  const montant = Number(lire("montant_push", 0));
+  const plafond = Number(lire("plafond_montant_test", 500));
+
+  if (!(montant > 0)) {
+    throw new Error("montant_push doit être un entier > 0");
+  }
+
+  if (montant > plafond) {
+    throw new Error("Push de " + montant + " FCFA refusé : plafond de test = " + plafond +
+      " FCFA (variable plafond_montant_test). Argent réel, pas de bac à sable.");
+  }
+
+  console.log("[airtel] push " + montant + " FCFA vers " + lire("airtel_msisdn", "?") +
+    " — request_id " + requestId);
+}
+
+script:post-response {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  const donnees = (res.getBody() || {}).data || {};
+
+  if (donnees.paymentId) {
+    bru.setVar("payment_id", donnees.paymentId);
+  }
+
+  console.log("[airtel] statut initial " + (donnees.status || "?") +
+    " | le client doit maintenant valider sur son téléphone");
+}
+
+tests {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Mode brut (défaut) : la réponse passe telle quelle, aucune vérification n'est
+  // jouée. Mettre mode_brut = non pour les rallumer. L'enchaînement des variables,
+  // lui, se fait dans script:post-response et reste actif dans les deux cas.
+  const brut = String(lire("mode_brut", "oui")).toLowerCase() === "oui";
+  const verifier = brut
+    ? function () {}
+    : function (nom, fonction) { return test(nom, fonction); };
+
+  const corps = res.getBody() || {};
+  const donnees = corps.data || {};
+
+  verifier("HTTP 2xx", function () {
+    expect(res.getStatus()).to.be.within(200, 299);
+  });
+
+  // L'API peut répondre 200 avec success:false sur une erreur métier : le backend
+  // vérifie les deux, la collection aussi.
+  verifier("success = true", function () {
+    expect(corps.success, JSON.stringify(corps)).to.equal(true);
+  });
+
+  verifier("un identifiant de paiement est retourné", function () {
+    expect(donnees.paymentId).to.not.be.undefined;
+  });
+
+  verifier("le request_id renvoyé est bien celui envoyé", function () {
+    const envoye = bru.getVar("request_id");
+    expect(donnees.requestId || envoye).to.equal(envoye);
+  });
+}
+
+docs {
+  Pousse la demande de paiement sur le téléphone du cotisant, qui valide par son code Airtel Money. Montant brut en FCFA, frais inclus (à la charge du cotisant). Nom et prénom pré-remplis depuis le KYC.
+}

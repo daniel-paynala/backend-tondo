@@ -1,0 +1,118 @@
+meta {
+  name: KYC — numéro du scénario
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{airtel_base_url}}/kyc
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "msisdn": "{{airtel_msisdn}}"
+  }
+}
+
+script:post-response {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Le grade Airtel décide de tout en aval : type de compte Tonji (particulier /
+  // association) ET routage du décaissement (B2C / B2B). Mêmes listes que
+  // PaynalaPaymentService.
+  const GRADES_PARTICULIER = ["SUBS", "TEMP"];
+  const GRADES_ASSOCIATION = ["MERCHVIP", "HMERA"];
+
+  const corps = res.getBody() || {};
+
+  if (corps.success === true && corps.status === "FOUND") {
+    const donnees = corps.data || {};
+    const grade = donnees.grade || "";
+    const typeClient = GRADES_PARTICULIER.indexOf(grade) !== -1 ? "particulier" : "entreprise";
+    const typeCompte = GRADES_PARTICULIER.indexOf(grade) !== -1
+      ? "particulier"
+      : (GRADES_ASSOCIATION.indexOf(grade) !== -1 ? "association" : "");
+
+    // Alimente les requêtes suivantes : le push part avec le nom du titulaire et
+    // le décaissement en B2C ou B2B, comme le fait resolveDisburseType().
+    bru.setVar("kyc_grade", grade);
+    bru.setVar("kyc_prenom", donnees.first_name || "");
+    bru.setVar("kyc_nom", donnees.last_name || "");
+    bru.setVar("type_client", typeClient);
+    bru.setVar("type_compte", typeCompte);
+    bru.setVar("type_decaissement", typeClient === "entreprise" ? "B2B" : "B2C");
+
+    console.log("[airtel] compte trouvé : " + (donnees.first_name || "?") + " " +
+      (donnees.last_name || "?") + " | grade " + grade + " | type_client " + typeClient +
+      " | décaissement " + (typeClient === "entreprise" ? "B2B" : "B2C"));
+  } else if (corps.success === false && corps.status === "FAILED") {
+    bru.setVar("kyc_grade", "");
+    bru.setVar("type_client", "");
+    console.log("[airtel] aucun compte Airtel Money pour ce numéro");
+  }
+}
+
+tests {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Mode brut (défaut) : la réponse passe telle quelle, aucune vérification n'est
+  // jouée. Mettre mode_brut = non pour les rallumer. L'enchaînement des variables,
+  // lui, se fait dans script:post-response et reste actif dans les deux cas.
+  const brut = String(lire("mode_brut", "oui")).toLowerCase() === "oui";
+  const verifier = brut
+    ? function () {}
+    : function (nom, fonction) { return test(nom, fonction); };
+
+  const GRADES_CONNUS = ["SUBS", "TEMP", "MERCHVIP", "HMERA"];
+  const corps = res.getBody() || {};
+
+  verifier("HTTP 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  if (corps.success === true && corps.status === "FOUND") {
+    verifier("grade reconnu par le backend (" + ((corps.data || {}).grade || "") + ")", function () {
+      // Un grade hors des deux listes doit faire bloquer une inscription :
+      // typeCompteDepuisGrade() rend null et l'appelant refuse.
+      expect(GRADES_CONNUS).to.include((corps.data || {}).grade);
+    });
+  } else if (corps.success === false && corps.status === "FAILED") {
+    verifier("numéro sans compte Airtel Money (FAILED) — inscription à bloquer", function () {
+      expect(corps.status).to.equal("FAILED");
+    });
+  } else {
+    // Ni FOUND ni FAILED : ce que le backend traite comme « service
+    // indisponible » et qui le fait laisser passer sans vérifier.
+    verifier("réponse KYC exploitable (FOUND ou FAILED)", function () {
+      expect.fail("réponse inattendue : " + JSON.stringify(corps));
+    });
+  }
+}
+
+docs {
+  Pose kyc_nom, kyc_prenom, kyc_grade, type_client et type_decaissement pour toute la suite de la collection. Numéro local 9 chiffres (0XXXXXXXX), jamais E.164.
+}

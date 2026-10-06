@@ -37,7 +37,6 @@ final class Registre
         'reference_decaissement' => 'TONJIDISBURSEMENT', // référence transmise à Paynala
         'retrait_especes'        => 'TONJICASH',         // retrait au comptoir (recette)
         'payout_marchand'        => 'TONJIMERCHANT',     // paiement d'un marchand (recette)
-        'frais_dispatch'         => 'TONJIFRAIS',        // part de frais reversée à un compte
     ];
 
     /**
@@ -155,7 +154,6 @@ final class Registre
         'TONJIDISBURSEMENT' => 'TD',
         'TONJICASH'         => 'TC',
         'TONJIMERCHANT'     => 'TM',
-        'TONJIFRAIS'        => 'TF',
         'TONDOPAYIN'        => 'DI',
         'TONDOPAYOUT'       => 'DO',
         'TONDOAUTO'         => 'DA',
@@ -256,7 +254,6 @@ final class Registre
      * aussi.
      */
     public const TACHES = [
-        'tonji:regler-frais'           => 'toutes les 15 minutes',
         'tontines:traiter-retraits'    => 'chaque jour à 20:00',
         'cotisations:reversements-auto' => 'chaque jour à 18:00',
         'tontines:rappels'             => 'chaque jour à 09:00',
@@ -277,7 +274,6 @@ final class Registre
      * est considérée en panne après cinq minutes de silence.
      */
     public const RETARD_TOLERE = [
-        'tonji:regler-frais'           => 2700,   // 45 min
         'tontines:traiter-retraits'    => 93600,  // 26 h
         'cotisations:reversements-auto' => 93600, // 26 h
         'tontines:rappels'             => 93600,  // 26 h
@@ -330,9 +326,6 @@ final class Registre
         'cagnottes' => ['reference', 'numero_retrait', 'reversement_auto', 'statut_validation'],
         'paiements' => ['trans_id', 'canal', 'commentaire', 'actif'],
         'taches'    => ['commande', 'derniere_execution', 'statut'],
-        // Répartition des frais : le réglage, et le journal de ce qui est dû.
-        'frais_comptes' => ['service', 'numero_tel', 'taux', 'actif'],
-        'frais_dus'     => ['compte_id', 'montant', 'statut', 'trans_id'],
     ];
 
     /** Fichiers scannés par l'audit des préfixes. */

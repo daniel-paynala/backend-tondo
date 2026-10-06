@@ -12,35 +12,6 @@ namespace App\Support;
 final class MessagePaiementMarchand
 {
     /**
-     * Montant réellement ENCAISSÉ par l'enseigne, depuis une ligne de payout.
-     *
-     * `payout.montant` est le montant DÉBITÉ de la collecte ; depuis la
-     * répartition des frais, l'enseigne peut recevoir moins — les parts sont
-     * retenues et partent vers leurs propres comptes. Le net est tracé dans
-     * `request.montant_net`.
-     *
-     * Repli sur le brut quand la clé est absente : les lignes d'avant la
-     * répartition n'en ont pas, et pour elles les deux montants étaient égaux.
-     *
-     * Un seul calcul, partagé par le reçu et la notification : annoncer deux
-     * chiffres différents au même commerçant pour le même paiement serait
-     * pire que de se tromper une fois.
-     */
-    public static function encaisse(object $ligne): int
-    {
-        $request = is_string($ligne->request ?? null)
-            ? json_decode($ligne->request, true)
-            : ($ligne->request ?? null);
-
-        $net = is_array($request) ? ($request['montant_net'] ?? null) : null;
-
-        return (int) ($net ?? $ligne->montant);
-    }
-
-    /** Constructeur privé : composition pure, pas d'instance. */
-    private function __construct() {}
-
-    /**
      * SMS et e-mail reçus par le marchand.
      *
      * @param  array{montant: int, reference: string, cagnotte: string,

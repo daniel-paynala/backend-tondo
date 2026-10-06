@@ -86,39 +86,4 @@ class MessagePaiementMarchandTest extends TestCase
         $this->assertSame('150 000 FCFA payés à TRAITEUR LE BARACHOIS.', $corps);
     }
 
-    /**
-     * Le marchand doit lire ce qu'il a ENCAISSÉ, pas ce qui a été débité.
-     *
-     * Depuis la répartition des frais les deux diffèrent : les parts sont
-     * retenues sur le montant et partent ailleurs. Imprimer le brut sur un reçu
-     * ferait réclamer à l'enseigne une somme qu'elle n'a jamais reçue.
-     */
-    public function test_le_net_encaisse_est_lu_dans_la_requete(): void
-    {
-        $ligne = (object) [
-            'montant' => 100000,
-            'request' => json_encode(['montant' => 100000, 'montant_net' => 97000]),
-        ];
-
-        $this->assertSame(97000, MessagePaiementMarchand::encaisse($ligne));
-    }
-
-    public function test_sans_net_on_retombe_sur_le_montant(): void
-    {
-        // Les lignes d'avant la répartition n'ont pas la clé, et pour elles les
-        // deux montants étaient égaux.
-        $ligne = (object) [
-            'montant' => 50000,
-            'request' => json_encode(['montant' => 50000]),
-        ];
-
-        $this->assertSame(50000, MessagePaiementMarchand::encaisse($ligne));
-    }
-
-    public function test_une_requete_illisible_ne_fait_pas_echouer_le_recu(): void
-    {
-        $ligne = (object) ['montant' => 7000, 'request' => 'pas du json'];
-
-        $this->assertSame(7000, MessagePaiementMarchand::encaisse($ligne));
-    }
 }

@@ -1,0 +1,123 @@
+meta {
+  name: Statut — attente du résultat (boucle)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{airtel_base_url}}/payment_status_v2?request_id={{request_id}}
+  body: none
+  auth: inherit
+}
+
+script:pre-request {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  if (!bru.getVar("request_id")) {
+    throw new Error("Aucun request_id en mémoire : jouer « Push — create_payment_v2 » d'abord.");
+  }
+
+  if (!bru.getVar("statut_essais")) {
+    bru.setVar("statut_essais", "0");
+  }
+}
+
+script:post-response {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  const requestId = bru.getVar("request_id");
+
+  // 404 = l'API ne connaît pas ce request_id : le paiement n'a jamais existé. Le
+  // backend le traduit en FAILED, pas en erreur.
+  let statut = "PENDING";
+  if (res.getStatus() === 404) {
+    statut = "FAILED";
+  } else if (res.getStatus() === 200) {
+    // data absent = toujours en attente, même lecture que checkStatus().
+    statut = ((res.getBody() || {}).data || {}).status || "PENDING";
+  }
+
+  bru.setVar("statut_final", statut);
+  console.log("[airtel] " + requestId + " → " + statut);
+
+  // Attente active : la requête se rejoue tant que l'opérateur répond PENDING.
+  // C'est le pendant de la tâche planifiée tondo:verifier-paiements, qui
+  // interroge l'API toutes les 5 secondes.
+  //
+  // `bru.setNextRequest` ne fonctionne que dans le Runner (et `bru run`) : lancée
+  // seule, la requête rend simplement le statut courant.
+  const max = Number(lire("statut_max_essais", 20));
+  const essais = Number(bru.getVar("statut_essais") || 0) + 1;
+  bru.setVar("statut_essais", String(essais));
+
+  console.log("[airtel] attente " + essais + "/" + max + " → " + statut);
+
+  if (statut === "PENDING" && essais < max && typeof bru.setNextRequest === "function") {
+    // Trois secondes entre deux lectures : l'opérateur attend la saisie du code.
+    if (typeof bru.sleep === "function") {
+      await bru.sleep(3000);
+    }
+    bru.setNextRequest("Statut — attente du résultat (boucle)");
+  } else {
+    bru.setVar("statut_essais", "0");
+  }
+}
+
+tests {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Mode brut (défaut) : la réponse passe telle quelle, aucune vérification n'est
+  // jouée. Mettre mode_brut = non pour les rallumer. L'enchaînement des variables,
+  // lui, se fait dans script:post-response et reste actif dans les deux cas.
+  const brut = String(lire("mode_brut", "oui")).toLowerCase() === "oui";
+  const verifier = brut
+    ? function () {}
+    : function (nom, fonction) { return test(nom, fonction); };
+
+  const statut = bru.getVar("statut_final");
+  const essais = Number(bru.getVar("statut_essais") || 0);
+
+  // Pendant la boucle, le compteur n'est pas encore remis à zéro : on ne juge
+  // qu'au dernier passage.
+  if (essais === 0) {
+    verifier("l'opérateur a tranché", function () {
+      expect(statut, "toujours PENDING : client qui ne valide pas, ou confirmation perdue")
+        .to.not.equal("PENDING");
+    });
+
+    verifier("paiement encaissé (SUCCESS)", function () {
+      expect(statut).to.equal("SUCCESS");
+    });
+  }
+}
+
+docs {
+  Se rejoue tant que l'opérateur répond PENDING, jusqu'à statut_max_essais (20 par défaut), avec 3 secondes entre deux lectures. À lancer depuis le Runner.
+}

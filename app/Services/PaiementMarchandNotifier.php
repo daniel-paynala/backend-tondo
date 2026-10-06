@@ -76,8 +76,7 @@ class PaiementMarchandNotifier
         }
 
         $texte = MessagePaiementMarchand::pourMarchand([
-            // Le NET encaissé, pas le débité : voir MessagePaiementMarchand::encaisse().
-            'montant'     => MessagePaiementMarchand::encaisse($donnees),
+            'montant'     => $donnees->montant,
             'reference'   => Registre::court($donnees->trans_id) ?? $donnees->trans_id,
             'cagnotte'    => $donnees->cagnotte_titre,
             'payeur'      => $this->nomPayeur($donnees),
@@ -114,7 +113,7 @@ class PaiementMarchandNotifier
         try {
             $this->mail->envoyer(
                 $adresse,
-                'Tonji — paiement de ' . MessagePaiementMarchand::montant(MessagePaiementMarchand::encaisse($d)) . ' FCFA reçu',
+                'Tonji — paiement de ' . MessagePaiementMarchand::montant($d->montant) . ' FCFA',
                 '<pre style="font-family:inherit;font-size:15px">' . e($texte) . '</pre>',
             );
         } catch (\Throwable $e) {
@@ -169,7 +168,7 @@ class PaiementMarchandNotifier
             ->leftJoin('users as u', 'u.id', '=', 'p.user_id')
             ->where('p.id', $payoutId)
             ->first([
-                'p.id', 'p.montant', 'p.request', 'p.trans_id', 'p.date_creation',
+                'p.id', 'p.montant', 'p.trans_id', 'p.date_creation',
                 'p.user_id', 'p.cagnotte_id',
                 'm.nom as marchand_nom', 'm.numero_tel as marchand_numero',
                 'm.contact_email as marchand_email',

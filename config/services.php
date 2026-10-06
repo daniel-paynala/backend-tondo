@@ -102,16 +102,6 @@ return [
          * En réglage plutôt qu'en dur : si Paynala renomme ses modes ou en
          * ajoute un, cela se change dans un .env, sans redéploiement de code.
          */
-        /*
-         * Montant minimum accepté par l'opérateur pour un décaissement.
-         *
-         * Contrainte de l'opérateur, pas une règle Tonji : il la changera sans
-         * nous prévenir. C'est lui qui impose l'accumulation des parts de
-         * frais — 1 % de 3 000 FCFA fait 30 FCFA, qui ne peuvent pas partir
-         * seuls (voir App\Services\ReglementFrais).
-         */
-        'montant_minimum_disburse' => (int) env('PAYNALA_MIN_DISBURSE', 100),
-
         'routage_disburse' => [
             'entreprise'  => env('PAYNALA_MODE_ENTREPRISE', 'B2B'),
             'particulier' => env('PAYNALA_MODE_PARTICULIER', 'B2C'),

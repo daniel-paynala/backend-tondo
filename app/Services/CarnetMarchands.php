@@ -20,10 +20,7 @@ use Illuminate\Support\Facades\DB;
  */
 class CarnetMarchands
 {
-    public function __construct(
-        private readonly TondoConfigService $config,
-        private readonly RepartitionFrais $repartition,
-    ) {}
+    public function __construct(private readonly TondoConfigService $config) {}
 
     /**
      * Fiches actives du projet, éventuellement filtrées par nom.
@@ -117,23 +114,13 @@ class CarnetMarchands
     /**
      * Taux de frais du projet — repli quand la fiche n'en porte pas.
      *
-     * **La répartition fait foi dès qu'elle existe.** Le taux d'un service est
-     * la somme de ses lignes actives : garder à côté un `frais_marchand` de
-     * configuration serait une seconde source pour la même information, et les
-     * deux finiraient par se contredire — un taux annoncé à 3 % avec des
-     * lignes qui prélèvent 3,5 %, et c'est le client qui paie l'écart.
-     *
-     * Le champ de configuration reste le repli tant qu'aucun compte n'est
-     * déclaré : c'est l'état actuel du produit, et il doit continuer de
-     * s'afficher comme avant.
+     * Sert à ANNONCER le prélèvement au client, pas à le calculer : c'est
+     * Paynala qui prélève, d'après le type B2B/B2C transmis. Ce taux doit donc
+     * refléter le leur — rien côté Tonji ne le garantit.
      */
     public function tauxProjet(string $projectId): float
     {
-        $somme = $this->repartition->tauxTotal('marchand', $projectId);
-
-        return $somme > 0
-            ? $somme
-            : (float) ($this->config->getOperatorConfig($projectId)['frais_marchand'] ?? 0);
+        return (float) ($this->config->getOperatorConfig($projectId)['frais_marchand'] ?? 0);
     }
 
     /** Base commune des deux lectures : les fiches actives du projet. */

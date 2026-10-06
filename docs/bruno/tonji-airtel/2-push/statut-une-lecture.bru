@@ -1,0 +1,79 @@
+meta {
+  name: Statut — une lecture
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{airtel_base_url}}/payment_status_v2?request_id={{request_id}}
+  body: none
+  auth: inherit
+}
+
+script:post-response {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  const requestId = bru.getVar("request_id");
+
+  // 404 = l'API ne connaît pas ce request_id : le paiement n'a jamais existé. Le
+  // backend le traduit en FAILED, pas en erreur.
+  let statut = "PENDING";
+  if (res.getStatus() === 404) {
+    statut = "FAILED";
+  } else if (res.getStatus() === 200) {
+    // data absent = toujours en attente, même lecture que checkStatus().
+    statut = ((res.getBody() || {}).data || {}).status || "PENDING";
+  }
+
+  bru.setVar("statut_final", statut);
+  console.log("[airtel] " + requestId + " → " + statut);
+}
+
+tests {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Mode brut (défaut) : la réponse passe telle quelle, aucune vérification n'est
+  // jouée. Mettre mode_brut = non pour les rallumer. L'enchaînement des variables,
+  // lui, se fait dans script:post-response et reste actif dans les deux cas.
+  const brut = String(lire("mode_brut", "oui")).toLowerCase() === "oui";
+  const verifier = brut
+    ? function () {}
+    : function (nom, fonction) { return test(nom, fonction); };
+
+  if (res.getStatus() === 404) {
+    verifier("request_id inconnu de l'API (404) → traité comme FAILED", function () {
+      expect(bru.getVar("request_id"), "aucun request_id en mémoire : jouer le push d'abord")
+        .to.not.be.empty;
+    });
+  } else {
+    verifier("HTTP 200", function () {
+      expect(res.getStatus()).to.equal(200);
+    });
+
+    verifier("statut parmi PENDING / SUCCESS / FAILED", function () {
+      expect(["PENDING", "SUCCESS", "FAILED"]).to.include(bru.getVar("statut_final"));
+    });
+  }
+}
+
+docs {
+  PENDING / SUCCESS / FAILED. Un 404 signifie que l'API ne connaît pas ce request_id.
+}

@@ -1,0 +1,119 @@
+meta {
+  name: Décaissement — rejeu de la même clé (idempotence)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{airtel_base_url}}/disburse
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  x-operator-key: {{airtel_operator_key}}
+}
+
+body:json {
+  {
+    "msisdn": "{{airtel_msisdn}}",
+    "amount": {{montant_decaissement}},
+    "reference": "{{reference_decaissement}}",
+    "idempotency_key": "{{idempotency_key}}",
+    "type": "{{type_decaissement}}"
+  }
+}
+
+script:pre-request {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // ─── Garde-fou ───────────────────────────────────────────────────────────────
+  // Un décaissement sort de l'argent réel : il n'existe aucun bac à sable
+  // Paynala. La requête ne part que si l'environnement porte explicitement
+  // autoriser_decaissement = oui.
+  const autorise = String(lire("autoriser_decaissement", "non")).toLowerCase();
+  const montant = Number(lire("montant_decaissement", 0));
+  const plafond = Number(lire("plafond_montant_test", 500));
+
+  if (autorise !== "oui") {
+    throw new Error("autoriser_decaissement != oui — requête bloquée (argent réel, " +
+      "aucun bac à sable). Passer la variable à « oui » dans l'environnement, puis la remettre.");
+  }
+  if (!(montant > 0)) {
+    throw new Error("montant_decaissement doit être un entier > 0.");
+  }
+  if (montant > plafond) {
+    throw new Error("Décaissement de " + montant + " FCFA refusé : plafond de test = " +
+      plafond + " FCFA.");
+  }
+  if (!lire("airtel_operator_key", "")) {
+    throw new Error("airtel_operator_key manquante : l'endpoint disburse refuse sans x-operator-key.");
+  }
+
+  // Rejeu volontaire de la DERNIÈRE clé acceptée : l'API ne doit pas sortir
+  // l'argent deux fois. C'est le filet qui manquait quand la clé venait d'un
+  // COUNT(*) + 1.
+  const cle = bru.getVar("idempotency_key_rejeu");
+
+  if (!cle) {
+    throw new Error("Aucun décaissement réussi à rejouer : lancer « Décaissement — B2C / B2B » d'abord.");
+  }
+
+  // Même clé, même montant, même numéro : seule la référence change, comme si le
+  // backend relançait après un timeout réseau.
+  bru.setVar("idempotency_key", cle);
+  bru.setVar("reference_decaissement", "TONJIDISBURSEMENT" + Date.now());
+  console.log("[airtel] rejeu de la clé " + cle);
+}
+
+tests {
+  // Lecture d'une valeur : variable d'exécution, sinon environnement, sinon défaut.
+  // Bruno garde les `vars` de collection en lecture seule, d'où ce passage par les
+  // variables d'exécution pour tout ce qui change pendant un run.
+  const lire = (cle, defaut) => {
+    const execution = bru.getVar(cle);
+    if (execution !== undefined && execution !== null && execution !== "") return execution;
+    const env = bru.getEnvVar(cle);
+    if (env !== undefined && env !== null && env !== "") return env;
+    return defaut;
+  };
+
+  // Mode brut (défaut) : la réponse passe telle quelle, aucune vérification n'est
+  // jouée. Mettre mode_brut = non pour les rallumer. L'enchaînement des variables,
+  // lui, se fait dans script:post-response et reste actif dans les deux cas.
+  const brut = String(lire("mode_brut", "oui")).toLowerCase() === "oui";
+  const verifier = brut
+    ? function () {}
+    : function (nom, fonction) { return test(nom, fonction); };
+
+  const corps = res.getBody() || {};
+  const donnees = corps.data || corps;
+  const precedent = bru.getVar("airtel_money_id");
+
+  // Deux comportements acceptables : l'API rend la MÊME transaction, ou elle
+  // refuse explicitement le doublon. Ce qui serait grave, c'est une seconde
+  // transaction avec un nouvel identifiant : l'argent serait sorti deux fois.
+  const memeTransaction = donnees.airtel_money_id && donnees.airtel_money_id === precedent;
+  const refusExplicite = corps.success === false;
+
+  verifier("la clé rejouée ne crée pas un second décaissement", function () {
+    expect(
+      memeTransaction || refusExplicite,
+      "réponse : " + JSON.stringify(corps) + " | airtel_money_id attendu : " + precedent
+    ).to.equal(true);
+  });
+}
+
+docs {
+  Renvoie la dernière clé d'idempotence acceptée. L'API doit rendre la même transaction ou refuser le doublon — jamais sortir l'argent une seconde fois.
+}
