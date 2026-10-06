@@ -244,6 +244,18 @@ final class Registre
                 'motif'   => '/TONTINES_ACTIVES\s*=\s*(true|false)/',
             ],
         ],
+        // Retrait en espèces : le canal agent, qui remet du LIQUIDE. Fermé, ses
+        // routes ne sont pas enregistrées et le dashboard masque ses entrées.
+        // Les deux doivent dire la même chose : un dashboard qui propose de
+        // créer un partenaire pendant que l'API répond 404 ferait perdre une
+        // demi-journée à chercher la panne.
+        'retrait_especes' => [
+            'backend' => ['config' => 'tondo.retrait_especes_actif'],
+            'dashboard' => [
+                'fichier' => '../admin/src/lib/featureFlags.ts',
+                'motif'   => '/RETRAIT_ESPECES_ACTIF\s*=\s*(true|false)/',
+            ],
+        ],
     ];
 
     /**

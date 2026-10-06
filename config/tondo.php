@@ -35,4 +35,30 @@ return [
      */
     'tontines_actives' => env('TONJI_TONTINES_ACTIVES', false),
 
+    /*
+     * Feature flag « Retrait en espèces » — le canal agent, où un tiers remet
+     * des BILLETS contre le solde d'une collecte.
+     *
+     * À false (défaut) : les routes `/api/agent/*` et celles qui administrent
+     * supports, partenaires et agents **ne sont pas enregistrées**. Elles
+     * répondent 404, pas 401 : le canal est absent, pas seulement gardé. Le
+     * dashboard masque les entrées correspondantes (`RETRAIT_ESPECES_ACTIF`),
+     * et `tonji:audit` échoue si les deux valeurs divergent.
+     *
+     * Pourquoi ce drapeau : le chantier est expérimental et ses contours ne
+     * sont pas arrêtés, alors qu'il DÉBITE une collecte et remet du liquide —
+     * ce qui ne se conteste pas, contrairement à un virement. Il part pourtant
+     * en production avec le chantier marchand, dont il est inséparable : les
+     * deux se sont succédé sur la même ligne d'historique, et 14 fichiers du
+     * chemin de l'argent leur sont communs. Les isoler reviendrait à écrire du
+     * code neuf, jamais exécuté, là où l'argent passe.
+     *
+     * Décision de Daniel (2026-10-06) : drapeau + masquage plutôt qu'une
+     * branche reconstruite.
+     *
+     * ⚠️ Avant de passer ce drapeau à true, poser le verrou des sorties dans
+     * `RetraitEspecesService` — voir le commentaire de sa méthode `demander()`.
+     */
+    'retrait_especes_actif' => env('TONJI_RETRAIT_ESPECES_ACTIF', false),
+
 ];

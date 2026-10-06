@@ -181,6 +181,13 @@ Route::prefix('admin')->group(function () {
         // l'argent liquide n'est pas de la gestion courante. Écritures
         // réservées aux super admins et journalisées ; lectures ouvertes aux
         // autres rôles pour le support.
+        //
+        // ⚠️ Tout le bloc est conditionné au drapeau `tondo.retrait_especes_actif`.
+        // Fermé, ces routes ne sont PAS enregistrées : 404, pas 403. C'est ce
+        // qui empêche de créer un partenaire — donc une clé d'API — et sans
+        // clé, le canal agent est inatteignable. Masquer les écrans du
+        // dashboard ne ferait que retirer le chemin le plus commode.
+        if (config('tondo.retrait_especes_actif')) {
         Route::get('/supports-retrait',                [SupportsRetraitController::class, 'index']);
         Route::post('/supports-retrait',               [SupportsRetraitController::class, 'store']);        // super_admin
         Route::patch('/supports-retrait/{id}',         [SupportsRetraitController::class, 'update']);       // super_admin
@@ -198,6 +205,7 @@ Route::prefix('admin')->group(function () {
         Route::post('/agents/{id}/statut',             [AgentsController::class, 'statut']);                // super_admin
         Route::post('/agents/{id}/pin',                [AgentsController::class, 'reinitialiserPin']);      // super_admin
         Route::delete('/agents/{id}',                  [AgentsController::class, 'destroy']);               // super_admin
+        }
 
         // Marchands : destinations de transfert enregistrées. L'argent part
         // chez un tiers, donc mêmes règles que ci-dessus — écritures réservées
@@ -237,6 +245,12 @@ Route::prefix('admin')->group(function () {
 //   2. le jeton de session de l'agent, obtenu avec son identifiant et son PIN.
 //  Un PIN volé ne sert donc à rien hors d'un terminal du partenaire.
 // ============================================================================
+// ⚠️ Tout ce canal est conditionné au drapeau `tondo.retrait_especes_actif`.
+// Fermé, ces routes n'existent pas : un appel reçoit 404, pas 401. Le chantier
+// est expérimental et il remet du LIQUIDE, qui ne se conteste pas — tant que
+// ses contours ne sont pas arrêtés, il ne doit pas être joignable en
+// production, même protégé par une clé.
+if (config('tondo.retrait_especes_actif')) {
 Route::prefix('agent')->middleware('partenaire')->group(function () {
     Route::post('/connexion', [AgentSessionController::class, 'connexion'])->middleware('throttle:agent-connexion');
 
@@ -256,6 +270,7 @@ Route::prefix('agent')->middleware('partenaire')->group(function () {
         });
     });
 });
+}
 
 // ============================================================================
 //  API Mobile — préfixe /api/mobile/
