@@ -37,6 +37,12 @@ use Illuminate\Support\Str;
  */
 class TondoProjectConfig extends Model
 {
+    /** Aucun verrou — l'état par défaut, et le repli quand la colonne est vide. */
+    public const VERROUS_OUVERTS = [
+        'particulier' => ['transfert' => false, 'marchand' => false],
+        'association' => ['transfert' => false, 'marchand' => false],
+    ];
+
     use UuidPrimary;
     use HasProjectTable;
 
@@ -54,6 +60,7 @@ class TondoProjectConfig extends Model
         'plafond_cagnotte_particulier' => 'integer',
         'plafond_cagnotte_association' => 'integer',
         'frais_retrait'                => 'array',
+        'sorties_bloquees'             => 'array',
         'tranches'           => 'array',   // Tranches de frais opérateur (JSON array).
         'prefixes'           => 'array',   // Préfixes locaux valides (JSON array).
         'actif'              => 'boolean',
@@ -79,6 +86,8 @@ class TondoProjectConfig extends Model
             // Taux du paiement marchand. Zéro = aucun prélèvement, et le
             // texte des conditions le dira de lui-même.
             'frais_marchand'     => (float) ($this->frais_marchand ?? 0.0),
+            // Verrous des sorties d'argent, par type de compte.
+            'sorties_bloquees'   => $this->sorties_bloquees ?? self::VERROUS_OUVERTS,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
             'plafond_cagnotte_particulier' => (int) ($this->plafond_cagnotte_particulier ?? 2500000),

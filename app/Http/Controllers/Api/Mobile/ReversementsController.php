@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\DisbursementFailedMail;
 use App\Models\TondoCagnotte;
 use App\Services\PaiementMarchandNotifier;
+use App\Services\SortiesAutorisees;
 use App\Services\PaynalaPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,37 @@ class ReversementsController extends Controller
     public function __construct(
         private readonly PaynalaPaymentService $paynala,
         private readonly PaiementMarchandNotifier $notifier,
+        private readonly SortiesAutorisees $sorties,
     ) {}
+
+    /**
+     * GET /api/mobile/cagnottes/{reference}/sorties
+     *
+     * Ce que cette collecte autorise, à cet instant.
+     *
+     * Route dédiée et volontairement minuscule : l'app la rappelle à l'arrivée
+     * sur l'écran, au clic sur un bouton, et avant de valider. Faire relire la
+     * collecte entière à chacun de ces moments coûterait trois fois plus pour
+     * deux booléens.
+     */
+    public function sorties(Request $request, string $reference): JsonResponse
+    {
+        $user = $request->user();
+
+        $cagnotte = TondoCagnotte::where('project_id', $user->project_id)
+            ->where('reference', $reference)
+            ->first(['id', 'user_id']);
+
+        if (! $cagnotte || $cagnotte->user_id !== $user->id) {
+            // Même réponse qu'une collecte verrouillée : distinguer les deux
+            // dirait à qui tâtonne des références lesquelles existent.
+            return response()->json(['transfert' => false, 'marchand' => false]);
+        }
+
+        return response()->json(
+            $this->sorties->pour($cagnotte->id, $user->project_id),
+        );
+    }
 
     /**
      * POST /api/mobile/reversements
@@ -90,6 +121,18 @@ class ReversementsController extends Controller
             throw ValidationException::withMessages([
                 'cagnotte_reference' => 'Cagnotte clôturée — transfert impossible.',
             ]);
+        }
+
+        // ── Verrou des sorties ───────────────────────────────────────────────
+        //
+        // Posé ICI, avant toute réservation de solde et avant tout appel à
+        // Paynala. C'est le seul contrôle qui compte : l'application peut
+        // masquer le bouton, elle ne protège rien. Un verrou posé pendant que
+        // le client était sur l'écran est donc respecté — il ne découvre le
+        // refus qu'à la validation, mais l'argent n'a pas bougé.
+        $action = empty($data['marchand_id']) ? 'transfert' : 'marchand';
+        if ($refus = $this->sorties->refus($cagnotte->id, $user->project_id, $action)) {
+            return response()->json($refus, 423);
         }
 
         // ── Résolution du numéro bénéficiaire ────────────────────────────────

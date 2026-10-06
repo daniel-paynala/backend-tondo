@@ -341,6 +341,8 @@ Route::prefix('mobile')->group(function () {
         // Reversements partiels (payout gérant → bénéficiaire, cagnotte ouverte)
         Route::post('/reversements', [MobileReversementsController::class, 'store']);
         // Destinations marchandes proposées au moment d'un transfert.
+        // Droits de sortie d'une collecte, releves a chaque moment sensible.
+        Route::get('/cagnottes/{reference}/sorties', [MobileReversementsController::class, 'sorties']);
         Route::get('/marchands', [MobileMarchandsController::class, 'index']);
         // Resolution d'une saisie client : numero OU code de l'enseigne.
         Route::get('/marchands/resoudre', [MobileMarchandsController::class, 'resoudre']);
