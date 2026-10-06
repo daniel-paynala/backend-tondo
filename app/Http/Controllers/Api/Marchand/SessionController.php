@@ -33,17 +33,52 @@ class SessionController extends Controller
         $numero = self::versE164($data['numero']);
         $envois = $this->otp->envoyer($numero);
 
-        // Journalisé, pas répercuté : l'exploitation doit pouvoir constater
-        // qu'un numéro inconnu a été saisi, le client ne doit pas l'apprendre.
+        // ── Numéro inconnu : on le dit ───────────────────────────────────────
+        //
+        // La réponse était volontairement neutre — la même que le numéro soit
+        // marchand ou non — pour que cette page ne devienne pas un annuaire :
+        // on aurait pu essayer des numéros jusqu'à savoir qui encaisse chez
+        // Tonji. Daniel a tranché le 2026-10-06 : laisser passer à l'écran du
+        // code un numéro qui n'ira nulle part est plus coûteux que ce risque.
+        // Le commerçant restait planté devant un champ à six chiffres sans
+        // comprendre qu'aucun code n'arriverait jamais.
+        //
+        // Ce qui protège encore de l'énumération : la limite de débit sur cette
+        // route, et le fait qu'un numéro marchand est un numéro commercial,
+        // affiché en vitrine. Ce n'est pas un secret.
         if ($envois === 0) {
-            Log::info('[portail_marchand] demande sans destinataire', [
+            // Trois raisons possibles de n'avoir rien envoyé, et elles ne se
+            // disent pas pareil. Confondre « pas marchand » avec « fiche sans
+            // adresse » enverrait un commerçant enregistré chercher une erreur
+            // de numéro qu'il n'a pas commise.
+            if (! $this->otp->estMarchand($numero)) {
+                Log::info('[portail_marchand] numéro inconnu', [
+                    'numero' => substr($numero, 0, 8) . '***',
+                ]);
+
+                return response()->json([
+                    'message' => 'Ce numéro n\'est pas enregistré comme marchand chez Tonji. '
+                        . 'Vérifiez le numéro, ou contactez-nous pour inscrire votre commerce.',
+                    'code'    => 'numero_inconnu',
+                ], 404);
+            }
+
+            // La fiche existe : c'est son adresse de contact qui manque, ou
+            // l'envoi qui a échoué. Le commerçant ne peut rien y faire seul, et
+            // l'exploitation doit le voir — d'où un WARNING, pas un INFO.
+            Log::warning('[portail_marchand] marchand connu mais code non envoyé', [
                 'numero' => substr($numero, 0, 8) . '***',
             ]);
+
+            return response()->json([
+                'message' => 'Votre fiche existe, mais aucun code n\'a pu être envoyé : '
+                    . 'son adresse e-mail est manquante ou invalide. Contactez Tonji.',
+                'code'    => 'envoi_impossible',
+            ], 503);
         }
 
         return response()->json([
-            'message' => 'Si ce numéro est enregistré comme marchand, un code vient de partir '
-                . 'vers l\'adresse e-mail de la fiche.',
+            'message' => 'Un code vient de partir vers l\'adresse e-mail de votre fiche.',
         ]);
     }
 

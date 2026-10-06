@@ -2801,7 +2801,7 @@ class BotService
                 'revers_nom'    => null,
             ]));
             $masque = $this->maskPhoneNum($data['numero_payeur'] ?? '');
-            return $this->demanderMontantReversement($masque, null);
+            return $this->demanderMontantReversement($masque, null, $this->estAssociation($data));
         }
 
         if ($texte === '2') {
@@ -2858,7 +2858,11 @@ class BotService
         ]));
 
         $masque = $this->maskPhoneNum($numeroSaisi);
-        return $this->demanderMontantReversement($masque, $nomComplet !== '' ? $nomComplet : null);
+        return $this->demanderMontantReversement(
+            $masque,
+            $nomComplet !== '' ? $nomComplet : null,
+            $this->estAssociation($data),
+        );
     }
 
     /**
@@ -2872,20 +2876,79 @@ class BotService
      * @param  string|null $nom     Titulaire du compte, quand l'opérateur l'a donné
      * @return string
      */
-    private function demanderMontantReversement(string $masque, ?string $nom): string
-    {
+    private function demanderMontantReversement(
+        string $masque,
+        ?string $nom,
+        bool $estAssociation,
+    ): string {
         $beneficiaire = $nom !== null
             ? "*{$nom}* · {$masque}"
             : "*{$masque}*";
+
+        // Annoncer le prélèvement AVANT la saisie du montant, comme le fait le
+        // parcours marchand juste à côté. Un transfert qui ne disait rien de
+        // ses frais alors qu'un paiement de commerce les annonçait, c'était
+        // deux services voisins qui ne se comportaient pas pareil.
+        $ligneFrais = $this->ligneFraisTransfert($estAssociation);
 
         return <<<TXT
         Bénéficiaire : {$beneficiaire}
 
         Quel *montant* souhaitez-vous transférer ? (en FCFA)
-        _(min 100 — ne peut pas dépasser le solde disponible)_
+        _(min 100 — ne peut pas dépasser le solde disponible)_{$ligneFrais}
 
         #️⃣ _pour revenir en arrière_
         TXT;
+    }
+
+    /**
+     * Le gérant de la session est-il une association ?
+     *
+     * Même source que partout ailleurs dans le produit : `users.type_compte`.
+     * Tout ce qui n'est pas explicitement une association compte comme un
+     * particulier — c'est le cas par défaut, et le taux annoncé serait faux
+     * dans l'autre sens.
+     *
+     * @param array<string, mixed> $data Données de session.
+     */
+    private function estAssociation(array $data): bool
+    {
+        $user = TondoUser::find($data['user_id'] ?? null);
+
+        return ($user?->type_compte ?? null) === 'association';
+    }
+
+    /**
+     * Mention des frais de transfert, ou chaîne vide s'il n'y en a pas.
+     *
+     * Le taux vient de la configuration serveur, celle que le dashboard règle
+     * et que l'app et le web affichent : les trois canaux annoncent donc le
+     * même chiffre. Un taux écrit en dur ici aurait divergé au premier
+     * changement.
+     *
+     * Transfert depuis une cagnotte, par un particulier ou une association :
+     * c'est la seule combinaison atteignable ici, le bot ne transfère pas
+     * depuis une tontine.
+     *
+     * Lecture isolée : une configuration illisible ne doit pas empêcher un
+     * transfert. On n'annonce alors rien plutôt qu'un chiffre faux.
+     */
+    private function ligneFraisTransfert(bool $estAssociation): string
+    {
+        try {
+            $cfg = app(\App\Services\TondoConfigService::class)
+                ->getOperatorConfig($this->tondoProjectId());
+
+            $taux = (float) ($cfg['frais_retrait']['cagnotte'][$estAssociation ? 'association' : 'particulier'] ?? 0);
+
+            return $taux > 0
+                ? "\n_Des frais de " . \App\Support\Taux::pourcentage($taux) . " seront appliqués au moment du transfert._"
+                : '';
+        } catch (\Throwable $e) {
+            Log::error('[bot] taux de transfert illisible', ['erreur' => $e->getMessage()]);
+
+            return '';
+        }
     }
 
     /**

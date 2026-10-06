@@ -42,10 +42,12 @@ class MarchandOtpService
     /**
      * Envoie un code aux adresses rattachées à ce numéro.
      *
-     * @return int Nombre d'adresses atteintes. Zéro signifie « numéro inconnu
-     *             ou sans adresse » — l'appelant ne doit PAS le répercuter
-     *             tel quel au client, sous peine de transformer cette route en
-     *             annuaire des marchands.
+     * @return int Nombre d'adresses atteintes. **Zéro recouvre trois cas** —
+     *             numéro inconnu, fiche sans adresse de contact, envoi en
+     *             échec — et l'appelant doit les distinguer avant de répondre :
+     *             dire « pas marchand » à une fiche incomplète enverrait un
+     *             commerçant enregistré chercher une erreur qu'il n'a pas
+     *             commise. Voir {@see estMarchand()}.
      */
     public function envoyer(string $numeroE164): int
     {
@@ -127,6 +129,22 @@ class MarchandOtpService
      *
      * @return array<int, string>
      */
+    /**
+     * Ce numéro désigne-t-il un marchand actif ?
+     *
+     * Distinct de {@see adresses()} : une fiche peut exister sans adresse de
+     * contact. Confondre les deux ferait répondre « ce numéro n'est pas
+     * marchand » à un commerçant bel et bien enregistré, dont la fiche est
+     * seulement incomplète — il chercherait son erreur là où il n'y en a pas.
+     */
+    public function estMarchand(string $numeroE164): bool
+    {
+        return DB::table(project_table('marchands'))
+            ->where('numero_tel', $numeroE164)
+            ->where('actif', true)
+            ->exists();
+    }
+
     public function adresses(string $numeroE164): array
     {
         return DB::table(project_table('marchands'))
