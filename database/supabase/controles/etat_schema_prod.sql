@@ -36,3 +36,25 @@ UNION ALL SELECT 'table', 'tonji_retraits_especes', to_char(count(*), '9')
 UNION ALL SELECT 'table', 'tonji_marchands', to_char(count(*), '9')
   FROM information_schema.tables WHERE table_name = 'tonji_marchands'
  ORDER BY 1, 2;
+
+-- ----------------------------------------------------------------------------
+-- Vues : s'exécutent-elles avec les droits de l'appelant, et qui peut les lire ?
+--
+-- Une vue sans `security_invoker` tourne avec les droits de son propriétaire et
+-- CONTOURNE la RLS des tables sources. Accordée à `anon`, elle laisse lire
+-- toutes les lignes de tous les projets avec une clé publique. Attendu :
+-- mode = invoker, exposee_a = (plus personne).
+-- ----------------------------------------------------------------------------
+SELECT c.relname AS vue,
+       CASE WHEN EXISTS (SELECT 1 FROM unnest(COALESCE(c.reloptions, '{}'::text[])) o
+                          -- PostgreSQL conserve l'écriture utilisée : « on »
+                          -- comme « true ». Les deux valent activé.
+                          WHERE o IN ('security_invoker=on', 'security_invoker=true'))
+            THEN 'invoker' ELSE 'DEFINER' END AS mode,
+       COALESCE((SELECT string_agg(DISTINCT g.grantee, ',' ORDER BY g.grantee)
+                   FROM information_schema.role_table_grants g
+                  WHERE g.table_name = c.relname
+                    AND g.grantee IN ('anon', 'authenticated')), '(plus personne)') AS exposee_a
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public' AND c.relkind = 'v'
+ ORDER BY 1;
