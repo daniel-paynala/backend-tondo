@@ -63,7 +63,14 @@ class PlafondsController extends Controller
         ]);
     }
 
-    /** GET /api/admin/frais-retrait — matrice des frais de retrait (cotisation × user). */
+    /**
+     * GET /api/admin/frais-retrait — ce que Tonji prélève, et sur quoi.
+     *
+     * La matrice des frais de retrait et le taux du paiement marchand vivent
+     * sur le même écran : ce sont les deux seuls taux que le dashboard règle,
+     * et les séparer obligerait à chercher dans deux pages ce qui se décide
+     * d'un seul mouvement.
+     */
     public function showFrais(Request $request): JsonResponse
     {
         $config = app(TondoConfigService::class)->getOperatorConfig(Project::tondoId());
@@ -73,6 +80,9 @@ class PlafondsController extends Controller
                 'cagnotte' => ['particulier' => 0, 'association' => 0],
                 'tontine'  => ['particulier' => 0, 'association' => 0],
             ],
+            // Taux sur un paiement marchand. Zéro = aucun prélèvement, et le
+            // texte des conditions le dira de lui-même.
+            'frais_marchand' => (float) ($config['frais_marchand'] ?? 0),
         ]);
     }
 
@@ -91,6 +101,10 @@ class PlafondsController extends Controller
             'frais_retrait.cagnotte.association' => ['required', 'numeric', 'min:0', 'max:0.5'],
             'frais_retrait.tontine.particulier'  => ['required', 'numeric', 'min:0', 'max:0.5'],
             'frais_retrait.tontine.association'  => ['required', 'numeric', 'min:0', 'max:0.5'],
+            // Facultatif : un appel qui ne règle que la matrice reste valide.
+            // Borne à 25 %, comme la commission — au-delà, c'est une erreur de
+            // saisie, pas une décision commerciale.
+            'frais_marchand'                     => ['sometimes', 'numeric', 'min:0', 'max:0.25'],
         ]);
 
         // Normalise en float et applique à la config projet.
@@ -105,10 +119,17 @@ class PlafondsController extends Controller
             ],
         ];
 
-        $maj = TondoProjectConfig::where('project_id', Project::tondoId())->update([
+        // Le taux marchand n'est écrit QUE s'il a été envoyé : un appel qui ne
+        // règle que la matrice ne doit pas le remettre à sa valeur par défaut.
+        $champs = [
             'frais_retrait' => json_encode($matrice),
             'updated_at'    => now(),
-        ]);
+        ];
+        if (array_key_exists('frais_marchand', $data)) {
+            $champs['frais_marchand'] = (float) $data['frais_marchand'];
+        }
+
+        $maj = TondoProjectConfig::where('project_id', Project::tondoId())->update($champs);
 
         if ($maj === 0) {
             return response()->json([
