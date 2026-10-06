@@ -3117,8 +3117,10 @@ class BotService
         $collecteFmt = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
         $ville       = $marchand['ville'] ? " · {$marchand['ville']}" : '';
         $frais       = (float) ($marchand['frais'] ?? 0);
+        // ⚠️ Le taux est stocké en DÉCIMAL : 0.03 vaut 3 %. Le formater sans
+        // conversion annoncerait « 0,03 % » à qui sera prélevé de 3 %.
         $ligneFrais  = $frais > 0
-            ? "\n_Des frais de " . rtrim(rtrim(number_format($frais, 2, ',', ' '), '0'), ',') . " % seront appliqués au moment du paiement._"
+            ? "\n_Des frais de " . \App\Support\Taux::pourcentage($frais) . " seront appliqués au moment du paiement._"
             : '';
 
         return <<<TXT

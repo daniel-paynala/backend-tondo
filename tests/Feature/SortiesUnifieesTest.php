@@ -124,6 +124,30 @@ class SortiesUnifieesTest extends TestCase
     }
 
     /**
+     * Le bot formate le taux marchand avec le formateur partagé, pas à la main.
+     *
+     * Les taux sont stockés en DÉCIMAL — 0.03 vaut 3 %. Oublier la conversion
+     * ne fait rien échouer : ça annonce « 0,03 % » à qui sera prélevé de 3 %.
+     * C'est arrivé sur trois écrans à la fois, d'où ce garde-fou là où un
+     * `number_format` écrit à la main le réintroduirait.
+     */
+    public function test_le_taux_marchand_passe_par_le_formateur_partage(): void
+    {
+        $bot = file_get_contents(base_path('app/Services/WhatsApp/BotService.php')) ?: '';
+
+        $this->assertStringContainsString(
+            'Taux::pourcentage($frais)',
+            $bot,
+            'Le taux marchand doit être formaté par App\\Support\\Taux.',
+        );
+        $this->assertStringNotContainsString(
+            'number_format($frais',
+            $bot,
+            'Un taux formaté à la main oublierait la conversion décimal → pourcentage.',
+        );
+    }
+
+    /**
      * Les numéros du menu texte et ceux de la liste tappable sont les mêmes.
      *
      * WhatsApp renvoie l'`id` de la ligne choisie, qui est réinjecté tel quel
