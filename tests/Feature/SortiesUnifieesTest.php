@@ -113,18 +113,32 @@ class SortiesUnifieesTest extends TestCase
     {
         $sortie = file_get_contents(base_path('app/Services/SortieArgent.php')) ?: '';
 
+        // On isole la CHARGE de l'insert, pas le fichier entier : `canal` est
+        // un mot légitime partout ailleurs — dans le JSON de la requête, dans
+        // les journaux, dans les commentaires. Ce qui est interdit, c'est une
+        // clé de colonne.
+        $ouvre  = strpos($sortie, "DB::table(project_table('payout'))->insert([");
+        $this->assertNotFalse($ouvre, "L'insert du payout est introuvable — test à réécrire.");
+
+        // Jusqu'à `request`, où commence le JSON : au-delà, `canal` est une
+        // clé de ce JSON et non une colonne.
+        $jusqua  = strpos($sortie, "'request'", $ouvre);
+        $colonnes = substr($sortie, $ouvre, $jusqua - $ouvre);
+
         $this->assertStringNotContainsString(
-            "'canal'         => \$canal",
-            $sortie,
-            'Le canal d\'origine ne doit pas être écrit dans la colonne payout.canal '
-                . "(contrainte CHECK : 'mobile_money' ou 'especes' uniquement).",
+            "'canal'",
+            $colonnes,
+            "La colonne payout.canal dit le RAIL du décaissement et n'accepte que "
+                . "'mobile_money' ou 'especes'. Y écrire le canal d'origine ferait échouer "
+                . 'CHAQUE transfert, sur tous les canaux à la fois.',
         );
 
-        // Et il doit bien rester tracé quelque part, sinon on ne sait plus d'où
-        // part l'argent.
-        $this->assertStringContainsString(
-            "'canal'               => \$canal",
-            $sortie,
+        // Et le canal d'origine doit bien rester tracé, sinon on ne sait plus
+        // d'où part l'argent. Insensible à l'alignement : un test qui échoue
+        // parce qu'une colonne a bougé d'un espace apprend à être ignoré.
+        $this->assertMatchesRegularExpression(
+            "/'canal'\s*=>\s*\\\$canal,/",
+            substr($sortie, $jusqua),
             'Le canal d\'origine doit rester tracé dans payout.request.',
         );
     }

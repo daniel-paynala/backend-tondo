@@ -121,10 +121,16 @@ class RepartitionFrais
     }
 
     /**
-     * Comptes actifs d'un service, ordre stable.
+     * Comptes actifs d'un service, **de la plus petite part à la plus grande**.
      *
-     * L'ordre importe pour la reproductibilité : deux calculs du même montant
-     * doivent donner exactement les mêmes parts, y compris au franc d'arrondi.
+     * Cet ordre est celui des décaissements : les commissions d'abord, le
+     * bénéficiaire en dernier (sa part est la plus grosse par construction).
+     * Décidé par Daniel — Paynala ne sait pas répartir en un appel, il faut
+     * donc enchaîner, et les petites parts passent avant.
+     *
+     * `id` en second critère pour que deux comptes au même taux gardent un
+     * ordre stable : deux calculs du même montant doivent donner exactement
+     * les mêmes parts, jusqu'au franc d'arrondi.
      *
      * @return \Illuminate\Support\Collection<int, object>
      */
@@ -134,7 +140,7 @@ class RepartitionFrais
             ->where('project_id', $projectId)
             ->where('service', $service)
             ->where('actif', true)
-            ->orderBy('created_at')
+            ->orderBy('taux')
             ->orderBy('id')
             ->get(['id', 'libelle', 'numero_tel', 'type_paynala', 'taux']);
     }
