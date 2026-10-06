@@ -31,14 +31,23 @@ use App\Support\Registre;
  *
  * ── Les trois issues d'un décaissement ───────────────────────────────────────
  *   - **succès** : payout `succes`, solde définitivement amputé.
- *   - **refus explicite** (l'opérateur a répondu non) : payout `echec` et solde
+ *   - **refus explicite** ({@see DecaissementRefuse}) : payout `echec` et solde
  *     RESTAURÉ dans la même transaction. L'argent n'est pas parti, la collecte
  *     le récupère.
- *   - **issue inconnue** (timeout réseau) : on ne sait PAS si l'argent est
- *     parti. Recréditer ouvrirait la porte à un second décaissement du même
- *     montant : le solde reste amputé, le payout reste `en_cours` et attend une
- *     régularisation. C'est volontairement le cas le plus désagréable des
- *     trois — c'est aussi le seul où se tromper coûte deux fois le montant.
+ *   - **issue inconnue** (tout le reste) : payout `en_cours`, solde NON
+ *     restauré, alerte aux administrateurs, et la ligne remonte dans les
+ *     réconciliations à traiter.
+ *
+ * **Dans le doute, l'argent ne revient pas** (décision de Daniel, 2026-10-06).
+ * Les deux erreurs ne coûtent pas pareil :
+ *
+ *   - restaurer à tort → l'argent est parti ET la collecte l'affiche
+ *     disponible : la sortie suivante le dépense une seconde fois. Perte
+ *     réelle, irrécupérable, et **rien ne la signale** ;
+ *   - ne pas restaurer à tort → le montant attend dans une ligne visible en
+ *     réconciliation, réglée à la main en quelques minutes.
+ *
+ * Le cas se traite avec l'opérateur, pas par supposition.
  */
 class SortieArgent
 {
@@ -235,39 +244,15 @@ class SortieArgent
                 reference:      $reference,
                 type:           $disburseType,
             );
-        } catch (ConnectionException $e) {
-            // ISSUE INCONNUE — la requête n'a pas abouti, mais elle a pu être
-            // reçue et traitée côté opérateur. Restaurer le solde ici ouvrirait
-            // la porte à un second décaissement du même montant.
-            DB::table(project_table('payout'))->where('id', $payoutId)->update([
-                'statut'     => 'en_cours',
-                'response'   => json_encode(['error' => $e->getMessage(), 'issue' => 'inconnue']),
-                'updated_at' => now(),
-            ]);
-
-            Log::critical('[sortie] Paynala injoignable — issue inconnue, régularisation requise', [
-                'cagnotte'        => $cagnotte->reference,
-                'canal'           => $canal,
-                'payout_id'       => $payoutId,
-                'trans_id'        => $transId,
-                'idempotency_key' => $idempotencyKey,
-                'montant'         => $montant,
-                'erreur'          => $e->getMessage(),
-            ]);
-
-            $this->alerterAdmins($cagnotte, $montant, $numeroE164, $transId, $canal, $e->getMessage(), false);
-
-            return [
-                'ok' => false, 'code' => 'issue_inconnue', 'montant' => $montant,
-                'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
-                'message' => 'L\'opérateur est injoignable et l\'issue du transfert est inconnue. '
-                    . 'Les administrateurs ont été alertés — ne relancez pas le transfert.',
-            ];
-        } catch (\RuntimeException $e) {
+        } catch (DecaissementRefuse $e) {
             // REFUS EXPLICITE — l'opérateur a répondu non : l'argent n'est pas
             // parti. La réservation est compensée dans la même transaction que
             // le passage en `echec`, pour que le solde ne reste jamais amputé
             // d'un montant qui n'a pas quitté la collecte.
+            //
+            // Ce `catch` vient AVANT celui des autres erreurs : c'est la seule
+            // exception qui autorise à recréditer, elle doit donc être
+            // reconnue en premier.
             DB::transaction(function () use ($payoutId, $cagnotte, $montant, $e) {
                 DB::table(project_table('payout'))->where('id', $payoutId)->update([
                     'statut'     => 'echec',
@@ -299,6 +284,42 @@ class SortieArgent
                 'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
                 'message' => 'Le transfert a été refusé par l\'opérateur. '
                     . 'Le montant est revenu dans la collecte.',
+            ];
+        } catch (ConnectionException | \RuntimeException $e) {
+            // ISSUE INCONNUE — tout ce qui n'est pas un refus affirmé : coupure
+            // réseau, 5xx de passerelle, réponse illisible. La demande a pu
+            // être reçue et traitée côté opérateur.
+            //
+            // **Le solde n'est PAS restauré.** Recréditer ici ferait croire à
+            // la collecte qu'elle détient un montant déjà sorti, et la sortie
+            // suivante le dépenserait une seconde fois — perte irrécupérable
+            // que rien ne signale. Le payout reste `en_cours`, ce qui le fait
+            // remonter dans les réconciliations à traiter, et le cas se règle
+            // avec l'opérateur.
+            DB::table(project_table('payout'))->where('id', $payoutId)->update([
+                'statut'     => 'en_cours',
+                'response'   => json_encode(['error' => $e->getMessage(), 'issue' => 'inconnue']),
+                'updated_at' => now(),
+            ]);
+
+            Log::critical('[sortie] issue inconnue — solde non restauré, régularisation requise', [
+                'cagnotte'        => $cagnotte->reference,
+                'canal'           => $canal,
+                'payout_id'       => $payoutId,
+                'trans_id'        => $transId,
+                'idempotency_key' => $idempotencyKey,
+                'montant'         => $montant,
+                'erreur'          => $e->getMessage(),
+            ]);
+
+            $this->alerterAdmins($cagnotte, $montant, $numeroE164, $transId, $canal, $e->getMessage(), false);
+
+            return [
+                'ok' => false, 'code' => 'issue_inconnue', 'montant' => $montant,
+                'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
+                'message' => 'L\'issue du transfert est inconnue : elle est en cours de '
+                    . 'vérification auprès de l\'opérateur. Les administrateurs ont été '
+                    . 'alertés — ne relancez pas le transfert.',
             ];
         }
 

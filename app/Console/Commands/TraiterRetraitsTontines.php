@@ -295,13 +295,28 @@ class TraiterRetraitsTontines extends Command
                     reference:      $reference,
                     type:           $disburseType,
                 );
-            } catch (\RuntimeException $e) {
+            } catch (\Throwable $e) {
                 // Paynala KO — NE PAS restaurer le solde, alerter les admins.
+                //
+                // Le statut distingue les deux issues, parce que l'écran de
+                // réconciliation ne les traite pas pareil :
+                //   - refus affirmé → `echec`, le dossier est clos côté
+                //     opérateur, il reste à remettre la mise en jeu ;
+                //   - issue inconnue → `en_cours`, à vérifier auprès de
+                //     l'opérateur avant toute nouvelle tentative.
+                //
+                // Dans les deux cas le solde reste amputé : la rotation d'une
+                // tontine ne se recrédite pas sur une supposition.
+                $refusAffirme = $e instanceof \App\Services\DecaissementRefuse;
+
                 DB::table(project_table('payout'))
                     ->where('id', $payoutId)
                     ->update([
-                        'statut'     => 'echec',
-                        'response'   => json_encode(['error' => $e->getMessage()]),
+                        'statut'     => $refusAffirme ? 'echec' : 'en_cours',
+                        'response'   => json_encode(array_filter([
+                            'error' => $e->getMessage(),
+                            'issue' => $refusAffirme ? null : 'inconnue',
+                        ])),
                         'updated_at' => now(),
                     ]);
 
