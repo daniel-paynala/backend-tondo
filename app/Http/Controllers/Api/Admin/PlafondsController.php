@@ -100,11 +100,15 @@ class PlafondsController extends Controller
         );
 
         $data = $request->validate([
-            'frais_retrait'                      => ['required', 'array'],
-            'frais_retrait.cagnotte.particulier' => ['required', 'numeric', 'min:0', 'max:0.5'],
-            'frais_retrait.cagnotte.association' => ['required', 'numeric', 'min:0', 'max:0.5'],
-            'frais_retrait.tontine.particulier'  => ['required', 'numeric', 'min:0', 'max:0.5'],
-            'frais_retrait.tontine.association'  => ['required', 'numeric', 'min:0', 'max:0.5'],
+            // PATCH veut dire « modifie ce que j'envoie » : chaque bloc est
+            // facultatif et seul ce qui arrive est écrit. Sans cela, régler un
+            // verrou obligerait à renvoyer toute la matrice des taux, et un
+            // écran qui ne connaît que les verrous ne pourrait pas appeler.
+            'frais_retrait'                      => ['sometimes', 'array'],
+            'frais_retrait.cagnotte.particulier' => ['required_with:frais_retrait', 'numeric', 'min:0', 'max:0.5'],
+            'frais_retrait.cagnotte.association' => ['required_with:frais_retrait', 'numeric', 'min:0', 'max:0.5'],
+            'frais_retrait.tontine.particulier'  => ['required_with:frais_retrait', 'numeric', 'min:0', 'max:0.5'],
+            'frais_retrait.tontine.association'  => ['required_with:frais_retrait', 'numeric', 'min:0', 'max:0.5'],
             // Facultatif : un appel qui ne règle que la matrice reste valide.
             // Borne à 25 %, comme la commission — au-delà, c'est une erreur de
             // saisie, pas une décision commerciale.
@@ -118,24 +122,25 @@ class PlafondsController extends Controller
             'sorties_bloquees.association.marchand'     => ['required_with:sorties_bloquees', 'boolean'],
         ]);
 
-        // Normalise en float et applique à la config projet.
-        $matrice = [
-            'cagnotte' => [
-                'particulier' => (float) $data['frais_retrait']['cagnotte']['particulier'],
-                'association' => (float) $data['frais_retrait']['cagnotte']['association'],
-            ],
-            'tontine' => [
-                'particulier' => (float) $data['frais_retrait']['tontine']['particulier'],
-                'association' => (float) $data['frais_retrait']['tontine']['association'],
-            ],
-        ];
+        $champs  = ['updated_at' => now()];
+        $matrice = null;
 
-        // Le taux marchand n'est écrit QUE s'il a été envoyé : un appel qui ne
-        // règle que la matrice ne doit pas le remettre à sa valeur par défaut.
-        $champs = [
-            'frais_retrait' => json_encode($matrice),
-            'updated_at'    => now(),
-        ];
+        // Chaque bloc n'est écrit QUE s'il a été envoyé : un appel qui ne règle
+        // que les verrous ne doit pas remettre les taux à leur valeur par
+        // défaut, et réciproquement.
+        if (array_key_exists('frais_retrait', $data)) {
+            $matrice = [
+                'cagnotte' => [
+                    'particulier' => (float) $data['frais_retrait']['cagnotte']['particulier'],
+                    'association' => (float) $data['frais_retrait']['cagnotte']['association'],
+                ],
+                'tontine' => [
+                    'particulier' => (float) $data['frais_retrait']['tontine']['particulier'],
+                    'association' => (float) $data['frais_retrait']['tontine']['association'],
+                ],
+            ];
+            $champs['frais_retrait'] = json_encode($matrice);
+        }
         if (array_key_exists('frais_marchand', $data)) {
             $champs['frais_marchand'] = (float) $data['frais_marchand'];
         }
@@ -164,7 +169,7 @@ class PlafondsController extends Controller
         }
 
         return response()->json([
-            'message'       => 'Frais de retrait mis à jour.',
+            'message'       => 'Réglages mis à jour.',
             'frais_retrait' => $matrice,
         ]);
     }
