@@ -35,21 +35,4 @@ return [
      */
     'tontines_actives' => env('TONJI_TONTINES_ACTIVES', false),
 
-    /*
-     * Feature flag « Payer un commerce » — le client envoie le solde d'une
-     * collecte chez un marchand enregistré au lieu de le transférer à une
-     * personne.
-     *
-     * Pendant unique de `kPaiementMarchandActif` (Flutter) et
-     * `PAIEMENT_MARCHAND_ACTIF` (web) : les trois canaux doivent TOUJOURS être
-     * alignés, et `tonji:audit` le vérifie. Un drapeau ouvert d'un côté et
-     * fermé de l'autre donne une interface qui propose ce que le serveur
-     * refuse — ou l'inverse, une fonction accessible sans l'avoir décidé.
-     *
-     * À false (défaut) : le bouton « Payer » n'est pas construit dans l'app ni
-     * sur le web, et le bot WhatsApp ne propose pas l'entrée correspondante.
-     * Les fiches marchandes et le portail restent administrables : seule
-     * l'entrée côté client disparaît.
-     */
-    'paiement_marchand_actif' => env('TONJI_PAIEMENT_MARCHAND_ACTIF', false),
 ];

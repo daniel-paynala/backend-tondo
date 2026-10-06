@@ -2080,9 +2080,15 @@ class BotService
 
         $collecte = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
 
-        $this->session->set($numero, 'gerer.cagnotte', $newData);
+        $sorties = $this->sortiesDe($cagnotte);
+        // L'état du service est rangé en session pour que la LISTE TAPPABLE
+        // propose exactement les mêmes options que le texte : le
+        // WebhookController n'a que l'étape, pas la collecte.
+        $this->session->set($numero, 'gerer.cagnotte', array_merge($newData, [
+            'menu_marchand_actif' => $sorties['marchand_actif'] ?? false,
+        ]));
 
-        $options = $this->optionsMenuCagnotte($this->sortiesDe($cagnotte));
+        $options = $this->optionsMenuCagnotte($sorties);
 
         return <<<TXT
         💼 *{$cagnotte->titre}* · N°{$ref}
@@ -2099,16 +2105,20 @@ class BotService
     /**
      * Options du menu d'une cagnotte, avec leurs numéros FIXES.
      *
-     * Les numéros ne glissent pas quand une entrée disparaît : « Payer » est
-     * derrière un drapeau, et si son absence décalait « Fermer » de 4 à 3, les
-     * identifiants de la liste interactive ({@see BotUiMenus::menuCagnotte})
-     * ne correspondraient plus à ce que le texte annonce. Une option fermée
-     * est donc simplement absente de l'affichage, son numéro reste réservé.
+     * Les numéros ne glissent pas quand une entrée disparaît : « Payer »
+     * dépend de l'interrupteur du dashboard, et si son absence décalait
+     * « Fermer » de 4 à 3, les identifiants de la liste interactive
+     * ({@see BotUiMenus::menuCagnotte}) ne correspondraient plus à ce que le
+     * texte annonce. Une option fermée est donc simplement absente de
+     * l'affichage, son numéro reste réservé.
      *
-     * L'état du verrou est dit ICI plutôt qu'au clic : l'utilisateur voit
-     * tout de suite ce qui est suspendu, comme l'app grise ses boutons.
+     * Deux absences bien différentes :
+     *   - service marchand fermé au dashboard → la ligne n'existe pas ;
+     *   - service ouvert, collecte verrouillée → la ligne est barrée, avec la
+     *     raison. Celui qui l'a vue hier doit comprendre pourquoi elle ne
+     *     marche plus aujourd'hui.
      *
-     * @param  array{transfert: bool, marchand: bool} $sorties
+     * @param  array{transfert: bool, marchand: bool, marchand_actif: bool} $sorties
      */
     private function optionsMenuCagnotte(array $sorties): string
     {
@@ -2120,7 +2130,7 @@ class BotService
             ? '2️⃣  *Transférer* à une personne'
             : '2️⃣  ~Transférer~ _(momentanément suspendu)_';
 
-        if (config('tondo.paiement_marchand_actif')) {
+        if ($sorties['marchand_actif'] ?? false) {
             $lignes[] = $sorties['marchand']
                 ? '3️⃣  *Payer* un commerce'
                 : '3️⃣  ~Payer un commerce~ _(momentanément suspendu)_';
@@ -2153,7 +2163,7 @@ class BotService
                 'erreur'   => $e->getMessage(),
             ]);
 
-            return ['transfert' => false, 'marchand' => false];
+            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => false];
         }
     }
 
@@ -2227,8 +2237,11 @@ class BotService
             $paiements = $this->gererCagnotteSvc->historiquePaiements($cagnotte);
 
             if ($paiements->isEmpty()) {
-                $this->session->set($numero, 'gerer.cagnotte', $data);
-                $options = $this->optionsMenuCagnotte($this->sortiesDe($cagnotte));
+                $sorties = $this->sortiesDe($cagnotte);
+                $this->session->set($numero, 'gerer.cagnotte', array_merge($data, [
+                    'menu_marchand_actif' => $sorties['marchand_actif'] ?? false,
+                ]));
+                $options = $this->optionsMenuCagnotte($sorties);
 
                 return <<<TXT
                 📊 *Historique — {$cagnotte->titre}*
@@ -2311,13 +2324,17 @@ class BotService
         }
 
         // ── 3 · Payer un commerce ────────────────────────────────────────────
-        if ($texte === '3' && config('tondo.paiement_marchand_actif')) {
+        $sorties = $this->sortiesDe($cagnotte);
+
+        if ($texte === '3' && ($sorties['marchand_actif'] ?? false)) {
             $collecte = (int) $cagnotte->montant_collecte;
 
             if ($collecte <= 0) {
                 return $this->erreurEtMenu($numero, "❌ Solde nul — aucun paiement possible.");
             }
 
+            // Relu au clic : le verrou a pu tomber pendant que le menu était
+            // affiché. On relit, on ne réutilise pas la lecture du menu.
             if (! $this->sortiesDe($cagnotte)['marchand']) {
                 return "🔒 Le paiement d'un commerce est *momentanément suspendu* sur cette cagnotte.\n\n"
                     . $this->retourMenuCagnotte($numero, $cagnotte, $data);
@@ -2337,7 +2354,7 @@ class BotService
             TXT;
         }
 
-        $attendus = config('tondo.paiement_marchand_actif')
+        $attendus = ($sorties['marchand_actif'] ?? false)
             ? '*1*, *2*, *3*, *4* ou *5*'
             : '*1*, *2*, *4* ou *5*';
 
@@ -3491,9 +3508,12 @@ class BotService
     {
         $collecte = number_format((int) $cagnotte->montant_collecte, 0, ',', ' ');
         $ref      = $cagnotte->reference;
-        $this->session->set($numero, 'gerer.cagnotte', $data);
+        $sorties = $this->sortiesDe($cagnotte);
+        $this->session->set($numero, 'gerer.cagnotte', array_merge($data, [
+            'menu_marchand_actif' => $sorties['marchand_actif'] ?? false,
+        ]));
 
-        $options = $this->optionsMenuCagnotte($this->sortiesDe($cagnotte));
+        $options = $this->optionsMenuCagnotte($sorties);
 
         return <<<TXT
         💼 *{$cagnotte->titre}* · N°{$ref}

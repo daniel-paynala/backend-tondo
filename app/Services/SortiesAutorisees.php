@@ -24,9 +24,21 @@ class SortiesAutorisees
     public function __construct(private readonly TondoConfigService $config) {}
 
     /**
-     * État des deux sorties pour une collecte.
+     * État des sorties pour une collecte.
      *
-     * @return array{transfert: bool, marchand: bool}
+     * Trois valeurs et non deux. `marchand_actif` dit si le SERVICE est ouvert
+     * pour ce type de compte, indépendamment de cette collecte-ci :
+     *
+     *   - service fermé   → les interfaces ne CONSTRUISENT pas le bouton
+     *     « Payer ». Ce n'est pas « momentanément suspendu », ça n'existe pas.
+     *   - service ouvert mais collecte verrouillée → bouton présent et grisé,
+     *     avec la raison. Celui qui l'a vu hier doit comprendre pourquoi il ne
+     *     marche plus aujourd'hui.
+     *
+     * C'est ce qui remplace l'ancien drapeau de compilation : l'interrupteur du
+     * dashboard ferme le service partout, sans rebuild ni variable d'environnement.
+     *
+     * @return array{transfert: bool, marchand: bool, marchand_actif: bool}
      */
     public function pour(string $cagnotteId, string $projectId): array
     {
@@ -35,16 +47,17 @@ class SortiesAutorisees
             ->first(['user_id', 'transfert_bloque', 'paiement_marchand_bloque']);
 
         if ($cagnotte === null) {
-            // Collecte inconnue : on refuse les deux. Autoriser par défaut
-            // ferait d'une référence erronée un contournement du verrou.
-            return ['transfert' => false, 'marchand' => false];
+            // Collecte inconnue : on refuse tout. Autoriser par défaut ferait
+            // d'une référence erronée un contournement du verrou.
+            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => false];
         }
 
         $global = $this->global($projectId, $this->typeCompte($cagnotte->user_id));
 
         return [
-            'transfert' => ! $cagnotte->transfert_bloque && ! $global['transfert'],
-            'marchand'  => ! $cagnotte->paiement_marchand_bloque && ! $global['marchand'],
+            'transfert'      => ! $cagnotte->transfert_bloque && ! $global['transfert'],
+            'marchand'       => ! $cagnotte->paiement_marchand_bloque && ! $global['marchand'],
+            'marchand_actif' => ! $global['marchand'],
         ];
     }
 

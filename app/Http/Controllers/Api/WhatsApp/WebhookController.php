@@ -373,7 +373,10 @@ class WebhookController extends Controller
 
         // 3) L'étape courante (après traiter) a-t-elle une version interactive ?
         $etape = $this->session->etape($from);
-        $spec  = \App\Services\WhatsApp\BotUiMenus::pour($etape);
+        // Les données de session accompagnent l'étape : certaines versions
+        // tappables doivent proposer exactement ce que le texte vient
+        // d'afficher, et seul le bot sait ce qu'il a affiché.
+        $spec  = \App\Services\WhatsApp\BotUiMenus::pour($etape, $this->session->data($from));
         if ($spec === null) {
             $sender->envoyer($from, $texte);
             return;

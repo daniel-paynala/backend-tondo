@@ -244,17 +244,6 @@ final class Registre
                 'motif'   => '/TONTINES_ACTIVES\s*=\s*(true|false)/',
             ],
         ],
-        'paiement_marchand' => [
-            'backend' => ['config' => 'tondo.paiement_marchand_actif'],
-            'mobile'  => [
-                'fichier' => '../mobile/lib/core/config/feature_flags.dart',
-                'motif'   => '/kPaiementMarchandActif\s*=\s*(true|false)/',
-            ],
-            'web' => [
-                'fichier' => '../tondo-web/src/lib/featureFlags.ts',
-                'motif'   => '/PAIEMENT_MARCHAND_ACTIF\s*=\s*(true|false)/',
-            ],
-        ],
     ];
 
     /**

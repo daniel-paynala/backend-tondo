@@ -157,9 +157,7 @@ class SortiesUnifieesTest extends TestCase
     public function test_les_identifiants_du_menu_tappable_suivent_le_texte(): void
     {
         foreach ([false, true] as $marchandActif) {
-            config(['tondo.paiement_marchand_actif' => $marchandActif]);
-
-            $spec = BotUiMenus::pour('gerer.cagnotte');
+            $spec = BotUiMenus::pour('gerer.cagnotte', ['menu_marchand_actif' => $marchandActif]);
             $ids  = array_column($spec['sections'][0]['lignes'], 'id');
 
             $attendus = $marchandActif
@@ -174,15 +172,62 @@ class SortiesUnifieesTest extends TestCase
         }
     }
 
-    public function test_payer_un_commerce_reste_derriere_son_drapeau(): void
+    /**
+     * « Payer » suit l'interrupteur du dashboard, et rien d'autre.
+     *
+     * Il dépendait d'un drapeau de compilation, donc d'un rebuild et d'une
+     * variable d'environnement par canal. Désormais c'est le verrou global du
+     * type de compte qui décide — un seul interrupteur, qui ferme partout.
+     */
+    public function test_payer_un_commerce_suit_l_interrupteur_du_dashboard(): void
     {
-        config(['tondo.paiement_marchand_actif' => false]);
-        $ids = array_column(BotUiMenus::pour('gerer.cagnotte')['sections'][0]['lignes'], 'id');
+        $ids = array_column(
+            BotUiMenus::pour('gerer.cagnotte', ['menu_marchand_actif' => false])['sections'][0]['lignes'],
+            'id',
+        );
         $this->assertNotContains('3', $ids);
 
-        config(['tondo.paiement_marchand_actif' => true]);
-        $ids = array_column(BotUiMenus::pour('gerer.cagnotte')['sections'][0]['lignes'], 'id');
+        $ids = array_column(
+            BotUiMenus::pour('gerer.cagnotte', ['menu_marchand_actif' => true])['sections'][0]['lignes'],
+            'id',
+        );
         $this->assertContains('3', $ids);
+    }
+
+    /**
+     * Contexte absent = service fermé.
+     *
+     * Une session sans l'information ne doit pas faire apparaître une option
+     * que le texte n'a pas annoncée : c'est le désalignement qu'on évite.
+     */
+    public function test_sans_contexte_payer_n_apparait_pas(): void
+    {
+        $ids = array_column(
+            BotUiMenus::pour('gerer.cagnotte')['sections'][0]['lignes'],
+            'id',
+        );
+
+        $this->assertSame(['1', '2', '4', '5'], $ids);
+    }
+
+    /**
+     * Le verrou distingue « service fermé » de « collecte suspendue ».
+     *
+     * Les deux rendent le paiement impossible, mais pas de la même façon à
+     * l'écran : service fermé → le bouton n'est pas construit ; collecte
+     * verrouillée → il est grisé avec sa raison. Sans cette distinction, un
+     * service non ouvert s'afficherait comme « momentanément suspendu ».
+     */
+    public function test_le_verrou_expose_la_disponibilite_du_service(): void
+    {
+        $retour = new \ReflectionMethod(\App\Services\SortiesAutorisees::class, 'pour');
+
+        $this->assertStringContainsString(
+            'marchand_actif',
+            (string) $retour->getDocComment(),
+            'pour() doit documenter marchand_actif : les interfaces s\'en servent '
+                . 'pour ne PAS construire le bouton quand le service est fermé.',
+        );
     }
 
     /**
