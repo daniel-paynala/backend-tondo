@@ -99,7 +99,27 @@ class TraiterReversementsAutoCagnottes extends Command
             // le verrou tient. D'où un AVERTISSEMENT et non une ligne
             // d'information — un solde immobilisé doit se voir dans les
             // journaux, sinon personne ne saura pourquoi rien n'est parti.
-            if (! $sorties->pour($cagnotte->id, $cagnotte->project_id)['transfert']) {
+            // La lecture du verrou est isolée PAR COLLECTE. Sans ce filet, une
+            // colonne manquante — le SQL 036 pas encore joué — ferait lever
+            // dès la première collecte et tuerait la passe entière : plus
+            // aucun reversement pour personne, cette nuit-là et les suivantes.
+            //
+            // En cas d'échec de lecture, on saute CETTE collecte et on
+            // continue. Refuser une sortie à tort se rattrape le lendemain ;
+            // la laisser passer alors qu'un verrou existe peut-être, non.
+            try {
+                $autorise = $sorties->pour($cagnotte->id, $cagnotte->project_id)['transfert'];
+            } catch (\Throwable $e) {
+                $this->error("  → [{$cagnotte->reference}] verrou illisible — reversement suspendu.");
+                Log::error('[reversements-auto] verrou illisible, collecte sautée', [
+                    'cagnotte' => $cagnotte->reference,
+                    'erreur'   => $e->getMessage(),
+                ]);
+                $ignores++;
+                continue;
+            }
+
+            if (! $autorise) {
                 $this->warn("  → [{$cagnotte->reference}] transfert verrouillé — reversement suspendu.");
                 Log::warning('[reversements-auto] collecte verrouillée, reversement suspendu', [
                     'cagnotte'  => $cagnotte->reference,
