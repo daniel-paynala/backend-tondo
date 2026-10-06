@@ -27,6 +27,7 @@ use Illuminate\Support\Str;
  * @property string  $pays                Code ISO 2 (ex : 'GA' pour Gabon).
  * @property ?string $indicatif           Indicatif téléphonique sans '+' (ex : '241').
  * @property float   $commission_paynala  Taux de commission (ex : 0.02 = 2%).
+ * @property float   $frais_marchand      Taux sur un paiement marchand (0.03 = 3 %).
  * @property int     $plafond_par_envoi   Montant max par transaction (FCFA).
  * @property int     $plafond_journalier  Montant max cumulé par jour (FCFA).
  * @property array   $tranches            Tableau JSON des tranches de frais opérateur.
@@ -36,6 +37,12 @@ use Illuminate\Support\Str;
  */
 class TondoProjectConfig extends Model
 {
+    /** Aucun verrou — l'état par défaut, et le repli quand la colonne est vide. */
+    public const VERROUS_OUVERTS = [
+        'particulier' => ['transfert' => false, 'marchand' => false],
+        'association' => ['transfert' => false, 'marchand' => false],
+    ];
+
     use UuidPrimary;
     use HasProjectTable;
 
@@ -47,11 +54,13 @@ class TondoProjectConfig extends Model
 
     protected $casts = [
         'commission_paynala' => 'float',
+        'frais_marchand'     => 'float',
         'plafond_par_envoi'  => 'integer',
         'plafond_journalier' => 'integer',
         'plafond_cagnotte_particulier' => 'integer',
         'plafond_cagnotte_association' => 'integer',
         'frais_retrait'                => 'array',
+        'sorties_bloquees'             => 'array',
         'tranches'           => 'array',   // Tranches de frais opérateur (JSON array).
         'prefixes'           => 'array',   // Préfixes locaux valides (JSON array).
         'actif'              => 'boolean',
@@ -74,6 +83,11 @@ class TondoProjectConfig extends Model
             'prefixes'           => $this->prefixes ?? [],    // Tableau vide si non défini.
             'actif'              => (bool) ($this->actif ?? true),
             'commission_paynala' => $this->commission_paynala,
+            // Taux du paiement marchand. Zéro = aucun prélèvement, et le
+            // texte des conditions le dira de lui-même.
+            'frais_marchand'     => (float) ($this->frais_marchand ?? 0.0),
+            // Verrous des sorties d'argent, par type de compte.
+            'sorties_bloquees'   => $this->sorties_bloquees ?? self::VERROUS_OUVERTS,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
             'plafond_cagnotte_particulier' => (int) ($this->plafond_cagnotte_particulier ?? 2500000),

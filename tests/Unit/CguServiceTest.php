@@ -32,9 +32,14 @@ class CguServiceTest extends TestCase
             'plafond_par_envoi'            => 500000,
             'plafond_cagnotte_particulier' => 2500000,
             'plafond_cagnotte_association' => 10000000,
+            'frais_marchand'               => 0.03,
             'frais_retrait'                => [
                 'cagnotte' => ['particulier' => 0, 'association' => 0],
                 'tontine'  => ['particulier' => 0, 'association' => 0],
+            ],
+            'tranches'                     => [
+                ['type' => 'pourcentage', 'valeur' => 0.03, 'montant_min' => 1, 'montant_max' => 166667],
+                ['type' => 'forfait',     'valeur' => 5000, 'montant_min' => 166668, 'montant_max' => 500000],
             ],
         ], $surcharges);
     }
@@ -50,18 +55,54 @@ class CguServiceTest extends TestCase
         $this->fail("Bloc « {$titre} » absent des CGU.");
     }
 
-    public function test_le_taux_de_commission_n_est_jamais_cite(): void
+    public function test_le_taux_de_commission_sur_cotisation_n_est_jamais_cite(): void
     {
-        // RÈGLE 4-bis : le détail du calcul des frais ne s'expose pas. Le texte
-        // dit qui les supporte, jamais combien ils valent.
-        $corps = $this->bloc($this->config(), 'Modèle économique');
+        // RÈGLE 4-bis tient toujours POUR LA COTISATION : le texte dit qui
+        // supporte les frais, jamais combien ils valent. Daniel a en revanche
+        // demandé que le taux du paiement marchand, lui, soit annoncé — c'est
+        // le créateur de la collecte qui le lit, pas le cotisant au moment de
+        // payer.
+        $corps = $this->bloc($this->config(['commission_paynala' => 0.035]), 'Frais');
 
-        $this->assertStringContainsString('commission sur chaque cotisation', $corps);
-        $this->assertStringNotContainsString('2 %', $corps);
-        $this->assertStringNotContainsString('3,5 %', $this->bloc(
-            $this->config(['commission_paynala' => 0.035]),
-            'Modèle économique',
-        ));
+        $this->assertStringNotContainsString('3,5 %', $corps);
+    }
+
+    public function test_sans_commission_le_texte_annonce_des_cotisations_gratuites(): void
+    {
+        // Le texte disait « les frais sont à la charge du cotisant » alors que
+        // la commission était passée à 0 : exactement la divergence que ce
+        // service existe pour empêcher.
+        $corps = $this->bloc($this->config(['commission_paynala' => 0]), 'Frais');
+        $this->assertStringContainsString('sans frais', $corps);
+
+        $avec = $this->bloc($this->config(['commission_paynala' => 0.02]), 'Frais');
+        $this->assertStringContainsString('à la charge du cotisant', $avec);
+    }
+
+    public function test_le_taux_marchand_est_annonce_et_suit_la_config(): void
+    {
+        $this->assertStringContainsString(
+            '3 %',
+            $this->bloc($this->config(['frais_marchand' => 0.03]), 'Frais'),
+        );
+        // À zéro, on ne dit pas « 0 % » : on dit qu'il n'y a pas de frais.
+        $gratuit = $this->bloc($this->config(['frais_marchand' => 0]), 'Frais');
+        $this->assertStringContainsString('sans frais', $gratuit);
+        $this->assertStringNotContainsString('0 %', $gratuit);
+    }
+
+    public function test_le_bareme_de_retrait_vient_des_tranches(): void
+    {
+        // Une renégociation avec l'opérateur doit changer le texte sans qu'une
+        // ligne de code ne bouge.
+        $corps = $this->bloc($this->config(), 'Frais');
+        $this->assertStringContainsString('3 % jusqu\'à 166 667 FCFA', $corps);
+        $this->assertStringContainsString('5 000 FCFA au-delà', $corps);
+
+        $autre = $this->bloc($this->config(['tranches' => [
+            ['type' => 'pourcentage', 'valeur' => 0.02, 'montant_min' => 1, 'montant_max' => 200000],
+        ]]), 'Frais');
+        $this->assertStringContainsString('2 % jusqu\'à 200 000 FCFA', $autre);
     }
 
     public function test_un_reglage_invisible_ne_change_pas_la_version(): void
@@ -74,11 +115,13 @@ class CguServiceTest extends TestCase
         $this->assertSame($avant, $apres);
     }
 
-    public function test_matrice_a_zero_les_frais_de_retrait_ne_sont_pas_repercutes(): void
+    public function test_matrice_a_zero_le_transfert_est_annonce_sans_frais(): void
     {
+        // Même garantie qu'avant, formulation nouvelle : c'est la matrice
+        // `frais_retrait` qui décide, jamais une phrase écrite en dur.
         $this->assertStringContainsString(
-            'ne sont pas répercutés sur le cotisant',
-            $this->bloc($this->config(), 'Modèle économique'),
+            'transfert du solde vers un numéro Mobile Money est sans frais',
+            $this->bloc($this->config(), 'Frais'),
         );
     }
 
@@ -90,8 +133,8 @@ class CguServiceTest extends TestCase
         ]]);
 
         $this->assertStringContainsString(
-            'sont également répercutés sur le',
-            $this->bloc($cfg, 'Modèle économique'),
+            'transfert du solde vers un numéro Mobile Money est facturé',
+            $this->bloc($cfg, 'Frais'),
         );
     }
 

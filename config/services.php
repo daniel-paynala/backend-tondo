@@ -73,8 +73,17 @@ return [
     | Paynala Payment Gateway — Airtel Money Gabon
     |--------------------------------------------------------------------------
     |
-    | PAYNALA_BASE_URL : staging = https://testapi.paynala.com/functions/v1
-    |                    prod    = https://api.paynala.com/functions/v1
+    | PAYNALA_BASE_URL : https://api.paynala.com/functions/v1
+    |
+    | ⚠️ Il n'existe pas d'environnement de test Paynala : testapi.paynala.com ne
+    | résout pas (constaté le 2026-09-11). La valeur par défaut ci-dessous reste
+    | cette adresse morte à dessein — un environnement mal configuré échoue sans
+    | rien déplacer, au lieu de tomber silencieusement sur la production.
+    |
+    | Le serveur de test utilise donc api.paynala.com, pour le KYC notamment.
+    | Les encaissements et transferts y sont BLOQUÉS (APP_ENV=staging) tant que
+    | PAYNALA_OPERATIONS_REELLES n'est pas explicitement à true : ils
+    | déplaceraient de l'argent réel sur la base de soldes de test.
     |
     */
     'paynala' => [
@@ -82,6 +91,21 @@ return [
         'client_secret' => env('PAYNALA_CLIENT_SECRET'),
         'base_url'      => env('PAYNALA_BASE_URL', 'https://testapi.paynala.com/functions/v1'),
         'operator_key'  => env('PAYNALA_OPERATOR_KEY'),
+        'operations_reelles_en_test' => (bool) env('PAYNALA_OPERATIONS_REELLES', false),
+
+        /*
+         * Mode de décaissement selon le type du compte qui reçoit, tel que le
+         * grade Airtel le donne. Un compte professionnel se paie en B2B, un
+         * compte personnel en B2C — inverser les deux fait répondre
+         * « Transaction Ambiguous » et débite la cagnotte pour rien.
+         *
+         * En réglage plutôt qu'en dur : si Paynala renomme ses modes ou en
+         * ajoute un, cela se change dans un .env, sans redéploiement de code.
+         */
+        'routage_disburse' => [
+            'entreprise'  => env('PAYNALA_MODE_ENTREPRISE', 'B2B'),
+            'particulier' => env('PAYNALA_MODE_PARTICULIER', 'B2C'),
+        ],
     ],
 
     /*
@@ -192,6 +216,13 @@ return [
     // Paynala, domaine paynala.com). Appelée en HTTP direct — pas besoin du
     // transport Mailgun de Laravel ni d'un package composer supplémentaire.
     'mailgun' => [
+        /*
+         * Hors production : toute adresse est remplacée par celle-ci, le
+         * destinataire d'origine passant dans le sujet. Miroir de
+         * RETRAIT_SMS_DESTINATAIRE_FORCE. Vide = aucun détournement, donc de
+         * vrais commerçants reçoivent les essais de recette.
+         */
+        'destinataire_force' => env('MAIL_DESTINATAIRE_FORCE', ''),
         'domain'   => env('MAILGUN_DOMAIN', 'paynala.com'),
         'secret'   => env('MAILGUN_SECRET'),
         'endpoint' => env('MAILGUN_ENDPOINT', 'api.eu.mailgun.net'),
@@ -201,6 +232,14 @@ return [
 
     // URL du dashboard admin (pour les liens dans les e-mails d'invitation).
     'admin_dashboard_url' => env('ADMIN_DASHBOARD_URL', 'https://api.tonji.ga'),
+
+    /*
+     * Portail de suivi des marchands, cité en dernière ligne du message de
+     * paiement. Vide par défaut : l'adresse n'est pas arrêtée, et la ligne
+     * disparaît du message tant qu'elle ne l'est pas — mieux vaut pas de lien
+     * qu'un lien mort dans un SMS facturé.
+     */
+    'portail_marchand_url' => env('PORTAIL_MARCHAND_URL', ''),
 
     // Supabase Storage — stockage des pièces des associations (bucket PRIVÉ).
     // Réutilise l'URL + la clé service_role déjà présentes dans le .env.

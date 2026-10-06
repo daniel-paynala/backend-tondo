@@ -28,8 +28,24 @@ class EmailLayout
         $annee = date('Y');
         $titreSafe = e($titre);
 
+        // Hors production, l'expéditeur et le gabarit sont identiques à ceux de la
+        // production : on marque donc l'e-mail dès l'aperçu et par un bandeau, pour
+        // qu'un identifiant de recette ne soit jamais pris pour un identifiant réel.
+        $estTest = ! app()->environment('production');
+
+        if ($estTest && $preheader) {
+            $preheader = '[TEST] '.$preheader;
+        }
+
         $preheaderHtml = $preheader
             ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">'.e($preheader).'</div>'
+            : '';
+
+        $bandeauTest = $estTest
+            ? '<tr><td style="background:#E8A830;padding:12px 28px;font-size:13px;line-height:1.5;color:#14202E;font-weight:700;">'
+              .'PLATEFORME DE TEST — cet e-mail vient de l\'environnement de recette Tonji. '
+              .'<span style="font-weight:400;">Les identifiants et les montants qu\'il contient ne concernent pas la production.</span>'
+              .'</td></tr>'
             : '';
 
         $cta = '';
@@ -60,6 +76,7 @@ class EmailLayout
                 <tr><td style="background:#0A6847;padding:20px 28px;border-radius:16px 16px 0 0;">
                   <img src="https://tonji.ga/logo-tonji.png" alt="Tonji" width="46" height="46" style="display:block;width:46px;height:46px;border-radius:10px;">
                 </td></tr>
+                {$bandeauTest}
 
                 <!-- Corps -->
                 <tr><td style="background:#ffffff;padding:32px 28px;border-left:1px solid #E8EDE9;border-right:1px solid #E8EDE9;">

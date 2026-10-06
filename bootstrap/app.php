@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ReceiptMarchandViewController;
 use App\Http\Controllers\ReceiptViewController;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -22,6 +23,16 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(function () {
                     Route::get('/{transId}',     [ReceiptViewController::class, 'show']);
                     Route::get('/{transId}/pdf', [ReceiptViewController::class, 'pdf']);
+                });
+
+            // Boucle distincte pour les paiements marchands : un reçu
+            // commercial n'a ni les mêmes données ni la même forme qu'un reçu
+            // de cotisation, et on ne touche pas à ce qui marche déjà.
+            Route::middleware([])
+                ->prefix('recu-marchand')
+                ->group(function () {
+                    Route::get('/{transId}',     [ReceiptMarchandViewController::class, 'show']);
+                    Route::get('/{transId}/pdf', [ReceiptMarchandViewController::class, 'pdf']);
                 });
         },
     )
@@ -48,7 +59,42 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             \App\Http\Middleware\ForceJsonResponse::class,
         ]);
+
+        // Terminaux des agents de retrait : clé du partenaire, puis contrôle de
+        // l'agent à chaque appel.
+        $middleware->alias([
+            // Portail marchand : le numéro vient du jeton, jamais de la requête.
+            'jeton.marchand'  => \App\Http\Middleware\JetonMarchandRequis::class,
+            'partenaire'         => \App\Http\Middleware\AuthentifiePartenaire::class,
+            'agent.operationnel' => \App\Http\Middleware\AgentOperationnel::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // API des agents de retrait : chaque refus porte un `code` stable, que
+        // le logiciel du partenaire lit sans analyser le texte — y compris les
+        // erreurs levées par le framework lui-même, qui ne le fourniraient pas
+        // (« Unauthenticated. », « Too Many Attempts. »).
+        $agent = fn (\Illuminate\Http\Request $r) => $r->is('api/agent/*');
+
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $r) use ($agent) {
+            return $agent($r) ? response()->json([
+                'message' => 'Session expirée ou invalide. Reconnectez-vous.',
+                'code'    => 'session_invalide',
+            ], 401) : null;
+        });
+
+        $exceptions->render(function (\Illuminate\Validation\ValidationException $e, \Illuminate\Http\Request $r) use ($agent) {
+            return $agent($r) ? response()->json([
+                'message' => collect($e->errors())->flatten()->first() ?? 'Requête invalide.',
+                'code'    => 'requete_invalide',
+                'erreurs' => $e->errors(),
+            ], 422) : null;
+        });
+
+        $exceptions->render(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e, \Illuminate\Http\Request $r) use ($agent) {
+            return $agent($r) ? response()->json([
+                'message' => 'Trop de requêtes. Réessayez dans un instant.',
+                'code'    => 'trop_de_requetes',
+            ], 429, $e->getHeaders()) : null;
+        });
     })->create();

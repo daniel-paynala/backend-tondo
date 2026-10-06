@@ -1,0 +1,459 @@
+<?php
+
+namespace App\Http\Controllers\Api\Admin;
+
+use App\Http\Controllers\Api\Admin\Concerns\GereRetraitAgents;
+use App\Http\Controllers\Controller;
+use App\Models\TondoMarchand;
+use App\Services\PaynalaPaymentService;
+use App\Services\VerificationNumeroRetrait;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+
+/**
+ * Marchands — destinations de transfert enregistrées par Tonji.
+ *
+ * Un marchand est un numéro Airtel Money vers lequel un client peut envoyer le
+ * solde de sa cagnotte au lieu de le rapatrier sur son propre numéro. Comme
+ * l'argent part réellement chez un tiers, l'enregistrement est un acte
+ * d'administration : écriture réservée aux super admins et tracée dans le
+ * journal, exactement comme les partenaires de retrait.
+ *
+ * Le numéro est vérifié auprès de l'opérateur avant d'être enregistré : on
+ * garde le nom du titulaire, qui sert de contrôle visuel à la saisie puis de
+ * preuve si un paiement est contesté.
+ *
+ * Une fiche qui porte des paiements ne se supprime pas : on la désactive, et
+ * l'historique reste lisible.
+ */
+class MarchandsController extends Controller
+{
+    use GereRetraitAgents;
+
+    /** GET /api/admin/marchands */
+    public function index(Request $request): JsonResponse
+    {
+        $categories = project_table('categories_marchands');
+        $marchandsTable = project_table('marchands');
+
+        $marchands = TondoMarchand::where("{$marchandsTable}.project_id", $request->user()->project_id)
+            // Le libellé accompagne chaque fiche : le dashboard l'affiche en
+            // pastille, et une requête par ligne serait du gaspillage.
+            ->leftJoin($categories, "{$categories}.id", '=', "{$marchandsTable}.categorie_id")
+            ->select("{$marchandsTable}.*", "{$categories}.libelle as categorie_libelle")
+            ->when($request->filled('actif'), fn ($q) => $q->where("{$marchandsTable}.actif", $request->boolean('actif')))
+            ->when($request->filled('q'), function ($q) use ($request, $marchandsTable) {
+                $terme = '%' . $request->string('q')->trim() . '%';
+                $q->where(fn ($s) => $s->where("{$marchandsTable}.nom", 'ilike', $terme)
+                    ->orWhere("{$marchandsTable}.numero_tel", 'ilike', $terme));
+            })
+            ->orderBy("{$marchandsTable}.nom")
+            ->get();
+
+        $stats = TondoMarchand::statistiques($marchands->pluck('id'));
+
+        return response()->json([
+            'marchands' => $marchands->map(fn (TondoMarchand $m) => $this->presenter($m, $stats)),
+        ]);
+    }
+
+    /**
+     * POST /api/admin/marchands
+     *
+     * Le KYC est appelé ici, pas seulement à la saisie : entre l'aperçu affiché
+     * dans le formulaire et l'enregistrement, rien ne garantit que le numéro
+     * soumis soit celui qui a été vérifié.
+     *
+     * Il décide aussi du routage : un compte Airtel professionnel part en B2B,
+     * un compte personnel en B2C. Ce n'est pas un choix d'administrateur —
+     * déclarer « entreprise » un numéro personnel fait répondre « Transaction
+     * Ambiguous » à Airtel, la cagnotte est débitée et rien n'arrive.
+     */
+    public function store(Request $request, VerificationNumeroRetrait $verification): JsonResponse
+    {
+        $this->exigerSuperAdmin($request);
+        $projectId = $request->user()->project_id;
+
+        $request->merge(['numero_tel' => self::versE164($request->input('numero_tel'))]);
+        self::normaliserCode($request);
+        $data = $request->validate($this->regles($projectId));
+
+        $verdict = $verification->verifier($data['numero_tel'], $projectId);
+
+        if ($verdict['operateur'] !== 'airtel') {
+            return response()->json([
+                'message' => 'Ce numéro n\'est pas un numéro Airtel Money : le transfert vers ce marchand échouerait.',
+                'code'    => 'operateur_non_supporte',
+            ], 422);
+        }
+
+        if ($verdict['kycOk'] === false) {
+            return response()->json([
+                'message' => 'Aucun compte Airtel Money actif sur ce numéro.',
+                'code'    => 'compte_inactif',
+            ], 422);
+        }
+
+        $type = self::typeSelonOperateur($data['numero_tel']);
+        if ($refus = self::refusSiPasEntreprise($type)) {
+            return response()->json($refus[0], $refus[1]);
+        }
+
+        $marchand = new TondoMarchand();
+        // id généré en PHP : Eloquent ne relit pas la valeur du DEFAULT.
+        $marchand->id = (string) Str::uuid();
+        $marchand->fill($data + [
+            'project_id'           => $projectId,
+            'titulaire'            => $verdict['titulaire'],
+            'titulaire_verifie_at' => $verdict['titulaire'] ? now() : null,
+            'type_paynala'         => $type,
+        ]);
+        $marchand->save();
+
+        $this->journaliser($request, 'marchand_cree', "Marchand {$marchand->nom}", 'info', [
+            'marchand_id' => $marchand->id,
+            'numero'      => $marchand->numero_tel,
+            'titulaire'   => $marchand->titulaire,
+        ]);
+
+        return response()->json(['marchand' => $this->presenter($marchand)], 201);
+    }
+
+    /** PATCH /api/admin/marchands/{id} */
+    public function update(Request $request, string $id, VerificationNumeroRetrait $verification): JsonResponse
+    {
+        $this->exigerSuperAdmin($request);
+        $projectId = $request->user()->project_id;
+
+        $marchand = TondoMarchand::where('project_id', $projectId)->find($id);
+        if (! $marchand) {
+            return response()->json(['message' => 'Marchand introuvable.'], 404);
+        }
+
+        if ($request->has('numero_tel')) {
+            $request->merge(['numero_tel' => self::versE164($request->input('numero_tel'))]);
+        }
+        self::normaliserCode($request);
+        $data = $request->validate($this->regles($projectId, partiel: true, ignoreId: $id));
+
+        // Changer le numéro change la destination de l'argent : le titulaire
+        // affiché doit suivre, sinon la fiche afficherait le nom de l'ancien
+        // compte tout en payant le nouveau.
+        if (isset($data['numero_tel']) && $data['numero_tel'] !== $marchand->numero_tel) {
+            $verdict = $verification->verifier($data['numero_tel'], $projectId);
+
+            if ($verdict['operateur'] !== 'airtel' || $verdict['kycOk'] === false) {
+                return response()->json([
+                    'message' => 'Ce numéro n\'est pas un compte Airtel Money actif.',
+                    'code'    => 'numero_refuse',
+                ], 422);
+            }
+
+            // Le routage suit le nouveau numéro : garder l'ancien ferait partir
+            // un B2B vers un compte personnel, ou l'inverse. Et le nouveau
+            // numéro doit lui aussi être une entreprise — sans ce contrôle,
+            // une modification serait le chemin détourné pour inscrire un
+            // compte particulier que la création refuse.
+            $type = self::typeSelonOperateur($data['numero_tel']);
+            if ($refus = self::refusSiPasEntreprise($type)) {
+                return response()->json($refus[0], $refus[1]);
+            }
+
+            $data['titulaire']            = $verdict['titulaire'];
+            $data['titulaire_verifie_at'] = $verdict['titulaire'] ? now() : null;
+            $data['type_paynala']         = $type;
+        }
+
+        $avant = $marchand->only(array_keys($data));
+        $marchand->fill($data);
+        $marchand->save();
+
+        $this->journaliser(
+            $request,
+            'marchand_modifie',
+            "Marchand {$marchand->nom}",
+            // Désactiver retire la destination du parcours client : c'est visible.
+            array_key_exists('actif', $data) && $data['actif'] === false ? 'warning' : 'info',
+            ['marchand_id' => $marchand->id, 'avant' => $avant, 'apres' => $data],
+        );
+
+        return response()->json(['marchand' => $this->presenter($marchand)]);
+    }
+
+    /**
+     * DELETE /api/admin/marchands/{id}
+     *
+     * Refusée dès le premier paiement : la clé étrangère est en RESTRICT, et
+     * un message clair vaut mieux qu'une erreur de base de données.
+     */
+    public function destroy(Request $request, string $id): JsonResponse
+    {
+        $this->exigerSuperAdmin($request);
+
+        $marchand = TondoMarchand::where('project_id', $request->user()->project_id)->find($id);
+        if (! $marchand) {
+            return response()->json(['message' => 'Marchand introuvable.'], 404);
+        }
+
+        $nb = DB::table(project_table('payout'))->where('marchand_id', $marchand->id)->count();
+        if ($nb > 0) {
+            return response()->json([
+                'message' => "Suppression impossible : {$nb} paiement(s) sont rattachés à ce marchand. Désactivez-le plutôt.",
+            ], 409);
+        }
+
+        $marchand->delete();
+
+        $this->journaliser($request, 'marchand_supprime', "Marchand {$marchand->nom}", 'warning', [
+            'marchand_id' => $marchand->id,
+            'numero'      => $marchand->numero_tel,
+        ]);
+
+        return response()->json(['supprime' => true]);
+    }
+
+    /**
+     * POST /api/admin/marchands/verifier-numero
+     *
+     * Aperçu pour le formulaire : affiche le titulaire avant d'enregistrer,
+     * pour qu'un chiffre inversé se voie tout de suite.
+     */
+    public function verifierNumero(Request $request, VerificationNumeroRetrait $verification): JsonResponse
+    {
+        $data = $request->validate([
+            'numero_tel' => ['required', 'string', 'max:20'],
+        ]);
+
+        $verdict = $verification->verifier($data['numero_tel'], $request->user()->project_id);
+
+        return response()->json([
+            'numero_tel'   => self::versE164($data['numero_tel']),
+            'operateur'    => $verdict['operateur'],
+            'kyc_ok'       => $verdict['kycOk'],
+            'titulaire'    => $verdict['titulaire'],
+            // « entreprise » => décaissement B2B possible, « particulier » => B2C.
+            'type_paynala' => $verdict['kycOk'] === true
+                ? self::typeSelonOperateur(self::versE164($data['numero_tel']))
+                : null,
+        ]);
+    }
+
+    /**
+     * GET /api/admin/marchands/{id}/paiements
+     *
+     * Relevé d'un marchand : ce que Tonji lui a envoyé, du plus récent au plus
+     * ancien, avec la cagnotte d'origine.
+     */
+    public function paiements(Request $request, string $id): JsonResponse
+    {
+        $projectId = $request->user()->project_id;
+
+        $marchand = TondoMarchand::where('project_id', $projectId)->find($id);
+        if (! $marchand) {
+            return response()->json(['message' => 'Marchand introuvable.'], 404);
+        }
+
+        $payout    = project_table('payout');
+        $cagnottes = project_table('cagnottes');
+
+        $paiements = DB::table($payout)
+            ->leftJoin($cagnottes, "{$cagnottes}.id", '=', "{$payout}.cagnotte_id")
+            ->where("{$payout}.marchand_id", $marchand->id)
+            ->orderByDesc("{$payout}.date_creation")
+            ->limit(200)
+            ->get([
+                "{$payout}.trans_id",
+                "{$payout}.montant",
+                "{$payout}.statut",
+                "{$payout}.operateur_id",
+                "{$payout}.date_creation",
+                "{$cagnottes}.reference as cagnotte_reference",
+                "{$cagnottes}.titre as cagnotte_titre",
+            ]);
+
+        return response()->json([
+            'marchand'  => $this->presenter($marchand),
+            'paiements' => $paiements,
+        ]);
+    }
+
+    // ── Interne ─────────────────────────────────────────────────────────────
+
+    /**
+     * Type de compte tel que l'opérateur le voit, jamais tel qu'on le déclare.
+     *
+     * Le grade Airtel a été mis en cache par la vérification qui précède.
+     *
+     * Retourne **null** quand le grade est introuvable — cache expiré,
+     * opérateur muet. Ce cas ne retombe plus sur « particulier » : depuis que
+     * seuls les comptes entreprise sont acceptés, confondre « ce n'est pas une
+     * entreprise » avec « on ne sait pas » donnerait au super admin un refus
+     * qu'il ne saurait pas corriger. Le premier se règle chez Airtel, le
+     * second en réessayant.
+     */
+    private static function typeSelonOperateur(string $numeroE164): ?string
+    {
+        $local = '0' . substr($numeroE164, 4);
+
+        return app(PaynalaPaymentService::class)->resolveTypeClientFromKyc($local);
+    }
+
+    /**
+     * Refus motivé quand le compte n'est pas une entreprise, null s'il l'est.
+     *
+     * **Règle actée par Daniel (2026-10-05)** : un marchand doit être un compte
+     * Airtel Money **entreprise**. L'ouverture aux comptes particuliers est
+     * fermée — un décaissement B2C vers un compte personnel présenté comme un
+     * commerce brouille la trace de l'argent, et c'est exactement ce que la
+     * fiche marchand existe pour tenir.
+     *
+     * @return array{0: array<string, string>, 1: int}|null
+     */
+    private static function refusSiPasEntreprise(?string $type): ?array
+    {
+        if ($type === 'entreprise') {
+            return null;
+        }
+
+        return $type === null
+            ? [[
+                'message' => "Le type de ce compte Airtel n'a pas pu être déterminé. Réessayez dans un instant : sans ce verdict, la fiche ne peut pas être enregistrée.",
+                'code'    => 'type_indetermine',
+            ], 422]
+            : [[
+                'message' => "Ce numéro est un compte Airtel Money particulier. Seul un compte entreprise peut être enregistré comme marchand.",
+                'code'    => 'compte_particulier',
+            ], 422];
+    }
+
+    /**
+     * Forme unique en base : +241 suivi du numéro sans son zéro initial.
+     * Le dashboard laisse saisir « 07 60 77 52 » comme « +24107607752 ».
+     */
+    private static function versE164(mixed $numero): string
+    {
+        $chiffres = preg_replace('/\D/', '', (string) $numero) ?? '';
+
+        return str_starts_with($chiffres, '241')
+            ? '+' . $chiffres
+            : '+241' . ltrim($chiffres, '0');
+    }
+
+    /**
+     * Ramene le code saisi a sa forme stockee : sans espaces, et null quand le
+     * champ est laisse vide.
+     *
+     * Une chaine vide passerait la contrainte d'unicite autant de fois qu'on
+     * veut en base, mais echouerait le CHECK de format : autant la traduire
+     * tout de suite en « pas de code ».
+     */
+    private static function normaliserCode(Request $request): void
+    {
+        if (! $request->has('code_marchand')) {
+            return;
+        }
+        $code = trim((string) $request->input('code_marchand'));
+        $request->merge(['code_marchand' => $code === '' ? null : $code]);
+    }
+
+    /** @return array<string, mixed> */
+    private function regles(string $projectId, bool $partiel = false, ?string $ignoreId = null): array
+    {
+        $requis = $partiel ? 'sometimes' : 'required';
+
+        return [
+            'nom'           => [$requis, 'string', 'min:2', 'max:120'],
+            // Code que l'enseigne communique a ses clients. Il ne vient pas de
+            // nous : on le stocke tel quel, d'ou un format volontairement
+            // permissif. Il sert a designer UNE fiche quand plusieurs
+            // partagent un numero (cf. 031), donc il doit rester unique par
+            // projet — sans tenir compte de la casse, puisque le client le
+            // tapera comme il l'aura lu.
+            'code_marchand' => [
+                'sometimes', 'nullable', 'string',
+                'regex:/^[A-Za-z0-9][A-Za-z0-9._-]{1,31}$/',
+                function (string $attribut, mixed $valeur, callable $erreur) use ($projectId, $ignoreId) {
+                    if ($valeur === null || $valeur === '') {
+                        return;
+                    }
+                    $pris = DB::table(project_table('marchands'))
+                        ->where('project_id', $projectId)
+                        ->whereRaw('upper(code_marchand) = ?', [mb_strtoupper((string) $valeur)])
+                        ->when($ignoreId !== null, fn ($q) => $q->where('id', '!=', $ignoreId))
+                        ->exists();
+                    if ($pris) {
+                        $erreur('Ce code marchand est deja attribue a une autre fiche.');
+                    }
+                },
+            ],
+            // Format : miroir du CHECK en base, pour un message lisible plutôt
+            // qu'une erreur Postgres. En revanche, un numéro peut porter
+            // plusieurs fiches : une chaîne encaisse sur
+            // un seul numéro pour plusieurs établissements. C'est le marchand
+            // choisi au paiement qui dit où l'on a payé.
+            'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/'],
+            // Référence à la liste administrée : un texte libre finissait en
+            // « Santé » / « santé » / « Pharmacie » pour la même réalité.
+            'categorie_id'  => ['sometimes', 'nullable', 'uuid',
+                Rule::exists(project_table('categories_marchands'), 'id')->where('project_id', $projectId)],
+            // Taux négocié avec CE marchand. NULL = celui du projet ; 0 =
+            // exonéré, ce qui n'est pas la même chose. Borné comme la
+            // commission : au-delà de 25 %, c'est une faute de frappe.
+            'frais_taux'    => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:0.25'],
+            'ville'         => ['sometimes', 'nullable', 'string', 'max:60'],
+            'contact_nom'   => ['sometimes', 'nullable', 'string', 'max:120'],
+            'contact_tel'   => ['sometimes', 'nullable', 'string', 'max:16'],
+            'contact_email' => ['sometimes', 'nullable', 'email', 'max:160'],
+            'notes'         => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'actif'         => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /**
+     * Forme envoyée au dashboard. `supprimable` évite que l'interface propose
+     * une suppression que l'API refusera.
+     *
+     * @param  array<string, array{nb: int, total: int}> $stats
+     * @return array<string, mixed>
+     */
+    private function presenter(TondoMarchand $m, array $stats = []): array
+    {
+        $stat = $stats[$m->id] ?? null;
+        $nb   = $stat['nb'] ?? DB::table(project_table('payout'))->where('marchand_id', $m->id)->count();
+
+        // La liste apporte déjà le libellé par jointure ; après une écriture,
+        // il faut aller le chercher pour que la réponse soit complète.
+        $categorie = $m->categorie_libelle
+            ?? ($m->categorie_id
+                ? DB::table(project_table('categories_marchands'))->where('id', $m->categorie_id)->value('libelle')
+                : null);
+
+        return [
+            'id'                   => $m->id,
+            'nom'                  => $m->nom,
+            'code_marchand'        => $m->code_marchand,
+            // Null est transmis tel quel : le dashboard doit pouvoir
+            // distinguer « taux du projet » de « exonéré ».
+            'frais_taux'           => $m->frais_taux,
+            'numero_tel'           => $m->numero_tel,
+            'titulaire'            => $m->titulaire,
+            'titulaire_verifie_at' => optional($m->titulaire_verifie_at)->toIso8601String(),
+            'type_paynala'         => $m->type_paynala,
+            'categorie_id'         => $m->categorie_id,
+            'categorie'            => $categorie,
+            'ville'                => $m->ville,
+            'contact_nom'          => $m->contact_nom,
+            'contact_tel'          => $m->contact_tel,
+            'contact_email'        => $m->contact_email,
+            'notes'                => $m->notes,
+            'actif'                => (bool) $m->actif,
+            'nb_paiements'         => (int) $nb,
+            'total_paye_fcfa'      => (int) ($stat['total'] ?? 0),
+            'supprimable'          => $nb === 0,
+            'created_at'           => optional($m->created_at)->toIso8601String(),
+        ];
+    }
+}

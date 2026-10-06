@@ -489,8 +489,19 @@ class CagnottesController extends Controller
                         ->select('nom', 'prenom')->first();
                     if ($u) $nomBenef = trim("{$u->prenom} {$u->nom}");
                 }
+                // Retrait en espèces : le gérant doit voir QUEL comptoir a remis
+                // l'argent, pas seulement à qui — c'est l'information qui lui
+                // permet de contester une sortie qu'il ne reconnaît pas.
+                if (($r->canal ?? 'mobile_money') === 'especes' && $r->agent_id) {
+                    $agent = DB::table(project_table('agents'))->where('id', $r->agent_id)
+                        ->select('nom', 'identifiant')->first();
+                    $nomBenef = $agent
+                        ? "Retrait en espèces · {$agent->nom} ({$agent->identifiant})"
+                        : 'Retrait en espèces';
+                }
                 return [
                     'id'                  => $r->id,
+                    'canal'               => $r->canal ?? 'mobile_money',
                     'beneficiaire_nom'    => $nomBenef,
                     'beneficiaire_numero' => $r->numero_tel ?? '',
                     'montant'             => $r->montant,

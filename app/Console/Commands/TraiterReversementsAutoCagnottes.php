@@ -52,6 +52,14 @@ class TraiterReversementsAutoCagnottes extends Command
         ReversementService $reversements,
         PushNotifier       $notif,
     ): int {
+        // Environnement de test : aucun transfert réel. On s'arrête avant de
+        // parcourir les cagnottes, plutôt que de créer un payout en échec par
+        // cagnotte éligible.
+        if (\App\Services\PaynalaPaymentService::operationsReellesBloquees()) {
+            $this->warn('Transferts réels bloqués sur l\'environnement de test (PAYNALA_OPERATIONS_REELLES).');
+            return self::SUCCESS;
+        }
+
         $isDryRun = (bool) $this->option('dry-run');
         // Heure locale Gabon pour éviter un décalage de date lié à UTC.
         $today    = now()->timezone('Africa/Libreville')->toDateString();
@@ -72,10 +80,51 @@ class TraiterReversementsAutoCagnottes extends Command
         $traites = 0;
         $ignores = 0;
 
+        $sorties = app(\App\Services\SortiesAutorisees::class);
+
         foreach ($cagnottes as $cagnotte) {
             $mode = $this->determinerMode($cagnotte, $today);
 
             if (! $mode) {
+                $ignores++;
+                continue;
+            }
+
+            // Verrou des sorties — décidé par Daniel le 2026-10-06 : si le
+            // transfert est verrouillé, le reversement automatique l'est
+            // aussi. Un verrou que le cron de 18 h contournerait ne
+            // verrouillerait rien : il suffirait d'attendre la nuit.
+            //
+            // Contrepartie assumée : l'argent reste dans la collecte tant que
+            // le verrou tient. D'où un AVERTISSEMENT et non une ligne
+            // d'information — un solde immobilisé doit se voir dans les
+            // journaux, sinon personne ne saura pourquoi rien n'est parti.
+            // La lecture du verrou est isolée PAR COLLECTE. Sans ce filet, une
+            // colonne manquante — le SQL 036 pas encore joué — ferait lever
+            // dès la première collecte et tuerait la passe entière : plus
+            // aucun reversement pour personne, cette nuit-là et les suivantes.
+            //
+            // En cas d'échec de lecture, on saute CETTE collecte et on
+            // continue. Refuser une sortie à tort se rattrape le lendemain ;
+            // la laisser passer alors qu'un verrou existe peut-être, non.
+            try {
+                $autorise = $sorties->pour($cagnotte->id, $cagnotte->project_id)['transfert'];
+            } catch (\Throwable $e) {
+                $this->error("  → [{$cagnotte->reference}] verrou illisible — reversement suspendu.");
+                Log::error('[reversements-auto] verrou illisible, collecte sautée', [
+                    'cagnotte' => $cagnotte->reference,
+                    'erreur'   => $e->getMessage(),
+                ]);
+                $ignores++;
+                continue;
+            }
+
+            if (! $autorise) {
+                $this->warn("  → [{$cagnotte->reference}] transfert verrouillé — reversement suspendu.");
+                Log::warning('[reversements-auto] collecte verrouillée, reversement suspendu', [
+                    'cagnotte'  => $cagnotte->reference,
+                    'montant'   => (int) $cagnotte->montant_collecte,
+                ]);
                 $ignores++;
                 continue;
             }
@@ -199,7 +248,7 @@ class TraiterReversementsAutoCagnottes extends Command
             source:       'cron_reversement_auto',
             // Préfixe de trans_id : désigne l'origine du transfert dans le grand
             // livre (payout). Les lignes antérieures au 2026-09-17 portent TONDOAUTO.
-            prefixeTrans: 'TONJIAUTO',
+            cleTrans: 'payout_auto',
             cloturer:     ! in_array($mode, ['libre', 'quotidien'], true),
             trace:        ['mode' => $mode],
         );

@@ -10,6 +10,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Gestion des cagnottes et tontines existantes via le canal WhatsApp.
@@ -157,13 +158,11 @@ class GererCagnotteService
 
         $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
         $payoutId       = (string) Str::uuid();
-        $transId        = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+        $transId        = Registre::nouvelleReference('payout_manuel');
 
-        // Clé d'idempotence = la référence de la transaction elle-même.
-        //
-        // Elle était dérivée d'un COUNT(*) + 1 : deux décaissements simultanés
-        // produisaient la même clé, que l'opérateur dédoublonne. Le trans_id est
-        // unique en base, il l'est donc aussi chez Paynala.
+        // Clé d'idempotence = la référence de la transaction elle-même : le
+        // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et la
+        // recette parle au même Paynala que la production.
         $idempotencyKey = $transId;
 
         // Rechercher le compte bénéficiaire pour renseigner user_id et type_client
@@ -171,6 +170,10 @@ class GererCagnotteService
             ->where('numero', $numeroE164)
             ->select(['id', 'type_client'])
             ->first();
+
+        // Environnement de test : refuser AVANT de réserver. Plus bas, un échec
+        // de Paynala laisse le solde décrémenté pour vérification manuelle.
+        PaynalaPaymentService::assurerOperationsReellesAutorisees('transfert');
 
         // ── Phase 1 — réserver sous row-lock ─────────────────────────────────
         DB::transaction(function () use (

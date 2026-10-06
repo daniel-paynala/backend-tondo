@@ -44,6 +44,8 @@ class TondoConfigService
             'indicatif'          => null,  // Pas d'indicatif configuré → détection impossible.
             'prefixes'           => [],    // Aucun préfixe → aucun opérateur détectable.
             'commission_paynala' => (float) $c['commission_paynala'],
+            'frais_marchand'     => (float) ($c['frais_marchand'] ?? 0.0),
+            'sorties_bloquees'   => \App\Models\TondoProjectConfig::VERROUS_OUVERTS,
             'plafond_par_envoi'  => (int) $c['plafond_par_envoi'],
             'plafond_journalier' => (int) $c['plafond_journalier'],
             'plafond_cagnotte_particulier' => (int) ($c['plafond_cagnotte_particulier'] ?? 2500000),

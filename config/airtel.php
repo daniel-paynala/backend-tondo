@@ -21,6 +21,12 @@ return [
     'commission_paynala' => (float) env('PAYNALA_COMMISSION', 0.02),
 
     /*
+     * Taux prélevé sur un paiement marchand depuis une cagnotte.
+     * Repli seulement : la valeur qui fait foi vit en base, par projet.
+     */
+    'frais_marchand' => (float) env('PAYNALA_FRAIS_MARCHAND', 0.03),
+
+    /*
     | Plafond d'un envoi Mobile Money unique (FCFA).
     */
     'plafond_par_envoi' => (int) env('AIRTEL_PLAFOND_ENVOI', 500_000),

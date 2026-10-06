@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use App\Support\Registre;
 
 /**
  * Traite les retraits périodiques des tontines à 20h (Africa/Libreville).
@@ -48,6 +49,14 @@ class TraiterRetraitsTontines extends Command
         PushNotifier      $notif,
         TontineService        $tontineService,
     ): int {
+        // Environnement de test : aucun transfert réel. On s'arrête avant de
+        // parcourir les cagnottes, plutôt que de créer un payout en échec par
+        // cagnotte éligible.
+        if (\App\Services\PaynalaPaymentService::operationsReellesBloquees()) {
+            $this->warn('Transferts réels bloqués sur l\'environnement de test (PAYNALA_OPERATIONS_REELLES).');
+            return self::SUCCESS;
+        }
+
         $isDryRun = (bool) $this->option('dry-run');
         // Heure locale Gabon pour éviter un décalage de date lié à UTC.
         $today    = now()->timezone('Africa/Libreville')->toDateString();
@@ -169,13 +178,11 @@ class TraiterRetraitsTontines extends Command
             // ── Génération des identifiants Paynala ───────────────────────────
             $reference      = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
             $payoutId       = (string) Str::uuid();
-            $transId        = 'TONJIPAYOUT' . strtoupper(Str::random(9));
+            $transId        = Registre::nouvelleReference('payout_manuel');
 
-            // Clé d'idempotence = la référence de la transaction elle-même.
-        //
-        // Elle était dérivée d'un COUNT(*) + 1 : deux décaissements simultanés
-        // produisaient la même clé, que l'opérateur dédoublonne. Le trans_id est
-        // unique en base, il l'est donc aussi chez Paynala.
+            // Clé d'idempotence = la référence de la transaction elle-même : le
+            // COUNT(*) + 1 d'avant se répétait d'un environnement à l'autre, et
+            // la recette parle au même Paynala que la production.
             $idempotencyKey = $transId;
 
             // ── Phase 1 : réserver sous row-lock ─────────────────────────────

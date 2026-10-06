@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use App\Support\Registre;
 
 /**
  * Cotisations entrantes (payin).
@@ -437,7 +438,7 @@ class CotisationsController extends Controller
         ?string $commentaire = null,
     ): JsonResponse {
         // request_id alphanumérique uniquement (contrainte API Paynala — pas de tirets).
-        $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
+        $transId = Registre::nouvelleReference('payin');
 
         // Numéro local Airtel (9 chiffres : 074XXXXXX).
         $phoneE164      = ltrim($numeroPayeurE164, '+');
@@ -562,7 +563,7 @@ class CotisationsController extends Controller
         string $canal = 'app',
         ?string $commentaire = null,
     ): JsonResponse {
-        $transId = 'TONJIPAYIN' . strtoupper(Str::random(10));
+        $transId = Registre::nouvelleReference('payin');
 
         try {
             DB::transaction(function () use (

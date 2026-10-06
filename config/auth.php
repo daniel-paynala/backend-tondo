@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\TondoAdmin;
+use App\Models\TondoAgent;
 use App\Models\TondoUser;
 
 return [
@@ -23,6 +24,14 @@ return [
             'driver' => 'sanctum',
             'provider' => 'mobile_users',
         ],
+
+        // Agents de retrait en espèces (TPE, guichet…). Sanctum vérifie que le
+        // jeton appartient bien à un TondoAgent : un jeton d'agent est refusé
+        // sur les routes admin et mobile, et inversement.
+        'agent' => [
+            'driver' => 'sanctum',
+            'provider' => 'agents',
+        ],
     ],
 
     'providers' => [
@@ -34,6 +43,11 @@ return [
         'mobile_users' => [
             'driver' => 'eloquent',
             'model' => TondoUser::class,
+        ],
+
+        'agents' => [
+            'driver' => 'eloquent',
+            'model' => TondoAgent::class,
         ],
     ],
 

@@ -2,6 +2,11 @@
 
 namespace App\Providers;
 
+use App\Listeners\TracerTachePlanifiee;
+use Illuminate\Console\Events\ScheduledTaskFailed;
+use Illuminate\Console\Events\ScheduledTaskFinished;
+use Illuminate\Support\Facades\Event;
+
 use App\Contracts\PushNotifier;
 use App\Services\FcmService;
 use App\Services\WhatsApp\Contracts\WhatsAppSender;
@@ -57,6 +62,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Tonji ne parle qu'une langue à ses utilisateurs et à ses admins. Les
+        // messages de validation partent tels quels dans le dashboard et dans
+        // l'app : on ne les laisse pas dépendre d'un APP_LOCALE oublié à « en »
+        // dans un .env — c'est exactement ce qui a produit
+        // « The numero tel has already been taken. » à l'écran.
+        app()->setLocale('fr');
+
+        // Trace du passage des tâches planifiées : sans elle, une tâche qui ne
+        // tourne plus ne produit aucun signal.
+        Event::listen(ScheduledTaskFinished::class, [TracerTachePlanifiee::class, 'finie']);
+        Event::listen(ScheduledTaskFailed::class, [TracerTachePlanifiee::class, 'echouee']);
+
         $this->configurerRateLimiters();
     }
 
@@ -90,6 +107,28 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Portail marchand, demande de code : borne les e-mails envoyés et
+        // freine l'énumération des numéros marchands. Plus serré que l'OTP
+        // client — un commerçant ne se connecte pas dix fois par heure.
+        RateLimiter::for('marchand-otp', function (Request $request) {
+            $numero = preg_replace('/\D/', '', (string) $request->input('numero')) ?? '';
+            return [
+                Limit::perMinutes(10, 2)->by("motp:num:{$numero}"),
+                Limit::perHour(6)->by("motph:num:{$numero}"),
+                Limit::perMinute(20)->by("motp:ip:{$request->ip()}"),
+            ];
+        });
+
+        // Vérification du code : le compteur d'essais vit déjà avec le code,
+        // ceci borne en plus le brute-force qui tournerait sur plusieurs codes.
+        RateLimiter::for('marchand-session', function (Request $request) {
+            $numero = preg_replace('/\D/', '', (string) $request->input('numero')) ?? '';
+            return [
+                Limit::perMinutes(10, 10)->by("msess:num:{$numero}"),
+                Limit::perMinute(30)->by("msess:ip:{$request->ip()}"),
+            ];
+        });
+
         // KYC check (public) : freine l'énumération de numéros Airtel/Tonji.
         RateLimiter::for('kyc-check', function (Request $request) {
             $phone = $this->cleNumero($request);
@@ -112,6 +151,22 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perHour(30)->by("kycnum:user:{$cle}"),
                 Limit::perMinute(8)->by("kycnum:user:{$cle}"),
             ];
+        });
+
+        // Connexion d'un agent. Le verrouillage après 5 PIN faux protège UN
+        // agent ; ces limites protègent contre le balayage de MILLIERS
+        // d'identifiants, qui se suivent (ECKTPE001, 002…).
+        RateLimiter::for('agent-connexion', function (Request $request) {
+            return [
+                Limit::perMinute(20)->by('agcx:ip:' . $request->ip()),
+                Limit::perMinute(10)->by('agcx:id:' . strtoupper((string) $request->input('identifiant'))),
+            ];
+        });
+
+        // Opérations d'un agent connecté : large pour un comptoir réel, bas
+        // pour un script.
+        RateLimiter::for('agent-retraits', function (Request $request) {
+            return [Limit::perMinute(60)->by('agret:' . ($request->user('agent')?->id ?? $request->ip()))];
         });
 
         // Login admin : par e-mail + IP (anti brute-force mot de passe).

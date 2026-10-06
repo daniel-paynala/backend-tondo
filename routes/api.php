@@ -1,11 +1,18 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AdminsController;
+use App\Http\Controllers\Api\Agent\RetraitsController as AgentRetraitsController;
+use App\Http\Controllers\Api\Agent\SessionController as AgentSessionController;
 use App\Http\Controllers\Api\Admin\AgentsController;
+use App\Http\Controllers\Api\Admin\CategoriesMarchandsController;
+use App\Http\Controllers\Api\Admin\MarchandsController;
+use App\Http\Controllers\Api\Admin\PartenairesRetraitController;
+use App\Http\Controllers\Api\Admin\SupportsRetraitController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\ConfigController as AdminConfigController;
 use App\Http\Controllers\Api\Admin\LogsController;
 use App\Http\Controllers\Api\Admin\ReconciliationController;
+use App\Http\Controllers\Api\Admin\SanteController;
 use App\Http\Controllers\Api\Admin\SignalementsController;
 use App\Http\Controllers\Api\Admin\TontinesController;
 use App\Http\Controllers\Api\Admin\TransactionsController;
@@ -17,6 +24,7 @@ use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
 use App\Http\Controllers\Api\Mobile\ConfigController as MobileConfigController;
 use App\Http\Controllers\Api\Mobile\CotisationsController as MobileCotisationsController;
+use App\Http\Controllers\Api\Mobile\MarchandsController as MobileMarchandsController;
 use App\Http\Controllers\Api\Mobile\ReversementsController as MobileReversementsController;
 use App\Http\Controllers\Api\Mobile\ProfilController as MobileProfilController;
 use App\Http\Controllers\Api\Mobile\AssociationController as MobileAssociationController;
@@ -29,6 +37,8 @@ use App\Http\Controllers\Api\WhatsApp\WebhookController as WhatsAppWebhookContro
 use App\Http\Controllers\Api\WhatsApp\StatusController as WhatsAppStatusController;
 use App\Http\Controllers\Api\Ussd\UssdController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\Marchand\SessionController as MarchandSessionController;
+use App\Http\Controllers\Api\Marchand\SuiviController as MarchandSuiviController;
 
 // ============================================================================
 //  Health check public
@@ -125,6 +135,8 @@ Route::prefix('admin')->group(function () {
         Route::post('/cagnottes/{reference}/approuver',  [AdminCagnottesController::class, 'approuver']);
         Route::post('/cagnottes/{reference}/rejeter',    [AdminCagnottesController::class, 'rejeter']);
         Route::post('/cagnottes/{reference}/suspendre',  [AdminCagnottesController::class, 'suspendre']);
+        // Verrous des sorties d'argent d'une collecte — super_admin.
+        Route::patch('/cagnottes/{reference}/verrous',   [AdminCagnottesController::class, 'verrous']);
 
         // Modération des ASSOCIATIONS (validation des dossiers)
         Route::post('/organisations/{id}/approuver',            [AdminOrganisationsController::class, 'approuver']);
@@ -164,16 +176,54 @@ Route::prefix('admin')->group(function () {
         Route::post('/config/{operateur}/{pays}/toggle',    [AdminConfigController::class, 'toggle']);
         Route::delete('/config/{operateur}/{pays}',         [AdminConfigController::class, 'destroy']);
 
-        // ── Agents de retrait en espèces ──────────────────────────────────
+        // ── Retrait en espèces : supports, partenaires, agents ───────────────
         // Un agent remet des BILLETS : habiliter un tiers à distribuer de
-        // l'argent liquide n'est pas de la gestion courante. Toutes les
-        // écritures sont réservées aux super admins et journalisées ; la
-        // lecture reste ouverte aux autres rôles pour le support.
-        Route::get('/agents',                 [AgentsController::class, 'index']);
-        Route::post('/agents',                [AgentsController::class, 'store']);        // super_admin
-        Route::patch('/agents/{id}',          [AgentsController::class, 'update']);       // super_admin
-        Route::post('/agents/{id}/statut',    [AgentsController::class, 'statut']);       // super_admin
-        Route::post('/agents/{id}/cle',       [AgentsController::class, 'rotationCle']);  // super_admin
+        // l'argent liquide n'est pas de la gestion courante. Écritures
+        // réservées aux super admins et journalisées ; lectures ouvertes aux
+        // autres rôles pour le support.
+        //
+        // ⚠️ Tout le bloc est conditionné au drapeau `tondo.retrait_especes_actif`.
+        // Fermé, ces routes ne sont PAS enregistrées : 404, pas 403. C'est ce
+        // qui empêche de créer un partenaire — donc une clé d'API — et sans
+        // clé, le canal agent est inatteignable. Masquer les écrans du
+        // dashboard ne ferait que retirer le chemin le plus commode.
+        if (config('tondo.retrait_especes_actif')) {
+        Route::get('/supports-retrait',                [SupportsRetraitController::class, 'index']);
+        Route::post('/supports-retrait',               [SupportsRetraitController::class, 'store']);        // super_admin
+        Route::patch('/supports-retrait/{id}',         [SupportsRetraitController::class, 'update']);       // super_admin
+        Route::delete('/supports-retrait/{id}',        [SupportsRetraitController::class, 'destroy']);      // super_admin
+
+        Route::get('/partenaires-retrait',             [PartenairesRetraitController::class, 'index']);
+        Route::post('/partenaires-retrait',            [PartenairesRetraitController::class, 'store']);     // super_admin
+        Route::patch('/partenaires-retrait/{id}',      [PartenairesRetraitController::class, 'update']);    // super_admin
+        Route::delete('/partenaires-retrait/{id}',     [PartenairesRetraitController::class, 'destroy']);   // super_admin
+        Route::post('/partenaires-retrait/{id}/cle',   [PartenairesRetraitController::class, 'rotationCle']); // super_admin
+
+        Route::get('/agents',                          [AgentsController::class, 'index']);
+        Route::post('/agents',                         [AgentsController::class, 'store']);                 // super_admin
+        Route::patch('/agents/{id}',                   [AgentsController::class, 'update']);                // super_admin
+        Route::post('/agents/{id}/statut',             [AgentsController::class, 'statut']);                // super_admin
+        Route::post('/agents/{id}/pin',                [AgentsController::class, 'reinitialiserPin']);      // super_admin
+        Route::delete('/agents/{id}',                  [AgentsController::class, 'destroy']);               // super_admin
+        }
+
+        // Marchands : destinations de transfert enregistrées. L'argent part
+        // chez un tiers, donc mêmes règles que ci-dessus — écritures réservées
+        // aux super admins, lectures ouvertes pour le support.
+        Route::get('/categories-marchands',            [CategoriesMarchandsController::class, 'index']);
+        Route::post('/categories-marchands',           [CategoriesMarchandsController::class, 'store']);    // super_admin
+        Route::patch('/categories-marchands/{id}',     [CategoriesMarchandsController::class, 'update']);   // super_admin
+        Route::delete('/categories-marchands/{id}',    [CategoriesMarchandsController::class, 'destroy']);  // super_admin
+
+        Route::get('/marchands',                       [MarchandsController::class, 'index']);
+        Route::post('/marchands',                      [MarchandsController::class, 'store']);              // super_admin
+        Route::post('/marchands/verifier-numero',      [MarchandsController::class, 'verifierNumero']);
+        Route::get('/marchands/{id}/paiements',        [MarchandsController::class, 'paiements']);
+        Route::patch('/marchands/{id}',                [MarchandsController::class, 'update']);             // super_admin
+        Route::delete('/marchands/{id}',               [MarchandsController::class, 'destroy']);            // super_admin
+
+        // État du système : tâches planifiées, paiements bloqués, réglages.
+        Route::get('/sante', [SanteController::class, 'index']);
 
         // Réconciliation financière
         Route::get('/reconcile',                             [ReconciliationController::class, 'index']);
@@ -183,6 +233,44 @@ Route::prefix('admin')->group(function () {
         Route::post('/cagnottes/{reference}/reconcile/corriger',      [ReconciliationController::class, 'corriger']);
     });
 });
+
+// ============================================================================
+//  API Agent — préfixe /api/agent/
+//  Terminaux des agents de retrait en espèces (TPE, guichet…), appelés par le
+//  logiciel des PARTENAIRES.
+//
+//  Deux clés, jamais une seule :
+//   1. X-Cle-Partenaire, sur toutes les routes — prouve que l'appel vient du
+//      système du partenaire ;
+//   2. le jeton de session de l'agent, obtenu avec son identifiant et son PIN.
+//  Un PIN volé ne sert donc à rien hors d'un terminal du partenaire.
+// ============================================================================
+// ⚠️ Tout ce canal est conditionné au drapeau `tondo.retrait_especes_actif`.
+// Fermé, ces routes n'existent pas : un appel reçoit 404, pas 401. Le chantier
+// est expérimental et il remet du LIQUIDE, qui ne se conteste pas — tant que
+// ses contours ne sont pas arrêtés, il ne doit pas être joignable en
+// production, même protégé par une clé.
+if (config('tondo.retrait_especes_actif')) {
+Route::prefix('agent')->middleware('partenaire')->group(function () {
+    Route::post('/connexion', [AgentSessionController::class, 'connexion'])->middleware('throttle:agent-connexion');
+
+    Route::middleware('auth:agent')->group(function () {
+        // Seule route ouverte tant que le PIN initial n'est pas changé.
+        Route::post('/pin', [AgentSessionController::class, 'changerPin'])->middleware('agent.operationnel:pin');
+        Route::post('/deconnexion', [AgentSessionController::class, 'deconnexion']);
+
+        Route::middleware(['agent.operationnel', 'throttle:agent-retraits'])->group(function () {
+            Route::get('/moi', [AgentSessionController::class, 'moi']);
+
+            Route::get('/retraits', [AgentRetraitsController::class, 'index']);
+            Route::post('/retraits', [AgentRetraitsController::class, 'store']);
+            Route::get('/retraits/{reference}', [AgentRetraitsController::class, 'show']);
+            Route::post('/retraits/{reference}/valider', [AgentRetraitsController::class, 'valider']);
+            Route::post('/retraits/{reference}/annuler', [AgentRetraitsController::class, 'annuler']);
+        });
+    });
+});
+}
 
 // ============================================================================
 //  API Mobile — préfixe /api/mobile/
@@ -269,5 +357,35 @@ Route::prefix('mobile')->group(function () {
 
         // Reversements partiels (payout gérant → bénéficiaire, cagnotte ouverte)
         Route::post('/reversements', [MobileReversementsController::class, 'store']);
+        // Destinations marchandes proposées au moment d'un transfert.
+        // Droits de sortie d'une collecte, releves a chaque moment sensible.
+        Route::get('/cagnottes/{reference}/sorties', [MobileReversementsController::class, 'sorties']);
+        Route::get('/marchands', [MobileMarchandsController::class, 'index']);
+        // Resolution d'une saisie client : numero OU code de l'enseigne.
+        Route::get('/marchands/resoudre', [MobileMarchandsController::class, 'resoudre']);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Portail marchand — suivi des encaissements
+|--------------------------------------------------------------------------
+|
+| Pas de compte : le marchand entre son numéro, reçoit un code par e-mail, et
+| consulte. Le jeton rendu est sans état et de courte durée ; c'est lui qui
+| porte le numéro, de sorte qu'aucun appel ne peut viser un autre commerce.
+|
+| Les deux premières routes sont PUBLIQUES et répondent la même chose quel que
+| soit le numéro : dire « ce numéro n'est pas marchand » ferait de cette entrée
+| un annuaire des commerces affiliés.
+*/
+Route::prefix('marchand')->group(function () {
+    Route::post('/otp', [MarchandSessionController::class, 'demanderCode'])
+        ->middleware('throttle:marchand-otp');
+    Route::post('/session', [MarchandSessionController::class, 'ouvrir'])
+        ->middleware('throttle:marchand-session');
+
+    Route::middleware('jeton.marchand')->group(function () {
+        Route::get('/transactions', [MarchandSuiviController::class, 'index']);
     });
 });
