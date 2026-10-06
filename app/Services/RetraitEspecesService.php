@@ -101,6 +101,20 @@ class RetraitEspecesService
         if ($cagnotte->montant_collecte < $montant) {
             throw new RetraitImpossible('Solde de la cagnotte insuffisant.', 422, 'solde_insuffisant');
         }
+
+        // Verrou des sorties — même service que l'app, le web, WhatsApp et les
+        // deux crons. Un retrait en espèces DÉBITE la collecte : c'est une
+        // sortie d'argent comme les autres, et un verrou qui laisserait un
+        // guichet ouvert ne verrouillerait rien.
+        //
+        // Contrôle indicatif ici, pour ne pas envoyer un code voué à l'échec ;
+        // il est refait à la validation, seule vérification qui fait foi.
+        if (! app(SortiesAutorisees::class)->pour($cagnotte->id, $cagnotte->project_id)['transfert']) {
+            throw new RetraitImpossible(
+                'Les sorties d\'argent sont momentanément suspendues sur cette collecte.',
+                423, 'transfert_bloque',
+            );
+        }
         if ($this->montantRetireAujourdhui($agent->id) + $montant > $agent->plafond_journalier_fcfa) {
             throw new RetraitImpossible('Plafond journalier de l\'agent atteint.', 422, 'plafond_journalier');
         }
@@ -235,6 +249,18 @@ class RetraitEspecesService
             // solde suffit et que la cagnotte est toujours éligible. Aucune
             // lecture-puis-écriture qu'un autre débit pourrait devancer.
             $cagnotte = DB::table(project_table('cagnottes'))->where('id', $r->cagnotte_id)->first();
+
+            // Verrou relu ICI : c'est le contrôle qui fait foi. Il a pu être
+            // posé entre la demande du code et sa présentation au comptoir, et
+            // l'agent n'a encore remis aucun billet — c'est le dernier moment
+            // où refuser ne coûte rien.
+            if ($cagnotte !== null
+                && ! app(SortiesAutorisees::class)->pour($cagnotte->id, $cagnotte->project_id)['transfert']) {
+                return [
+                    'dossier' => $this->clore($r->id, 'refuse', 'Sorties d\'argent suspendues sur cette collecte.'),
+                    'valide_maintenant' => false,
+                ];
+            }
             $debite = DB::table(project_table('cagnottes'))
                 ->where('id', $r->cagnotte_id)
                 ->where('type', self::TYPE_ADMIS)
