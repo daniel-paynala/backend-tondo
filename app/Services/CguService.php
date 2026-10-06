@@ -54,7 +54,7 @@ class CguService
         $plafondParticulier = $this->fcfa((int) ($cfg['plafond_cagnotte_particulier'] ?? 0));
         $plafondAssociation = $this->fcfa((int) ($cfg['plafond_cagnotte_association'] ?? 0));
 
-        $resume = $this->resume($plafondEnvoi);
+        $resume = $this->resume($cfg, $plafondEnvoi);
         $blocs  = $this->blocs($cfg, $plafondEnvoi, $plafondParticulier, $plafondAssociation);
 
         return [
@@ -73,15 +73,28 @@ class CguService
      *
      * @return list<string>
      */
-    private function resume(string $plafondEnvoi): array
+    private function resume(array $cfg, string $plafondEnvoi): array
     {
         return [
             'Le montant collecté est automatiquement transféré sur le numéro de retrait indiqué.',
             'Ce numéro ne peut plus être modifié après la création de la collecte.',
-            'Les frais sont appliqués au moment du paiement et sont à la charge du cotisant.',
+            // La phrase disait « les frais sont à la charge du cotisant », ce
+            // qui est devenu faux : Tonji ne prélève plus sur les cotisations.
+            // Elle est produite depuis la config, pour ne plus pouvoir mentir.
+            $this->phraseCotisation($cfg),
             "Chaque paiement est plafonné à {$plafondEnvoi}.",
             "Tonji n'arbitre pas les conflits entre membres, sauf cas manifestement clair.",
         ];
+    }
+
+    /** Ce que coûte une cotisation, dit depuis la config. */
+    private function phraseCotisation(array $cfg): string
+    {
+        $taux = (float) ($cfg['commission_paynala'] ?? 0);
+
+        return $taux > 0
+            ? 'Une commission est appliquée au moment du paiement, à la charge du cotisant.'
+            : 'Les cotisations sont sans frais : le cotisant paie exactement le montant qu\'il donne.';
     }
 
     /**
@@ -97,7 +110,7 @@ class CguService
     ): array {
         return [
             [
-                'titre' => 'Modèle économique',
+                'titre' => 'Frais',
                 'corps' => $this->modeleEconomique($cfg),
             ],
             [
@@ -141,21 +154,60 @@ class CguService
      */
     private function modeleEconomique(array $cfg): string
     {
-        $phrase = 'Tonji prélève une commission sur chaque cotisation, à la charge du cotisant. '
-            . 'Elle est appliquée au moment du paiement et le montant exact vous est indiqué '
-            . 'avant validation. ';
+        // Quatre postes, quatre phrases, toutes produites depuis la config.
+        // Aucune n'est écrite en dur : c'est précisément parce que ces chiffres
+        // vivaient en dur dans cinq écrans qu'ils avaient fini par diverger.
+        $lignes = [];
 
-        if ($this->fraisRetraitRepercutes($cfg)) {
-            $phrase .= 'Les frais de retrait de l\'opérateur sont également répercutés sur le '
-                . 'cotisant, selon le barème en vigueur. ';
-        } else {
-            $phrase .= "Les frais de retrait de l'opérateur ne sont pas répercutés sur le cotisant : "
-                . 'ils restent à la charge du bénéficiaire. ';
+        // 1. Cotisation.
+        $lignes[] = $this->phraseCotisation($cfg);
+
+        // 2. Paiement d'un marchand depuis une cagnotte.
+        $marchand = (float) ($cfg['frais_marchand'] ?? 0);
+        $lignes[] = $marchand > 0
+            ? 'Le paiement d\'un commerce depuis une collecte est facturé '
+                . $this->pourcentage($marchand) . ' du montant payé.'
+            : 'Le paiement d\'un commerce depuis une collecte est sans frais.';
+
+        // 3. Transfert du solde vers un numéro.
+        $lignes[] = $this->fraisRetraitRepercutes($cfg)
+            ? 'Le transfert du solde vers un numéro Mobile Money est facturé selon le barème '
+                . 'en vigueur, indiqué avant validation.'
+            : 'Le transfert du solde vers un numéro Mobile Money est sans frais de notre part.';
+
+        // 4. Retrait en espèces — barème de l'opérateur, pas le nôtre.
+        $lignes[] = 'Le retrait de l\'argent en espèces est facturé par l\'opérateur selon son '
+            . 'propre barème : ' . $this->baremeRetrait($cfg) . '. Ces frais ne reviennent pas '
+            . 'à Tonji.';
+
+        $lignes[] = 'Les frais éventuellement prélevés par votre opérateur Mobile Money au moment '
+            . 'du paiement lui sont propres et ne reviennent pas à Tonji.';
+
+        return implode(' ', $lignes);
+    }
+
+    /**
+     * Barème de retrait en espèces, rendu depuis les tranches de l'opérateur.
+     *
+     * Les tranches sont la source : une renégociation avec Airtel change le
+     * texte des conditions sans qu'une ligne de code ne bouge.
+     */
+    private function baremeRetrait(array $cfg): string
+    {
+        $morceaux = [];
+
+        foreach (($cfg['tranches'] ?? []) as $tranche) {
+            $valeur = (float) ($tranche['valeur'] ?? 0);
+            $max    = (int) ($tranche['montant_max'] ?? 0);
+
+            $morceaux[] = ($tranche['type'] ?? '') === 'pourcentage'
+                ? $this->pourcentage($valeur) . ' jusqu\'à ' . $this->fcfa($max)
+                : $this->fcfa((int) $valeur) . ' au-delà';
         }
 
-        return $phrase . 'Les frais éventuellement prélevés par votre opérateur Mobile Money au '
-            . 'moment du paiement lui sont propres et ne reviennent pas à Tonji. Le bénéficiaire '
-            . 'reçoit le montant net annoncé.';
+        return $morceaux === []
+            ? 'selon le barème affiché par l\'opérateur'
+            : implode(', puis ', $morceaux);
     }
 
     /** Vrai si un seul couple (type de collecte × type de compte) répercute des frais de retrait. */
