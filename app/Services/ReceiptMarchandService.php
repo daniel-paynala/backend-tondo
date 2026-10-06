@@ -21,10 +21,15 @@ use Illuminate\Support\Facades\DB;
  * aurait donné deux générateurs de QR à maintenir pour aucun bénéfice.
  *
  * Les deux reçus n'ont d'ailleurs pas le même sens. Une cotisation est une
- * ENTRÉE, avec des frais à la charge du cotisant et un montant net inférieur
- * au montant débité. Un paiement marchand est une SORTIE : le montant est
- * celui qui part, il n'y a pas de frais côté payeur, et les rôles sont
- * inversés — c'est l'enseigne qui encaisse.
+ * ENTRÉE ; un paiement marchand est une SORTIE, et les rôles sont inversés —
+ * c'est l'enseigne qui encaisse.
+ *
+ * Le montant affiché est celui que l'enseigne a RÉELLEMENT reçu. Depuis la
+ * répartition des frais, il peut être inférieur au montant débité de la
+ * collecte : les parts sont retenues et partent vers leurs propres comptes.
+ * `payout.montant` reste le débité — pour que la réconciliation retombe
+ * juste — et le net est lu dans `request.montant_net`. Imprimer le brut sur un
+ * reçu ferait réclamer à l'enseigne une somme qu'elle n'a pas encaissée.
  */
 class ReceiptMarchandService
 {
@@ -56,7 +61,7 @@ class ReceiptMarchandService
             ->where('p.statut', 'succes')
             ->whereNotNull('p.marchand_id')
             ->first([
-                'p.trans_id', 'p.montant', 'p.date_creation', 'p.operateur_id',
+                'p.trans_id', 'p.montant', 'p.request', 'p.date_creation', 'p.operateur_id',
                 'm.nom as marchand_nom', 'm.code_marchand', 'm.numero_tel as marchand_numero',
                 'm.titulaire as marchand_titulaire', 'm.ville as marchand_ville',
                 'c.titre as cagnotte_titre', 'c.reference as cagnotte_reference',
@@ -74,8 +79,8 @@ class ReceiptMarchandService
             // Référence montrée en grand : c'est elle qui circule dans les SMS
             // et que le marchand recopiera pour une réclamation.
             'reference'           => Registre::court($ligne->trans_id) ?? $ligne->trans_id,
-            'montant'             => (int) $ligne->montant,
-            'montant_affiche'     => MessagePaiementMarchand::montant((int) $ligne->montant),
+            'montant'             => MessagePaiementMarchand::encaisse($ligne),
+            'montant_affiche'     => MessagePaiementMarchand::montant(MessagePaiementMarchand::encaisse($ligne)),
             'date_heure'          => MessagePaiementMarchand::dateHeure($ligne->date_creation),
             'marchand_nom'        => $ligne->marchand_nom,
             'marchand_code'       => $ligne->code_marchand,

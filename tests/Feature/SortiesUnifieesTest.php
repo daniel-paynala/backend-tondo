@@ -28,12 +28,18 @@ class SortiesUnifieesTest extends TestCase
      *   choisie par un humain, d'où un chemin distinct.
      * - `TraiterRetraitsTontines` : rotation d'une tontine, qui consulte le
      *   verrou par tontine.
+     * - `ReglementFrais` : règlement des parts de COMMISSION, qui ne sortent
+     *   pas d'une collecte mais de ce que les frais nous doivent. Préfixe
+     *   dédié `TONJIFRAIS`, table dédiée, et aucun solde de collecte touché —
+     *   d'où un chemin distinct, et surtout aucun verrou à consulter : une
+     *   commission déjà prélevée ne se re-bloque pas.
      * - `PaynalaPaymentService` : le client HTTP lui-même.
      */
     private const AUTORISES = [
         'app/Services/SortieArgent.php',
         'app/Services/ReversementService.php',
         'app/Console/Commands/TraiterRetraitsTontines.php',
+        'app/Services/ReglementFrais.php',
         'app/Services/PaynalaPaymentService.php',
     ];
 

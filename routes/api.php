@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\Admin\TransactionsController;
 use App\Http\Controllers\Api\Admin\UsersController;
 use App\Http\Controllers\Api\Admin\OrganisationsController as AdminOrganisationsController;
 use App\Http\Controllers\Api\Admin\PlafondDemandesController as AdminPlafondDemandesController;
+use App\Http\Controllers\Api\Admin\FraisComptesController as AdminFraisComptesController;
 use App\Http\Controllers\Api\Admin\PlafondsController as AdminPlafondsController;
 use App\Http\Controllers\Api\Mobile\AuthController as MobileAuthController;
 use App\Http\Controllers\Api\Mobile\CagnottesController as MobileCagnottesController;
@@ -166,6 +167,14 @@ Route::prefix('admin')->group(function () {
         Route::get('/plafonds-cagnotte',   [AdminPlafondsController::class, 'show']);
         Route::patch('/plafonds-cagnotte', [AdminPlafondsController::class, 'update']);  // super_admin
         // Frais de retrait configurables (matrice cotisation × user)
+        // Répartition des frais : qui reçoit quelle part, et le journal de ce
+        // qui est dû. Écritures réservées au super_admin et journalisées.
+        Route::get('/frais-comptes',        [AdminFraisComptesController::class, 'index']);
+        Route::post('/frais-comptes',       [AdminFraisComptesController::class, 'store']);     // super_admin
+        Route::patch('/frais-comptes/{id}', [AdminFraisComptesController::class, 'update']);    // super_admin
+        Route::delete('/frais-comptes/{id}',[AdminFraisComptesController::class, 'destroy']);   // super_admin
+        Route::get('/frais-dus',            [AdminFraisComptesController::class, 'dus']);
+
         Route::get('/frais-retrait',       [AdminPlafondsController::class, 'showFrais']);
         Route::patch('/frais-retrait',     [AdminPlafondsController::class, 'updateFrais']);  // super_admin
 

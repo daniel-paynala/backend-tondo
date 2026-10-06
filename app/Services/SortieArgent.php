@@ -55,6 +55,8 @@ class SortieArgent
         private readonly PaynalaPaymentService $paynala,
         private readonly PaiementMarchandNotifier $notifier,
         private readonly SortiesAutorisees $verrou,
+        private readonly RepartitionFrais $repartition,
+        private readonly ReglementFrais $reglement,
     ) {}
 
     /**
@@ -152,7 +154,43 @@ class SortieArgent
         // recette parle au même Paynala que la production.
         $idempotencyKey = $transId;
 
-        // ── 3. Réservation sous row-lock ─────────────────────────────────────
+        // ── 3. Répartition des frais ─────────────────────────────────────────
+        //
+        // Calculée AVANT la réservation, parce qu'elle décide du montant
+        // réellement envoyé au bénéficiaire. La collecte est débitée de ce que
+        // le client a saisi ; le bénéficiaire reçoit ce qui reste une fois les
+        // parts retenues.
+        //
+        // Un taux négocié avec le marchand prime sur la somme des lignes : les
+        // parts sont alors mises à l'échelle, les mêmes comptes vivant d'un
+        // prélèvement plus faible. Sans fiche marchande, pas de taux imposé.
+        $tauxImpose = ($marchand !== null && $marchand->frais_taux !== null)
+            ? (float) $marchand->frais_taux
+            : null;
+
+        try {
+            $split = $this->repartition->pour(
+                $action === 'marchand' ? 'marchand' : 'transfert',
+                $cagnotte->project_id,
+                $montant,
+                $tauxImpose,
+            );
+        } catch (\Throwable $e) {
+            // Une répartition incohérente ne doit pas réserver de fonds : on
+            // refuse avant d'avoir touché au solde.
+            Log::critical('[sortie] répartition des frais invalide — sortie refusée', [
+                'cagnotte' => $cagnotte->reference,
+                'montant'  => $montant,
+                'erreur'   => $e->getMessage(),
+            ]);
+
+            return $echec('repartition', 'Configuration des frais invalide — transfert impossible. '
+                . 'Les administrateurs ont été alertés.');
+        }
+
+        $montantEnvoye = $split['net'];
+
+        // ── 4. Réservation sous row-lock ─────────────────────────────────────
         try {
             DB::transaction(function () use (
                 $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,
@@ -192,12 +230,18 @@ class SortieArgent
                     // contrainte l'exige : elles se posent ensemble.
                     'type_beneficiaire' => $marchand ? 'marchand' : 'particulier',
                     'marchand_id'       => $marchand?->id,
+                    // `montant` reste le montant DÉBITÉ de la collecte, pour
+                    // que la réconciliation retombe juste : solde attendu =
+                    // payins − payouts. Ce qui est réellement parti au
+                    // bénéficiaire est tracé à côté, avec les parts retenues.
                     'request'       => json_encode(array_filter(array_merge([
                         'idempotency_key'     => $idempotencyKey,
                         'reference'           => $reference,
                         'cagnotte_reference'  => $cagnotte->reference,
                         'numero_beneficiaire' => $numeroE164,
                         'montant'             => $montant,
+                        'montant_net'         => $montantEnvoye,
+                        'frais_total'         => $split['frais_total'],
                         'canal'               => $canal,
                         'marchand'            => $marchand?->nom,
                     ], $trace))),
@@ -239,7 +283,9 @@ class SortieArgent
         try {
             $disburseData = $this->paynala->disburse(
                 idempotencyKey: $idempotencyKey,
-                amount:         $montant,
+                // Le NET : les parts de frais sont retenues sur le montant et
+                // partent vers leurs propres comptes, pas vers le bénéficiaire.
+                amount:         $montantEnvoye,
                 msisdn:         $msisdnLocal,
                 reference:      $reference,
                 type:           $disburseType,
@@ -339,6 +385,25 @@ class SortieArgent
             }
         });
 
+        // ── Parts de frais ───────────────────────────────────────────────────
+        //
+        // ICI et pas avant : le reversement principal d'abord, les parts
+        // ensuite, jamais l'inverse. L'opération du client a réussi, les parts
+        // sont une dette que nous nous devons à nous-mêmes. Aucune des deux
+        // étapes qui suivent ne peut faire échouer ce qui précède.
+        //
+        // Le règlement est tenté tout de suite : pour un montant suffisant la
+        // part passe le plancher seule et part immédiatement — « au moment du
+        // reversement principal », comme voulu. Sinon elle s'accumule et la
+        // tâche `tonji:regler-frais` la réglera.
+        $this->reglement->enregistrer(
+            $split['parts'],
+            $cagnotte->project_id,
+            $payoutId,
+            $cagnotte->id,
+        );
+        $this->reglement->tenterReglementImmediat($split['parts'], $cagnotte->project_id);
+
         // Paiement marchand : prévenir l'enseigne. La prise est atomique et
         // sans effet si un autre chemin a déjà notifié — tout canal peut donc
         // appeler ceci sans se coordonner. Un échec ici ne doit pas faire
@@ -355,7 +420,13 @@ class SortieArgent
         }
 
         return [
-            'ok' => true, 'code' => 'succes', 'message' => null, 'montant' => $montant,
+            'ok' => true, 'code' => 'succes', 'message' => null,
+            // `montant` = débité de la collecte ; `montant_net` = reçu par le
+            // bénéficiaire. Les appelants qui annoncent un montant à l'écran
+            // doivent dire le net, sinon ils promettent ce qui n'arrive pas.
+            'montant' => $montant,
+            'montant_net' => $montantEnvoye,
+            'frais_total' => $split['frais_total'],
             'payout_id' => $payoutId, 'trans_id' => $transId, 'numero' => $numeroE164,
         ];
     }
