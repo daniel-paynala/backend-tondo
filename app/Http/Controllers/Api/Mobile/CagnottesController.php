@@ -489,6 +489,18 @@ class CagnottesController extends Controller
                         ->select('nom', 'prenom')->first();
                     if ($u) $nomBenef = trim("{$u->prenom} {$u->nom}");
                 }
+                // Paiement marchand : le gérant doit lire l'ENSEIGNE réglée.
+                // Un payout vers un commerce n'a pas de `user_id`, la ligne
+                // retombait donc sur « Bénéficiaire », qui ne lui dit rien et
+                // ne lui permet pas de rapprocher la sortie de son achat.
+                if (($r->type_beneficiaire ?? 'particulier') === 'marchand' && $r->marchand_id) {
+                    $m = DB::table(project_table('marchands'))
+                        ->where('id', $r->marchand_id)
+                        ->select('nom')
+                        ->first();
+                    $nomBenef = $m ? "Paiement · {$m->nom}" : 'Paiement marchand';
+                }
+
                 // Retrait en espèces : le gérant doit voir QUEL comptoir a remis
                 // l'argent, pas seulement à qui — c'est l'information qui lui
                 // permet de contester une sortie qu'il ne reconnaît pas.
