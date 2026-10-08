@@ -60,6 +60,8 @@ class TondoProjectConfig extends Model
         'plafond_cagnotte_particulier' => 'integer',
         'plafond_cagnotte_association' => 'integer',
         'frais_retrait'                => 'array',
+        'plafond_frais_retrait'        => 'integer',
+        'franchise_retrait'            => 'integer',
         'sorties_bloquees'             => 'array',
         'tranches'           => 'array',   // Tranches de frais opérateur (JSON array).
         'prefixes'           => 'array',   // Préfixes locaux valides (JSON array).
@@ -96,6 +98,12 @@ class TondoProjectConfig extends Model
                 'cagnotte' => ['particulier' => 0, 'association' => 0],
                 'tontine'  => ['particulier' => 0, 'association' => 0],
             ],
+            // Plafond du prélèvement sur un reversement, et montant sous lequel
+            // il est gratuit. Zéro veut dire « aucun plafond » et « aucune
+            // franchise » — pas « prélèvement nul » : c'est la matrice
+            // ci-dessus qui porte le taux.
+            'plafond_frais_retrait' => (int) ($this->plafond_frais_retrait ?? 0),
+            'franchise_retrait'     => (int) ($this->franchise_retrait ?? 0),
             'tranches'           => $this->tranches ?? [],    // Tableau vide si non défini.
             'logo'               => $this->logo,
         ];

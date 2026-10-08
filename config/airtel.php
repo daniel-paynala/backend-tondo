@@ -27,6 +27,16 @@ return [
     'frais_marchand' => (float) env('PAYNALA_FRAIS_MARCHAND', 0.03),
 
     /*
+     * Plafond du prélèvement sur un reversement (FCFA), et montant sous lequel
+     * ce reversement est gratuit. Zéro = aucun plafond, aucune franchise.
+     *
+     * Repli seulement : les valeurs qui font foi vivent en base, par projet, et
+     * se règlent au dashboard. Rien de tout cela n'est écrit dans les clients.
+     */
+    'plafond_frais_retrait' => (int) env('TONJI_PLAFOND_FRAIS_RETRAIT', 0),
+    'franchise_retrait'     => (int) env('TONJI_FRANCHISE_RETRAIT', 0),
+
+    /*
     | Plafond d'un envoi Mobile Money unique (FCFA).
     */
     'plafond_par_envoi' => (int) env('AIRTEL_PLAFOND_ENVOI', 500_000),

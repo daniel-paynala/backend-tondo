@@ -83,6 +83,11 @@ class PlafondsController extends Controller
             // Taux sur un paiement marchand. Zéro = aucun prélèvement, et le
             // texte des conditions le dira de lui-même.
             'frais_marchand' => (float) ($config['frais_marchand'] ?? 0),
+            // Bornes du prélèvement sur un reversement. Elles vivent avec la
+            // matrice parce qu'elles n'ont de sens qu'avec elle : un plafond
+            // sans taux ne veut rien dire.
+            'plafond_frais_retrait' => (int) ($config['plafond_frais_retrait'] ?? 0),
+            'franchise_retrait'     => (int) ($config['franchise_retrait'] ?? 0),
             // Verrous globaux des sorties, par type de compte. Ils ferment un
             // canal d'un coup, pour tous les comptes de ce type.
             'sorties_bloquees' => $config['sorties_bloquees']
@@ -113,6 +118,10 @@ class PlafondsController extends Controller
             // Borne à 25 %, comme la commission — au-delà, c'est une erreur de
             // saisie, pas une décision commerciale.
             'frais_marchand'                     => ['sometimes', 'numeric', 'min:0', 'max:0.25'],
+            // Bornes du prélèvement, en FCFA. Zéro est une valeur légitime :
+            // elle dit « aucun plafond » et « aucune franchise ».
+            'plafond_frais_retrait'              => ['sometimes', 'integer', 'min:0', 'max:1000000'],
+            'franchise_retrait'                  => ['sometimes', 'integer', 'min:0', 'max:100000000'],
             // Verrous globaux — facultatifs eux aussi : un appel qui ne règle
             // que les taux ne doit pas rouvrir un canal qu'on vient de fermer.
             'sorties_bloquees'                          => ['sometimes', 'array'],
@@ -143,6 +152,12 @@ class PlafondsController extends Controller
         }
         if (array_key_exists('frais_marchand', $data)) {
             $champs['frais_marchand'] = (float) $data['frais_marchand'];
+        }
+        if (array_key_exists('plafond_frais_retrait', $data)) {
+            $champs['plafond_frais_retrait'] = (int) $data['plafond_frais_retrait'];
+        }
+        if (array_key_exists('franchise_retrait', $data)) {
+            $champs['franchise_retrait'] = (int) $data['franchise_retrait'];
         }
         if (array_key_exists('sorties_bloquees', $data)) {
             // Normalisé en booléens : un « false » arrivé en chaîne depuis un

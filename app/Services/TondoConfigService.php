@@ -54,6 +54,8 @@ class TondoConfigService
                 'cagnotte' => ['particulier' => 0, 'association' => 0],
                 'tontine'  => ['particulier' => 0, 'association' => 0],
             ],
+            'plafond_frais_retrait' => (int) ($c['plafond_frais_retrait'] ?? 0),
+            'franchise_retrait'     => (int) ($c['franchise_retrait'] ?? 0),
             'tranches'           => $c['tranches'] ?? [],
         ];
     }
