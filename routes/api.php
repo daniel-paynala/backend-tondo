@@ -308,6 +308,9 @@ Route::prefix('mobile')->group(function () {
         // Solde personnel — créé à la volée au premier accès.
         Route::get('/wallet', [\App\Http\Controllers\Api\Mobile\WalletController::class, 'show']);
 
+        // Toute l'activité du compte, collectes confondues.
+        Route::get('/activite', [\App\Http\Controllers\Api\Mobile\ActiviteController::class, 'index']);
+
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
         // Acceptation des CGU : la version envoyée doit être celle en vigueur.
