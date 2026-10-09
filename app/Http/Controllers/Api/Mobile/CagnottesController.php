@@ -1180,15 +1180,10 @@ class CagnottesController extends Controller
      * Démarre à 4 chiffres ; si collision après 5 tentatives, passe à 5.
      * Une fois plus de ~10k cagnottes, à étendre à 6 chiffres (à voir).
      */
+    /** Délègue au modèle, seule source du générateur (le wallet l'utilise aussi). */
     private function doGenerateReference(): string
     {
-        for ($attempt = 0; $attempt < 20; $attempt++) {
-            $ref = (string) random_int(100000, 999999);
-            if (! TondoCagnotte::where('reference', $ref)->exists()) {
-                return $ref;
-            }
-        }
-        throw new \RuntimeException("Impossible de générer une référence 6 chiffres unique après 20 essais.");
+        return TondoCagnotte::nouvelleReference();
     }
 
     /**

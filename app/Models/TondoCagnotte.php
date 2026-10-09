@@ -74,6 +74,27 @@ class TondoCagnotte extends Model
      * La FK est `user_id` (pas `tondo_cagnotte_id`) — l'alias `gerant` est
      * plus explicite que le nom par défaut `user`.
      */
+    /**
+     * Une référence à 6 chiffres encore libre (RÈGLE 4-bis).
+     *
+     * Vit sur le modèle et non dans un contrôleur : le wallet en a besoin comme
+     * la création de collecte, et deux générateurs d'identifiant uniques qui
+     * s'ignorent finissent toujours par diverger.
+     */
+    public static function nouvelleReference(): string
+    {
+        for ($essai = 0; $essai < 20; $essai++) {
+            $ref = (string) random_int(100000, 999999);
+            if (! static::where('reference', $ref)->exists()) {
+                return $ref;
+            }
+        }
+
+        throw new \RuntimeException(
+            'Impossible de générer une référence 6 chiffres unique après 20 essais.'
+        );
+    }
+
     public function gerant(): BelongsTo
     {
         return $this->belongsTo(TondoUser::class, 'user_id');

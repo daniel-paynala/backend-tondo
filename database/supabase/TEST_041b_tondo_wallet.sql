@@ -1,6 +1,6 @@
 -- ============================================================================
--- TEST_041_tondo_wallet.sql — version locale, préfixe tondo_
--- Le solde personnel, modélisé comme une collecte d'un nouveau type.
+-- TEST_041b_tondo_wallet.sql
+-- Le solde personnel — à jouer APRÈS TEST_041a_tondo_type_wallet.sql.
 --
 -- ── Pourquoi un type de collecte, et pas une table à part ───────────────────
 --
@@ -17,8 +17,7 @@
 --
 -- La contrepartie est que les SERVICES de collecte doivent être explicitement
 -- écartés — reversement automatique, gratuité, partage, participants,
--- exploration publique, clôture. C'est du code, pas du schéma : voir
--- `Wallet::estWallet()` et les gardes des services concernés.
+-- exploration publique, clôture. C'est du code, pas du schéma.
 --
 -- ── Le transfert interne ────────────────────────────────────────────────────
 --
@@ -36,35 +35,7 @@
 -- Idempotent : rejouable sans effet de bord.
 -- ============================================================================
 
--- ── 1. Le type ──────────────────────────────────────────────────────────────
---
--- Le nom de l'énumération n'est PAS déduit du préfixe des tables : en
--- production les tables portent `tonji_` mais le type a pu rester `tondo_`,
--- selon l'ordre dans lequel les scripts ont été joués. On le lit donc sur la
--- colonne elle-même plutôt que de l'écrire — se tromper de nom ferait échouer
--- le script sur la première instruction.
---
--- `ADD VALUE` dans un bloc : autorisé depuis PostgreSQL 12 tant que la valeur
--- n'est pas utilisée dans la même transaction. Elle ne l'est pas ici.
-DO $$
-DECLARE nom_type text;
-BEGIN
-  SELECT t.typname
-    INTO nom_type
-    FROM pg_attribute a
-    JOIN pg_type     t ON t.oid = a.atttypid
-   WHERE a.attrelid = 'public.tondo_cagnottes'::regclass
-     AND a.attname  = 'type'
-     AND t.typtype  = 'e';   -- énumération seulement
-
-  IF nom_type IS NULL THEN
-    RAISE NOTICE 'Colonne type non énumérée : rien à ajouter.';
-  ELSE
-    EXECUTE format('ALTER TYPE public.%I ADD VALUE IF NOT EXISTS %L', nom_type, 'wallet');
-  END IF;
-END $$;
-
--- ── 2. Un seul wallet par personne ──────────────────────────────────────────
+-- ── Un seul wallet par personne ─────────────────────────────────────────────
 --
 -- Index partiel : la contrainte ne pèse que sur les wallets, les collectes
 -- ordinaires restent libres d'être nombreuses pour un même gérant.
@@ -72,7 +43,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS tondo_cagnottes_wallet_unique
   ON public.tondo_cagnottes (user_id)
   WHERE type = 'wallet';
 
--- ── 3. La provenance d'une cotisation interne ───────────────────────────────
+-- ── La provenance d'une cotisation interne ──────────────────────────────────
 ALTER TABLE public.tondo_paiements
   ADD COLUMN IF NOT EXISTS cagnotte_source_id uuid
   REFERENCES public.tondo_cagnottes(id) ON DELETE SET NULL;

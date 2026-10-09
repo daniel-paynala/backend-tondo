@@ -305,6 +305,9 @@ Route::prefix('mobile')->group(function () {
         // elle constituerait un annuaire inversé des comptes Airtel Money.
         Route::post('/kyc/verifier-numero',        [MobileProfilController::class, 'verifierNumeroRetrait'])->middleware('throttle:kyc-numero');
 
+        // Solde personnel — créé à la volée au premier accès.
+        Route::get('/wallet', [\App\Http\Controllers\Api\Mobile\WalletController::class, 'show']);
+
         // Config dynamique (taux de frais, pilotés serveur)
         Route::get('/config/frais', [MobileConfigController::class, 'frais']);
         // Acceptation des CGU : la version envoyée doit être celle en vigueur.
