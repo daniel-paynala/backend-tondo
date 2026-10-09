@@ -36,9 +36,13 @@ class ActiviteController extends Controller
     {
         $user = $request->user();
 
+        // Titre ET type : le type dit lequel de ces contenants est le solde,
+        // et un mouvement parti du solde n'a pas à l'annoncer — c'est le cas
+        // ordinaire. C'est l'autre qui mérite d'être signalé.
         $miennes = DB::table(project_table('cagnottes'))
             ->where('user_id', $user->id)
-            ->pluck('titre', 'id');
+            ->get(['id', 'titre', 'type'])
+            ->keyBy('id');
 
         $mouvements = collect()
             ->merge($this->cotisationsVersees($user, $miennes))
@@ -66,9 +70,11 @@ class ActiviteController extends Controller
             ->get(['p.id', 'p.montant', 'p.date', 'p.trans_id', 'c.titre', 'c.type'])
             ->map(fn ($l) => [
                 'id'      => (string) $l->id,
+                'action'  => ($l->type ?? '') === 'wallet' ? 'recharge' : 'cotisation',
                 'libelle' => ($l->type ?? '') === 'wallet'
-                    ? 'Rechargement du solde'
+                    ? 'Recharge du solde'
                     : 'Cotisation — ' . ($l->titre ?? 'collecte'),
+                'depuis'  => null,
                 'montant' => (int) $l->montant,
                 'sens'    => 'sortie',
                 'date'    => $l->date,
@@ -101,13 +107,25 @@ class ActiviteController extends Controller
             ->get(['p.id', 'p.montant', 'p.date', 'p.trans_id', 'p.cagnotte_id'])
             ->map(fn ($l) => [
                 'id'      => (string) $l->id,
-                'libelle' => 'Cotisation reçue — ' . ($miennes[$l->cagnotte_id] ?? 'collecte'),
+                'action'  => 'cotisation',
+                'libelle' => 'Cotisation reçue — '
+                    . ($miennes[$l->cagnotte_id]->titre ?? 'collecte'),
+                'depuis'  => null,
                 'montant' => (int) $l->montant,
                 'sens'    => 'entree',
                 'date'    => $l->date,
                 'reference' => $l->trans_id ? (Registre::court($l->trans_id) ?? $l->trans_id) : null,
             ])
             ->all();
+    }
+
+    /** Nom lisible du bénéficiaire d'un transfert, à défaut « un numéro ». */
+    private function nomBeneficiaire(object $ligne): string
+    {
+        $nom = trim(mb_strtoupper((string) ($ligne->benef_nom ?? '')) . ' '
+            . ucfirst(mb_strtolower((string) ($ligne->benef_prenom ?? ''))));
+
+        return $nom === '' ? 'un numéro' : $nom;
     }
 
     /** Ce qui est sorti de ses collectes — transfert, paiement, retrait. */
@@ -121,6 +139,9 @@ class ActiviteController extends Controller
         $marchands = project_table('marchands');
 
         return DB::table("{$payout} as o")
+            // Le bénéficiaire d'un transfert, quand il a un compte Tonji : un
+            // nom se reconnaît, un numéro masqué beaucoup moins.
+            ->leftJoin('users as u', 'u.id', '=', 'o.user_id')
             // Le nom de l'enseigne réglée. Un paiement marchand annoncé au nom
             // de la collecte débitée — « Paiement — Anniversaire maman » — ne
             // dit pas À QUI l'argent est allé, et c'est précisément ce qu'on
@@ -134,12 +155,22 @@ class ActiviteController extends Controller
             ->limit(self::LIMITE)
             ->get(['o.id', 'o.montant', 'o.date_creation', 'o.trans_id',
                    'o.cagnotte_id', 'o.type_beneficiaire', 'o.statut',
-                   'm.nom as marchand_nom'])
+                   'm.nom as marchand_nom', 'u.nom as benef_nom',
+                   'u.prenom as benef_prenom'])
             ->map(fn ($l) => [
                 'id'      => (string) $l->id,
+                'action'  => ($l->type_beneficiaire ?? '') === 'marchand'
+                    ? 'paiement'
+                    : 'transfert',
                 'libelle' => ($l->type_beneficiaire ?? '') === 'marchand'
                     ? 'Paiement · ' . ($l->marchand_nom ?? 'commerce')
-                    : 'Transfert — ' . ($miennes[$l->cagnotte_id] ?? 'collecte'),
+                    : 'Transfert · ' . $this->nomBeneficiaire($l),
+                // D'où l'argent est parti, et seulement quand ce n'est PAS le
+                // solde : payer un commerce depuis une collecte engage l'argent
+                // des cotisants, pas le sien. C'est ce qu'il faut voir.
+                'depuis'  => ($miennes[$l->cagnotte_id]->type ?? '') === 'wallet'
+                    ? null
+                    : ($miennes[$l->cagnotte_id]->titre ?? null),
                 'montant' => (int) $l->montant,
                 'sens'    => 'sortie',
                 'date'    => $l->date_creation,
