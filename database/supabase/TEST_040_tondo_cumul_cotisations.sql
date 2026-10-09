@@ -42,6 +42,43 @@ ALTER TABLE public.tondo_payout
 COMMENT ON COLUMN public.tondo_payout.frais_attendus IS
   'Frais que le barème Tonji prévoyait pour ce reversement, en FCFA. Indicatif : le montant envoyé n''est pas diminué.';
 
+-- ── Avant tout : les références trop courtes ────────────────────────────────
+--
+-- La contrainte `tondo_cagnottes_reference_check` exige six chiffres exacts.
+-- Des lignes antérieures à cette règle ne la respectent pas — on en a trouvé
+-- une à `7825` sur la base de test.
+--
+-- PostgreSQL revalide les contraintes de la ligne MODIFIÉE à chaque UPDATE.
+-- Une telle ligne est donc **impossible à mettre à jour** : non seulement la
+-- reprise ci-dessous échoue dessus, mais toute cotisation qui voudrait créditer
+-- cette collecte échoue aussi. Ce n'est pas un défaut de ce script, c'est une
+-- collecte gelée.
+--
+-- On complète donc à gauche par des zéros — `7825` devient `007825`, le même
+-- numéro, écrit sur six chiffres — et seulement si la valeur obtenue est libre.
+UPDATE public.tondo_cagnottes c
+   SET reference = lpad(c.reference, 6, '0')
+ WHERE c.reference ~ '^[0-9]{1,5}$'
+   AND NOT EXISTS (
+         SELECT 1 FROM public.tondo_cagnottes d
+          WHERE d.reference = lpad(c.reference, 6, '0')
+       );
+
+-- Ce qui résiste encore : référence non numérique, ou collision après
+-- complétion. Signalé plutôt que corrigé en silence — une référence est un
+-- identifiant qu'un utilisateur a pu noter.
+DO $$
+DECLARE restant int;
+BEGIN
+  SELECT count(*) INTO restant
+    FROM public.tondo_cagnottes
+   WHERE reference !~ '^[0-9]{6}$';
+
+  IF restant > 0 THEN
+    RAISE WARNING 'Références non conformes restantes : % — ces collectes ne peuvent pas être mises à jour.', restant;
+  END IF;
+END $$;
+
 -- ── Reprise de l'existant ───────────────────────────────────────────────────
 --
 -- `tondo_paiements` ne porte que des cotisations abouties : la ligne n'est
@@ -57,4 +94,7 @@ UPDATE public.tondo_cagnottes c
           WHERE p.cagnotte_id = c.id
             AND COALESCE(p.actif, true) = true
        ), 0)
- WHERE c.cumul_cotisations = 0;
+ WHERE c.cumul_cotisations = 0
+   -- Épargne les lignes restées non conformes : les toucher relancerait la
+   -- violation de contrainte et ferait échouer tout le script.
+   AND c.reference ~ '^[0-9]{6}$';
