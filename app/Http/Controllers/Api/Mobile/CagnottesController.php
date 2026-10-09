@@ -61,6 +61,11 @@ class CagnottesController extends Controller
         // ── Cagnottes gérant ─────────────────────────────────────────────
         $qGerant = TondoCagnotte::where('project_id', $user->project_id)
             ->where('user_id', $user->id)
+            // Le solde personnel est une collecte côté base, mais il n'est pas
+            // une collecte pour l'utilisateur : il a son propre onglet, ne se
+            // partage pas et ne se clôture pas. Le laisser remonter ici le
+            // ferait aussi apparaître dans « Mes cagnottes ».
+            ->where('type', '!=', 'wallet')
             ->orderBy('date_creation', 'desc');
         if ($filtreStatut) $qGerant->where('statut', $filtreStatut);
         if ($filtreType)   $qGerant->where('type',   $filtreType);
@@ -76,6 +81,8 @@ class CagnottesController extends Controller
 
         $qCotiseur = TondoCagnotte::where('project_id', $user->project_id)
             ->where('user_id', '!=', $user->id)   // exclure celles où il est gérant
+            // Un solde d'autrui ne se « rejoint » pas davantage que le sien.
+            ->where('type', '!=', 'wallet')
             ->whereIn('id', $cagnotteIdsCotiseur)
             ->orderBy('date_creation', 'desc');
         if ($filtreStatut) $qCotiseur->where('statut', $filtreStatut);
