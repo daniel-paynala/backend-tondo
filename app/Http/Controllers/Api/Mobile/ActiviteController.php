@@ -117,9 +117,15 @@ class ActiviteController extends Controller
             return [];
         }
 
-        $payout = project_table('payout');
+        $payout    = project_table('payout');
+        $marchands = project_table('marchands');
 
         return DB::table("{$payout} as o")
+            // Le nom de l'enseigne réglée. Un paiement marchand annoncé au nom
+            // de la collecte débitée — « Paiement — Anniversaire maman » — ne
+            // dit pas À QUI l'argent est allé, et c'est précisément ce qu'on
+            // vient chercher dans un relevé.
+            ->leftJoin("{$marchands} as m", 'm.id', '=', 'o.marchand_id')
             ->whereIn('o.cagnotte_id', $miennes->keys())
             // Une sortie refusée n'a rien déplacé : elle n'a pas sa place dans
             // un relevé, où elle se lirait comme de l'argent parti.
@@ -127,13 +133,13 @@ class ActiviteController extends Controller
             ->orderByDesc('o.date_creation')
             ->limit(self::LIMITE)
             ->get(['o.id', 'o.montant', 'o.date_creation', 'o.trans_id',
-                   'o.cagnotte_id', 'o.type_beneficiaire', 'o.statut'])
+                   'o.cagnotte_id', 'o.type_beneficiaire', 'o.statut',
+                   'm.nom as marchand_nom'])
             ->map(fn ($l) => [
                 'id'      => (string) $l->id,
-                'libelle' => (($l->type_beneficiaire ?? '') === 'marchand'
-                        ? 'Paiement — '
-                        : 'Transfert — ')
-                    . ($miennes[$l->cagnotte_id] ?? 'collecte'),
+                'libelle' => ($l->type_beneficiaire ?? '') === 'marchand'
+                    ? 'Paiement · ' . ($l->marchand_nom ?? 'commerce')
+                    : 'Transfert — ' . ($miennes[$l->cagnotte_id] ?? 'collecte'),
                 'montant' => (int) $l->montant,
                 'sens'    => 'sortie',
                 'date'    => $l->date_creation,
