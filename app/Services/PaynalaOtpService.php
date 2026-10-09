@@ -2,6 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\Project;
+use App\Models\TondoUser;
+use App\Services\Mail\EmailLayout;
+use App\Services\Mail\MailgunSender;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -30,7 +34,10 @@ class PaynalaOtpService
     /**
      * @param WirepickSmsService $wirepick  Service de livraison SMS injecté.
      */
-    public function __construct(private WirepickSmsService $wirepick) {}
+    public function __construct(
+        private WirepickSmsService $wirepick,
+        private MailgunSender      $mailer,
+    ) {}
 
     /**
      * Génère un code OTP, le stocke en cache, et l'envoie par SMS via Wirepick.
@@ -53,11 +60,62 @@ class PaynalaOtpService
             self::TTL_SECONDS
         );
 
+        // Canal de secours : si l'utilisateur a une adresse e-mail, on lui
+        // envoie aussi le code. Best-effort — ne doit jamais bloquer le SMS,
+        // d'où le placement AVANT l'envoi SMS (qui, lui, peut lever une
+        // exception) et la capture de toute erreur à l'intérieur.
+        $this->envoyerParEmail($phoneE164, $code);
+
         $message = "Tonji - Votre code de vérification : {$code}. Valable 5 minutes. Ne le partagez jamais.";
 
         $this->wirepick->send($phoneE164, $message);
 
         Log::info("[paynala-otp] code envoyé à {$phoneE164}");
+    }
+
+    /**
+     * Envoie le code OTP par e-mail si l'utilisateur en possède une adresse.
+     *
+     * Canal additionnel au SMS (utile quand la livraison SMS opérateur échoue).
+     * Entièrement best-effort : toute erreur (utilisateur introuvable, pas
+     * d'e-mail, échec Mailgun) est capturée et loggée sans jamais interrompre
+     * le flux OTP principal.
+     *
+     * @param string $phoneE164  Numéro E.164 de l'utilisateur.
+     * @param string $code       Code OTP à 6 chiffres (identique à celui du SMS).
+     */
+    private function envoyerParEmail(string $phoneE164, string $code): void
+    {
+        try {
+            $email = TondoUser::where('project_id', Project::tondoId())
+                ->where('numero', $phoneE164)
+                ->value('email');
+
+            if (! $email) {
+                return; // Pas d'utilisateur ou pas d'e-mail → canal e-mail ignoré.
+            }
+
+            $corps = '<p>Votre code de vérification Tonji est :</p>'
+                . '<p style="font-size:30px;font-weight:700;letter-spacing:6px;margin:16px 0">'
+                . e($code) . '</p>'
+                . '<p>Il est valable <strong>5 minutes</strong>. Ne le partagez avec personne.</p>';
+
+            $html = EmailLayout::render(
+                'Votre code de vérification',
+                $corps,
+                null,
+                null,
+                'Votre code de vérification Tonji',
+            );
+
+            $this->mailer->envoyer($email, 'Votre code de vérification Tonji', $html);
+            Log::info("[paynala-otp] code aussi envoyé par e-mail pour {$phoneE164}");
+        } catch (\Throwable $e) {
+            Log::warning('[paynala-otp] échec envoi e-mail OTP (non bloquant)', [
+                'phone' => $phoneE164,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
