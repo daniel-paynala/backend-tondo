@@ -109,11 +109,16 @@ class ReversementService
         // Bénéficiaire du retrait — peut être un tiers (cagnotte créée pour un proche).
         $beneficiaireUserId = DB::table('users')->where('numero', $numeroE164)->value('id');
 
+        // Même barème que les sorties manuelles, par le même service : le
+        // reversement automatique n'est pas un cas à part, il emprunte
+        // seulement une autre porte.
+        $frais = app(FraisSortie::class)->pour($cagnotte, $montant);
+
         // ── Phase 1 : réserver sous row-lock ─────────────────────────────────
         try {
             DB::transaction(function () use (
-                $cagnotte, $montant, $payoutId, $transId,
-                $idempotencyKey, $reference, $numeroE164, $beneficiaireUserId, $source, $trace
+                $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,
+                $reference, $numeroE164, $beneficiaireUserId, $source, $trace, $frais
             ) {
                 $solde = (int) DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
@@ -134,6 +139,12 @@ class ReversementService
                     'numero_tel'    => $numeroE164,
                     'montant'       => $montant,
                     'statut'        => 'initie',
+                    // Ce que le barème Tonji prévoyait pour cette sortie.
+                    // Indicatif : le montant envoyé n'en est pas diminué, c'est
+                    // Paynala qui prélève. Mais c'est cette trace qui dit si une
+                    // gratuité a été consommée — la règle du mois s'y réfère.
+                    'frais_attendus' => $frais['frais'],
+
                     'request'       => json_encode(array_merge([
                         'idempotency_key'    => $idempotencyKey,
                         'reference'          => $reference,

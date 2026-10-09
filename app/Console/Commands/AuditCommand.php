@@ -44,6 +44,7 @@ class AuditCommand extends Command
         if ($this->option('donnees')) {
             $this->controlerSchema();
             $this->controlerDeriveDonnees();
+            $this->controlerCumulCotisations();
         } else {
             $this->ajouter('ignore', 'données', 'Contrôles en base non exécutés (ajoutez --donnees).');
         }
@@ -303,6 +304,50 @@ class AuditCommand extends Command
             $resume = implode(', ', array_map(fn ($p, $n) => "{$p} ({$n})", array_keys($vus), $vus));
             $this->ajouter('ok', 'données', "{$table} : {$resume}");
         }
+    }
+
+    /**
+     * Le compteur des cotisations tient-il face aux cotisations réelles ?
+     *
+     * `cumul_cotisations` est dénormalisé : il monte dans la même instruction
+     * que le solde, aux quatre points de crédit. S'il dérive — un cinquième
+     * point oublié, une reprise partielle — la gratuité du reversement est
+     * accordée ou refusée à tort, et rien d'autre ne le signalerait.
+     */
+    private function controlerCumulCotisations(): void
+    {
+        $cagnottes = project_table('cagnottes');
+        $paiements = project_table('paiements');
+
+        if (! Schema::hasTable($cagnottes) || ! Schema::hasTable($paiements)
+            || ! Schema::hasColumn($cagnottes, 'cumul_cotisations')) {
+            $this->ajouter('avertissement', 'données',
+                "cumul_cotisations : colonne absente, le SQL 040 n'est pas joué.");
+
+            return;
+        }
+
+        $ecarts = DB::table("{$cagnottes} as c")
+            ->selectRaw('c.id, c.cumul_cotisations, coalesce(sum(p.montant), 0) as reel')
+            ->leftJoin("{$paiements} as p", function ($j) {
+                $j->on('p.cagnotte_id', '=', 'c.id')
+                  ->whereRaw('coalesce(p.actif, true) = true');
+            })
+            ->groupBy('c.id', 'c.cumul_cotisations')
+            ->havingRaw('c.cumul_cotisations <> coalesce(sum(p.montant), 0)')
+            ->limit(20)
+            ->get();
+
+        if ($ecarts->isEmpty()) {
+            $this->ajouter('ok', 'données', 'cumul_cotisations : conforme aux cotisations enregistrées.');
+
+            return;
+        }
+
+        $exemple = $ecarts->first();
+        $this->ajouter('anomalie', 'données',
+            "cumul_cotisations : {$ecarts->count()} collecte(s) en écart, par exemple "
+            . "{$exemple->id} (compteur {$exemple->cumul_cotisations}, réel {$exemple->reel}).");
     }
 
     // ── Restitution ─────────────────────────────────────────────────────────

@@ -626,7 +626,13 @@ class CotisationService
 
                 // Créditer le solde de la cagnotte (montant_net uniquement, pas les frais)
                 DB::table(project_table('cagnottes'))->where('id', $cagnotte->id)
-                    ->increment('montant_collecte', $montantNet);
+                    ->update([
+                        // `increment` ne sait toucher qu'une colonne : le cumul
+                        // doit monter dans la même instruction que le solde.
+                        'montant_collecte'  => DB::raw('montant_collecte + ' . $montantNet),
+                        'cumul_cotisations' => DB::raw('cumul_cotisations + ' . $montantNet),
+                        'updated_at'        => now(),
+                    ]);
             });
         } catch (\Throwable $e) {
             return ['statut' => 'erreur', 'message' => $e->getMessage()];
@@ -714,7 +720,12 @@ class CotisationService
 
             // 4. Créditer la cagnotte (montant net seulement)
             DB::table(project_table('cagnottes'))->where('id', $payin->cagnotte_id)
-                ->increment('montant_collecte', $netAmount);
+                ->update([
+                    // Idem : une seule instruction pour les deux colonnes.
+                    'montant_collecte'  => DB::raw('montant_collecte + ' . $netAmount),
+                    'cumul_cotisations' => DB::raw('cumul_cotisations + ' . $netAmount),
+                    'updated_at'        => now(),
+                ]);
         });
     }
 

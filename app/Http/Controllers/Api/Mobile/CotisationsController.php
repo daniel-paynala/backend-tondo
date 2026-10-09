@@ -380,8 +380,13 @@ class CotisationsController extends Controller
                     DB::table(project_table('cagnottes'))
                         ->where('id', $payin->cagnotte_id)
                         ->update([
-                            'montant_collecte' => DB::raw('montant_collecte + ' . $netAmount),
-                            'updated_at'       => now(),
+                            // Le cumul monte avec le solde, dans le MÊME ordre SQL :
+                            // deux instructions séparées dériveraient sous les
+                            // confirmations concurrentes — le terrain exact du
+                            // double-crédit du 2026-08-31.
+                            'montant_collecte'  => DB::raw('montant_collecte + ' . $netAmount),
+                            'cumul_cotisations' => DB::raw('cumul_cotisations + ' . $netAmount),
+                            'updated_at'        => now(),
                         ]);
                 });
             } catch (\Throwable $e) {
@@ -648,8 +653,11 @@ class CotisationsController extends Controller
                 DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
                     ->update([
-                        'montant_collecte' => DB::raw('montant_collecte + ' . $montantNet),
-                        'updated_at'       => now(),
+                        // Même règle qu'au-dessus : le cumul suit le solde dans
+                        // la même instruction.
+                        'montant_collecte'  => DB::raw('montant_collecte + ' . $montantNet),
+                        'cumul_cotisations' => DB::raw('cumul_cotisations + ' . $montantNet),
+                        'updated_at'        => now(),
                     ]);
             });
         } catch (\Throwable $e) {

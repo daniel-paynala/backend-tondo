@@ -167,9 +167,15 @@ class SortieArgent
 
         // ── 3. Réservation sous row-lock ─────────────────────────────────────
         try {
+            // Calculé AVANT la transaction : il interroge d'autres tables, et
+            // le faire sous le verrou de ligne allongerait la section critique
+            // du chemin de l'argent pour une information qui ne la concerne pas.
+            $frais = app(FraisSortie::class)->pour($cagnotte, $montant);
+
             DB::transaction(function () use (
                 $cagnotte, $montant, $payoutId, $transId, $idempotencyKey,
-                $reference, $numeroE164, $beneficiaireUserId, $marchand, $canal, $trace
+                $reference, $numeroE164, $beneficiaireUserId, $marchand, $canal,
+                $trace, $frais
             ) {
                 $solde = (int) DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
@@ -205,6 +211,12 @@ class SortieArgent
                     // contrainte l'exige : elles se posent ensemble.
                     'type_beneficiaire' => $marchand ? 'marchand' : 'particulier',
                     'marchand_id'       => $marchand?->id,
+                    // Ce que le barème Tonji prévoyait pour cette sortie.
+                    // Indicatif : le montant envoyé n'en est pas diminué, c'est
+                    // Paynala qui prélève. Mais c'est cette trace qui dit si une
+                    // gratuité a été consommée — la règle du mois s'y réfère.
+                    'frais_attendus' => $frais['frais'],
+
                     // `montant` est le montant demandé, débité de la collecte
                     // et envoyé tel quel à l'opérateur. C'est Paynala qui
                     // prélève ses frais sur cet envoi, selon le type B2B/B2C :
