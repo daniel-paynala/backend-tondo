@@ -54,13 +54,27 @@ class SuiviController extends Controller
         }
 
         $lignes = (clone $base)
+            ->select([
+                'p.trans_id', 'p.montant', 'p.statut', 'p.date_creation',
+                'm.nom as marchand_nom', 'c.titre as cagnotte_titre',
+                'u.nom as payeur_nom', 'u.prenom as payeur_prenom',
+            ])
             ->orderByDesc('p.date_creation')
             ->paginate(50, ['*'], 'page', $data['page'] ?? 1);
 
         // Totaux calculés sur la PÉRIODE entière, pas sur la page affichée :
         // un total qui changerait en tournant les pages ne vaudrait rien pour
         // un rapprochement.
-        $totaux = (clone $this->requete($numero, $projet, $depuis, $jusqua))
+        // Et sur TOUS les statuts, pas seulement celui qu'on filtre : les
+        // compteurs disent la répartition de la période, c'est leur rôle. Les
+        // vider parce qu'on regarde la liste des échecs n'aurait pas de sens.
+        //
+        // Ils repartent donc d'une requête neuve, et surtout NUE : `selectRaw`
+        // AJOUTE à la liste des colonnes, il ne la remplace pas. Tant que la
+        // requête commune portait les huit colonnes du détail, elles se
+        // retrouvaient dans un SELECT groupé sur le seul statut — et PostgreSQL
+        // refusait (42803).
+        $totaux = $this->requete($numero, $projet, $depuis, $jusqua)
             ->selectRaw("p.statut, count(*) as nb, coalesce(sum(p.montant), 0) as total")
             ->groupBy('p.statut')
             ->get()
@@ -99,7 +113,15 @@ class SuiviController extends Controller
         ]);
     }
 
-    /** Requête commune à la liste et aux totaux. */
+    /**
+     * Requête commune à la liste et aux totaux — jointures et filtres, **sans
+     * aucune colonne sélectionnée**.
+     *
+     * Le SELECT appartient à l'appelant : la liste veut le détail, les totaux
+     * veulent des agrégats, et `selectRaw` AJOUTE à la liste existante au lieu
+     * de la remplacer. Poser les colonnes du détail ici condamnait donc la
+     * requête d'agrégat.
+     */
     private function requete(string $numero, string $projet, \Carbon\Carbon $depuis, \Carbon\Carbon $jusqua)
     {
         $payout    = project_table('payout');
@@ -114,12 +136,7 @@ class SuiviController extends Controller
             // l'appelant, c'est ce qui cloisonne les marchands entre eux.
             ->where('m.numero_tel', $numero)
             ->where('p.project_id', $projet)
-            ->whereBetween('p.date_creation', [$depuis, $jusqua])
-            ->select([
-                'p.trans_id', 'p.montant', 'p.statut', 'p.date_creation',
-                'm.nom as marchand_nom', 'c.titre as cagnotte_titre',
-                'u.nom as payeur_nom', 'u.prenom as payeur_prenom',
-            ]);
+            ->whereBetween('p.date_creation', [$depuis, $jusqua]);
     }
 
     private function nomPayeur(object $l): string
