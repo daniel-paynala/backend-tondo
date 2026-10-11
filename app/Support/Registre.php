@@ -158,6 +158,7 @@ final class Registre
         'TONJIDISBURSEMENT' => 'TD',
         'TONJICASH'         => 'TC',
         'TONJIMERCHANT'     => 'TM',
+        'TONJIINTERNE'      => 'TN', // mouvement interne, sans opérateur
         'TONDOPAYIN'        => 'DI',
         'TONDOPAYOUT'       => 'DO',
         'TONDOAUTO'         => 'DA',
