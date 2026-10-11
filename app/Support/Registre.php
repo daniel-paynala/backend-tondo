@@ -37,6 +37,10 @@ final class Registre
         'reference_decaissement' => 'TONJIDISBURSEMENT', // référence transmise à Paynala
         'retrait_especes'        => 'TONJICASH',         // retrait au comptoir (recette)
         'payout_marchand'        => 'TONJIMERCHANT',     // paiement d'un marchand (recette)
+        // Mouvement INTERNE : d'un solde vers une collecte. Il ne sort jamais
+        // de Tonji, donc aucun opérateur ne le connaît — son préfixe doit être
+        // distinct pour que la réconciliation ne le cherche pas chez eux.
+        'paiement_interne'       => 'TONJIINTERNE',      // cotisation depuis le solde
     ];
 
     /**
