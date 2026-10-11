@@ -308,6 +308,10 @@ Route::prefix('mobile')->group(function () {
         // Solde personnel — créé à la volée au premier accès.
         Route::get('/wallet', [\App\Http\Controllers\Api\Mobile\WalletController::class, 'show']);
 
+        // Cotiser à une collecte en puisant dans son solde — mouvement
+        // interne, sans opérateur et donc sans frais.
+        Route::post('/wallet/cotiser', [\App\Http\Controllers\Api\Mobile\WalletCotisationController::class, 'store']);
+
         // Toute l'activité du compte, collectes confondues.
         Route::get('/activite', [\App\Http\Controllers\Api\Mobile\ActiviteController::class, 'index']);
 
