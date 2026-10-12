@@ -101,6 +101,9 @@ class CagnottesController extends Controller
         $data = $request->validate([
             'transfert' => ['sometimes', 'boolean'],
             'marchand'  => ['sometimes', 'boolean'],
+            // Pendant à l'entrée des deux verrous de sortie : coupe les
+            // cotisations de CETTE collecte, sans avoir à la clôturer.
+            'cotisation' => ['sometimes', 'boolean'],
         ]);
 
         $c = TondoCagnotte::where('reference', $reference)->first();
@@ -109,10 +112,14 @@ class CagnottesController extends Controller
         }
 
         $avant = [
-            'transfert' => (bool) $c->transfert_bloque,
-            'marchand'  => (bool) $c->paiement_marchand_bloque,
+            'transfert'  => (bool) $c->transfert_bloque,
+            'marchand'   => (bool) $c->paiement_marchand_bloque,
+            'cotisation' => (bool) $c->cotisation_bloquee,
         ];
 
+        if (array_key_exists('cotisation', $data)) {
+            $c->cotisation_bloquee = (bool) $data['cotisation'];
+        }
         if (array_key_exists('transfert', $data)) {
             $c->transfert_bloque = (bool) $data['transfert'];
         }
@@ -122,8 +129,9 @@ class CagnottesController extends Controller
         $c->save();
 
         $apres = [
-            'transfert' => (bool) $c->transfert_bloque,
-            'marchand'  => (bool) $c->paiement_marchand_bloque,
+            'transfert'  => (bool) $c->transfert_bloque,
+            'marchand'   => (bool) $c->paiement_marchand_bloque,
+            'cotisation' => (bool) $c->cotisation_bloquee,
         ];
 
         if ($avant !== $apres) {

@@ -63,29 +63,6 @@ class CotisationsController extends Controller
      *    en_attente / rejete / suspendu → la suspension coupe la collecte).
      *  – Particulier / cagnotte privée : jamais bloqué ici.
      */
-    private function collecteBloquee(mixed $cagnotte): ?string
-    {
-        // Lecture DB du gérant + statut d'orga — la décision est déléguée à
-        // CollecteGuard (logique pure testée).
-        $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
-        $orgStatut = null;
-        if ($gerant && $gerant->type_compte === 'association') {
-            $orgStatut = \App\Models\TondoOrganisation::query()
-                ->where('project_id', $cagnotte->project_id)
-                ->where('user_id', $gerant->id)
-                ->value('statut');
-        }
-
-        return CollecteGuard::bloquee(
-            $cagnotte->visibilite,
-            $cagnotte->statut_validation,
-            $gerant?->type_compte,
-            $orgStatut,
-            $cagnotte->type,
-            $cagnotte->date_fin ? (string) $cagnotte->date_fin : null,
-        );
-    }
-
     private function plafondCagnotte(mixed $cagnotte, array $config): int
     {
         $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
@@ -181,7 +158,7 @@ class CotisationsController extends Controller
         // Garde de collecte (sécurité) : cagnotte publique VALIDÉE par la
         // modération + association gérante APPROUVÉE (bloque une asso en attente,
         // rejetée ou suspendue). Ne dépend pas du gate client.
-        if ($raison = $this->collecteBloquee($cagnotte)) {
+        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)) {
             throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
         }
 
