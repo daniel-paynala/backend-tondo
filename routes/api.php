@@ -90,6 +90,11 @@ Route::prefix('ussd')->group(function () {
 Route::prefix('public')->group(function () {
     Route::get('/cagnottes',             [PublicCagnottesController::class, 'index']);
     Route::get('/cagnottes/{reference}', [PublicCagnottesController::class, 'show']);
+
+    // Logo d'une enseigne — image publique, servie avec un cache long. Le
+    // bucket étant privé, signer une URL par vignette coûterait un appel HTTP
+    // par ligne du carnet.
+    Route::get('/marchands/{id}/logo', [\App\Http\Controllers\Api\Public\LogosMarchandsController::class, 'show']);
 });
 
 // ============================================================================
@@ -221,6 +226,8 @@ Route::prefix('admin')->group(function () {
         Route::get('/marchands/{id}/paiements',        [MarchandsController::class, 'paiements']);
         Route::patch('/marchands/{id}',                [MarchandsController::class, 'update']);             // super_admin
         Route::delete('/marchands/{id}',               [MarchandsController::class, 'destroy']);            // super_admin
+        Route::post('/marchands/{id}/logo',            [MarchandsController::class, 'logo']);                // super_admin
+        Route::delete('/marchands/{id}/logo',          [MarchandsController::class, 'supprimerLogo']);       // super_admin
 
         // État du système : tâches planifiées, paiements bloqués, réglages.
         Route::get('/sante', [SanteController::class, 'index']);

@@ -150,6 +150,8 @@ class CarnetMarchands
             "{$marchands}.numero_tel",
             "{$marchands}.titulaire",
             "{$marchands}.ville",
+            "{$marchands}.logo_chemin",
+            "{$marchands}.logo_maj_at",
             "{$categories}.libelle as categorie",
         ];
     }
@@ -179,6 +181,10 @@ class CarnetMarchands
             'titulaire' => $m->titulaire,
             'ville'     => $m->ville,
             'categorie' => $m->categorie,
+            // Logo de l'enseigne, null quand il n'y en a pas : le client
+            // retombe sur la pastille d'initiales, qui reste la règle par
+            // défaut et non un cas d'erreur.
+            'logo'      => LogoMarchand::url($m->logo_chemin, $m->logo_maj_at, $m->id),
         ];
     }
 }
