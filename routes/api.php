@@ -119,6 +119,9 @@ Route::prefix('admin')->group(function () {
         Route::get('/users', [UsersController::class, 'index']);
         Route::get('/users/{id}', [UsersController::class, 'show']);
         Route::patch('/users/{id}/plafond', [UsersController::class, 'setPlafond']);
+        // Suspension d'un organisateur : ferme cotisations, transferts et
+        // paiements marchands sur TOUTES ses collectes. Super admin.
+        Route::patch('/users/{id}/suspension', [UsersController::class, 'setSuspension']);
         // Suppression (anonymisation) d'un compte — super_admin uniquement,
         // avec rapatriement préalable des soldes de ses cagnottes.
         Route::delete('/users/{id}', [UsersController::class, 'destroy']);
