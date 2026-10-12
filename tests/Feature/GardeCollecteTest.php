@@ -68,7 +68,19 @@ class GardeCollecteTest extends TestCase
             $t->string('visibilite')->default('prive');
             $t->string('statut_validation')->nullable();
             $t->bigInteger('montant_collecte')->default(0);
+            // Verrou administratif de la collecte, lu par CollecteAutorisee.
+            $t->boolean('cotisation_bloquee')->default(false);
             $t->timestamps();
+        });
+
+        // La garde consulte désormais le verrou GLOBAL, qui vit dans la config
+        // d'opérateur. Table vide : rien n'est bloqué, ce qui est l'état
+        // qu'attendent les cas ci-dessous.
+        Schema::create('tondo_project_config', function ($t) {
+            $t->uuid('id')->primary();
+            $t->string('project_id');
+            $t->string('operateur');
+            $t->string('pays');
         });
     }
 

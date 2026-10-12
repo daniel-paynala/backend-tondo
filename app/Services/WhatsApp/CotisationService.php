@@ -194,7 +194,7 @@ class CotisationService
         // Garde de collecte (sécurité) : cagnotte publique validée par la
         // modération + association gérante approuvée (bloque en attente / rejetée
         // / suspendue).
-        if ($raison = $this->collecteBloquee($cagnotte)) {
+        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)) {
             return ['statut' => 'erreur', 'message' => $raison];
         }
 
@@ -267,27 +267,6 @@ class CotisationService
      *    rejete / suspendu → la suspension coupe la collecte).
      *  – Particulier / cagnotte privée : jamais bloqué ici.
      */
-    private function collecteBloquee(TondoCagnotte $cagnotte): ?string
-    {
-        $gerant = TondoUser::find($cagnotte->user_id);
-        $orgStatut = null;
-        if ($gerant && $gerant->type_compte === 'association') {
-            $orgStatut = \App\Models\TondoOrganisation::query()
-                ->where('project_id', $cagnotte->project_id)
-                ->where('user_id', $gerant->id)
-                ->value('statut');
-        }
-
-        return CollecteGuard::bloquee(
-            $cagnotte->visibilite,
-            $cagnotte->statut_validation,
-            $gerant?->type_compte,
-            $orgStatut,
-            $cagnotte->type,
-            $cagnotte->date_fin ? (string) $cagnotte->date_fin : null,
-        );
-    }
-
     private function plafondCagnotte(TondoCagnotte $cagnotte, array $config): int
     {
         $gerant = TondoUser::find($cagnotte->user_id);

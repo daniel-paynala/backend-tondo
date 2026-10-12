@@ -92,6 +92,10 @@ class PlafondsController extends Controller
             // canal d'un coup, pour tous les comptes de ce type.
             'sorties_bloquees' => $config['sorties_bloquees']
                 ?? TondoProjectConfig::VERROUS_OUVERTS,
+            // Pendant à l'entrée : coupe les cotisations pour tout un type de
+            // compte, sur tous les canaux à la fois.
+            'cotisations_bloquees' => $config['cotisations_bloquees']
+                ?? TondoProjectConfig::COLLECTES_OUVERTES,
         ]);
     }
 
@@ -129,6 +133,11 @@ class PlafondsController extends Controller
             'sorties_bloquees.particulier.marchand'     => ['required_with:sorties_bloquees', 'boolean'],
             'sorties_bloquees.association.transfert'    => ['required_with:sorties_bloquees', 'boolean'],
             'sorties_bloquees.association.marchand'     => ['required_with:sorties_bloquees', 'boolean'],
+            // Verrou global des cotisations. Forme plus simple que les
+            // sorties : une seule action à fermer, donc un booléen par type.
+            'cotisations_bloquees'              => ['sometimes', 'array'],
+            'cotisations_bloquees.particulier'  => ['required_with:cotisations_bloquees', 'boolean'],
+            'cotisations_bloquees.association'  => ['required_with:cotisations_bloquees', 'boolean'],
         ]);
 
         $champs  = ['updated_at' => now()];
@@ -159,6 +168,16 @@ class PlafondsController extends Controller
         if (array_key_exists('franchise_retrait', $data)) {
             $champs['franchise_retrait'] = (int) $data['franchise_retrait'];
         }
+        if (array_key_exists('cotisations_bloquees', $data)) {
+            // Même normalisation que les sorties : un « false » arrivé en
+            // chaîne depuis un formulaire vaudrait vrai, et couperait la
+            // collecte sans que personne l'ait demandé.
+            $champs['cotisations_bloquees'] = json_encode([
+                'particulier' => (bool) $data['cotisations_bloquees']['particulier'],
+                'association' => (bool) $data['cotisations_bloquees']['association'],
+            ]);
+        }
+
         if (array_key_exists('sorties_bloquees', $data)) {
             // Normalisé en booléens : un « false » arrivé en chaîne depuis un
             // formulaire deviendrait vrai en base, et fermerait un canal que
