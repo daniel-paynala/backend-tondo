@@ -88,9 +88,27 @@ class CagnottesController extends Controller
             ->sortByDesc('date_creation')
             ->values();
 
+        // Quota renvoyé avec la liste : l'accueil s'en sert pour griser
+        // « Créer une collecte ». Il vient d'ici plutôt que d'un comptage côté
+        // client, qui compterait ce que la liste contient — or elle mêle les
+        // collectes gérées et celles où l'on cotise, et le quota ne porte que
+        // sur les premières.
+        $quota = app(\App\Services\QuotaCagnottes::class);
+        $user  = $request->user();
+        $actives = $quota->actives($user->id, $user->project_id);
+        $limite  = $quota->limite($user->project_id);
+
         return response()->json([
             'data'  => $all->all(),
             'total' => $all->count(),
+            'quota' => [
+                'actives'    => $actives,
+                'limite'     => $limite,
+                // Calculé serveur : l'app n'a pas à refaire la comparaison,
+                // et le jour où la règle se complique elle n'aura rien à
+                // réapprendre.
+                'peut_creer' => $actives < $limite,
+            ],
         ]);
     }
 
@@ -128,6 +146,16 @@ class CagnottesController extends Controller
             throw ValidationException::withMessages([
                 'type' => 'Type invalide.',
             ]);
+        }
+
+        // Quota de collectes actives. Contrôlé AVANT toute autre validation :
+        // inutile de faire remplir un formulaire entier pour refuser à la fin.
+        // L'app grise déjà le bouton, mais griser n'est pas interdire — le
+        // refus vit ici.
+        $quota = app(\App\Services\QuotaCagnottes::class)
+            ->refus($request->user()->id, $request->user()->project_id);
+        if ($quota !== null) {
+            throw ValidationException::withMessages(['type' => $quota]);
         }
 
         // Les comptes association n'ont pas accès aux tontines : une tontine est

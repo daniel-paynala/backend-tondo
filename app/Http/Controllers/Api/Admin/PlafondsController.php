@@ -96,6 +96,9 @@ class PlafondsController extends Controller
             // compte, sur tous les canaux à la fois.
             'cotisations_bloquees' => $config['cotisations_bloquees']
                 ?? TondoProjectConfig::COLLECTES_OUVERTES,
+            // Collectes actives par organisateur.
+            'max_cagnottes_actives' => (int) ($config['max_cagnottes_actives']
+                ?? TondoProjectConfig::MAX_CAGNOTTES_ACTIVES),
         ]);
     }
 
@@ -138,6 +141,10 @@ class PlafondsController extends Controller
             'cotisations_bloquees'              => ['sometimes', 'array'],
             'cotisations_bloquees.particulier'  => ['required_with:cotisations_bloquees', 'boolean'],
             'cotisations_bloquees.association'  => ['required_with:cotisations_bloquees', 'boolean'],
+            // Quota de collectes. Minimum 1 : zéro empêcherait tout le monde
+            // de créer quoi que ce soit, ce qui n'est pas un réglage mais une
+            // panne. Le maximum garde le champ dans le raisonnable.
+            'max_cagnottes_actives' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
         $champs  = ['updated_at' => now()];
@@ -168,6 +175,10 @@ class PlafondsController extends Controller
         if (array_key_exists('franchise_retrait', $data)) {
             $champs['franchise_retrait'] = (int) $data['franchise_retrait'];
         }
+        if (array_key_exists('max_cagnottes_actives', $data)) {
+            $champs['max_cagnottes_actives'] = (int) $data['max_cagnottes_actives'];
+        }
+
         if (array_key_exists('cotisations_bloquees', $data)) {
             // Même normalisation que les sorties : un « false » arrivé en
             // chaîne depuis un formulaire vaudrait vrai, et couperait la

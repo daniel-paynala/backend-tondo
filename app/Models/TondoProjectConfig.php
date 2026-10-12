@@ -54,6 +54,9 @@ class TondoProjectConfig extends Model
      * Forme plus simple que les sorties : il n'y a qu'une action à verrouiller,
      * donc un booléen par type de compte suffit.
      */
+    /** Collectes actives par organisateur, à défaut de réglage en base. */
+    public const MAX_CAGNOTTES_ACTIVES = 5;
+
     public const COLLECTES_OUVERTES = [
         'particulier' => false,
         'association' => false,
@@ -108,6 +111,10 @@ class TondoProjectConfig extends Model
             // Verrous des sorties d'argent, par type de compte.
             'sorties_bloquees'   => $this->sorties_bloquees ?? self::VERROUS_OUVERTS,
             'cotisations_bloquees' => $this->cotisations_bloquees ?? self::COLLECTES_OUVERTES,
+            // Collectes actives par organisateur. Une limite qui ne se change
+            // pas n'est pas une limite, c'est une impasse : elle vit donc en
+            // base, et le code ne porte qu'un défaut.
+            'max_cagnottes_actives' => (int) ($this->max_cagnottes_actives ?? self::MAX_CAGNOTTES_ACTIVES),
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
             'plafond_cagnotte_particulier' => (int) ($this->plafond_cagnotte_particulier ?? 2500000),
