@@ -43,6 +43,22 @@ class TondoProjectConfig extends Model
         'association' => ['transfert' => false, 'marchand' => false],
     ];
 
+    /**
+     * Verrou global des COTISATIONS, par type de compte.
+     *
+     * Clé distincte de `sorties_bloquees` et non une troisième action dedans :
+     * une cotisation est une entrée d'argent, pas une sortie. Les ranger
+     * ensemble aurait demandé de migrer la configuration déjà stockée pour un
+     * gain de nommage — on garde les données en place.
+     *
+     * Forme plus simple que les sorties : il n'y a qu'une action à verrouiller,
+     * donc un booléen par type de compte suffit.
+     */
+    public const COLLECTES_OUVERTES = [
+        'particulier' => false,
+        'association' => false,
+    ];
+
     use UuidPrimary;
     use HasProjectTable;
 
@@ -63,6 +79,7 @@ class TondoProjectConfig extends Model
         'plafond_frais_retrait'        => 'integer',
         'franchise_retrait'            => 'integer',
         'sorties_bloquees'             => 'array',
+        'cotisations_bloquees'         => 'array',
         'tranches'           => 'array',   // Tranches de frais opérateur (JSON array).
         'prefixes'           => 'array',   // Préfixes locaux valides (JSON array).
         'actif'              => 'boolean',
@@ -90,6 +107,7 @@ class TondoProjectConfig extends Model
             'frais_marchand'     => (float) ($this->frais_marchand ?? 0.0),
             // Verrous des sorties d'argent, par type de compte.
             'sorties_bloquees'   => $this->sorties_bloquees ?? self::VERROUS_OUVERTS,
+            'cotisations_bloquees' => $this->cotisations_bloquees ?? self::COLLECTES_OUVERTES,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
             'plafond_cagnotte_particulier' => (int) ($this->plafond_cagnotte_particulier ?? 2500000),
