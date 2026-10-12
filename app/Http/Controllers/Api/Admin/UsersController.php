@@ -120,6 +120,82 @@ class UsersController extends Controller
     }
 
     /**
+     * PATCH /api/admin/users/{id}/suspension — { suspendu: bool, motif?: string }
+     *
+     * Suspendre une personne, pas une collecte.
+     *
+     * La suspension ferme d'un coup les cotisations, les transferts et les
+     * paiements marchands sur **toutes** les collectes qu'elle organise, sur
+     * tous les canaux. C'est la mesure à prendre quand le soupçon porte sur
+     * quelqu'un plutôt que sur une opération : verrouiller ses collectes une
+     * par une laisserait passer celle qu'on n'a pas vue, et la suivante.
+     *
+     * **Elle n'empêche pas la connexion.** La personne doit pouvoir ouvrir
+     * l'app, constater l'état de son argent et joindre le support. Lui fermer
+     * la porte pendant qu'on retient ses fonds serait l'inverse de ce qu'on
+     * cherche, et le premier réflexe de qui ne comprend pas est de croire au
+     * vol.
+     *
+     * Réservé au super admin, comme les verrous.
+     */
+    public function setSuspension(Request $request, string $id): JsonResponse
+    {
+        abort_unless(
+            $request->user()->role === 'super_admin',
+            403,
+            'Action réservée aux super admins.',
+        );
+
+        $data = $request->validate([
+            'suspendu' => ['required', 'boolean'],
+            // Obligatoire à la suspension : un dossier sans raison est
+            // inexploitable par celui qui le reprendra.
+            'motif'    => ['required_if:suspendu,true', 'nullable', 'string', 'max:500'],
+        ]);
+
+        $projectId = $request->user()->project_id;
+        $user = TondoUser::where('project_id', $projectId)->find($id);
+        if (! $user) {
+            return response()->json(['message' => 'Utilisateur introuvable.'], 404);
+        }
+
+        $etait = $user->suspendu_at !== null;
+
+        $user->suspendu_at    = $data['suspendu'] ? now() : null;
+        $user->suspendu_motif = $data['suspendu'] ? ($data['motif'] ?? null) : null;
+        $user->save();
+
+        // Journalisé seulement si l'état change : rejouer le même réglage ne
+        // doit pas remplir le registre de lignes identiques.
+        if ($etait !== (bool) $data['suspendu']) {
+            $admin = $request->user();
+            DB::table(project_table('logs'))->insert([
+                'id'              => (string) Str::uuid(),
+                'project_id'      => $projectId,
+                'acteur_admin_id' => $admin->id,
+                'acteur_libelle'  => trim(($admin->prenom ?? '') . ' ' . ($admin->nom ?? '')) ?: 'Admin',
+                'acteur_role'     => $admin->role,
+                'action'          => $data['suspendu'] ? 'user_suspendu' : 'user_reactive',
+                'cible'           => 'Utilisateur ' . $user->numero,
+                'niveau'          => 'warning',
+                'metadonnees'     => json_encode([
+                    'user_id' => $user->id,
+                    'motif'   => $data['motif'] ?? null,
+                ]),
+                'date'            => now(),
+                'created_at'      => now(),
+            ]);
+        }
+
+        return response()->json([
+            'message'  => $data['suspendu']
+                ? 'Utilisateur suspendu : ses collectes ne reçoivent plus et ne sortent plus.'
+                : 'Suspension levée.',
+            'suspendu' => $user->suspendu_at !== null,
+        ]);
+    }
+
+    /**
      * DELETE /api/admin/users/{id}
      *
      * Supprime le compte d'un utilisateur mobile. **Réservé super_admin.**

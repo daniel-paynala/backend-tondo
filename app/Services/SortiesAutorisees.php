@@ -52,7 +52,19 @@ class SortiesAutorisees
             return ['transfert' => false, 'marchand' => false, 'marchand_actif' => false];
         }
 
-        $global = $this->global($projectId, $this->typeCompte($cagnotte->user_id));
+        $gerant = $this->gerant($cagnotte->user_id);
+
+        // Organisateur suspendu : tout est fermé, sans exception possible.
+        //
+        // Troisième terme du OU, et le plus fort : une suspension vise la
+        // personne, pas une collecte. Lui laisser une porte sur l'une de ses
+        // collectes viderait la mesure de son sens — il en a souvent
+        // plusieurs, et il suffirait d'en prendre une autre.
+        if ($gerant['suspendu']) {
+            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => false];
+        }
+
+        $global = $this->global($projectId, $gerant['type_compte']);
 
         return [
             'transfert'      => ! $cagnotte->transfert_bloque && ! $global['transfert'],
@@ -113,14 +125,27 @@ class SortiesAutorisees
      * défaut du produit, et il vaut mieux qu'un verrou s'applique à tort qu'il
      * se lève par accident.
      */
-    private function typeCompte(?string $userId): string
+    /**
+     * Le gérant en une lecture : son type de compte et sa suspension.
+     *
+     * Les deux faits viennent de la même ligne — les chercher séparément
+     * coûterait deux requêtes pour dessiner un écran, et laisserait la porte
+     * ouverte à ce qu'un appelant n'en lise qu'une.
+     *
+     * @return array{type_compte: string, suspendu: bool}
+     */
+    private function gerant(?string $userId): array
     {
         if ($userId === null) {
-            return 'particulier';
+            return ['type_compte' => 'particulier', 'suspendu' => false];
         }
 
-        $type = DB::table('users')->where('id', $userId)->value('type_compte');
+        $u = DB::table('users')->where('id', $userId)
+            ->first(['type_compte', 'suspendu_at']);
 
-        return $type === 'association' ? 'association' : 'particulier';
+        return [
+            'type_compte' => ($u->type_compte ?? null) === 'association' ? 'association' : 'particulier',
+            'suspendu'    => ($u->suspendu_at ?? null) !== null,
+        ];
     }
 }

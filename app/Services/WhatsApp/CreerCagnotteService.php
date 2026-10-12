@@ -45,6 +45,15 @@ class CreerCagnotteService
      */
     public function creer(array $data, TondoUser $user): TondoCagnotte
     {
+        // Même quota que l'app : le bot a sa propre entrée, et un canal qui
+        // ignore la règle la rend inexistante — on l'a déjà vécu avec la
+        // vérification du numéro de retrait.
+        $quota = app(\App\Services\QuotaCagnottes::class)
+            ->refus($user->id, $user->project_id);
+        if ($quota !== null) {
+            throw new \RuntimeException($quota);
+        }
+
         $type         = $data['type'];
         // Récupérer la configuration opérateur (frais Airtel, commission Paynala)
         $airtelConfig = $this->configSvc->getOperatorConfig($user->project_id);

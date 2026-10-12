@@ -45,6 +45,14 @@ class CollecteAutorisee
                 ->value('statut');
         }
 
+        // Organisateur suspendu : la collecte se ferme comme si la cagnotte
+        // elle-même était verrouillée.
+        //
+        // Même message qu'un verrou de collecte, volontairement : le cotisant
+        // n'a pas à apprendre qu'un organisateur est suspendu. Ce qu'il doit
+        // savoir, c'est que ça ne passera pas et vers qui se tourner.
+        $suspendu = $gerant?->suspendu_at !== null;
+
         return CollecteGuard::bloquee(
             $cagnotte->visibilite,
             $cagnotte->statut_validation,
@@ -52,7 +60,7 @@ class CollecteAutorisee
             $orgStatut,
             $cagnotte->type,
             $cagnotte->date_fin ? (string) $cagnotte->date_fin : null,
-            (bool) ($cagnotte->cotisation_bloquee ?? false),
+            (bool) ($cagnotte->cotisation_bloquee ?? false) || $suspendu,
             $this->verrouGlobal($cagnotte->project_id, $gerant?->type_compte),
         );
     }
