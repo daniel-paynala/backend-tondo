@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Admin\Concerns\GereRetraitAgents;
 use App\Http\Controllers\Controller;
 use App\Models\TondoMarchand;
 use App\Services\PaynalaPaymentService;
+use App\Services\LogoMarchand;
 use App\Services\VerificationNumeroRetrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -210,6 +211,73 @@ class MarchandsController extends Controller
         $this->journaliser($request, 'marchand_supprime', "Marchand {$marchand->nom}", 'warning', [
             'marchand_id' => $marchand->id,
             'numero'      => $marchand->numero_tel,
+        ]);
+
+        return response()->json(['supprime' => true]);
+    }
+
+    /**
+     * POST /api/admin/marchands/{id}/logo
+     *
+     * Téléverse — ou remplace — le logo de l'enseigne. Multipart, champ
+     * `logo`.
+     *
+     * Réservé au super admin comme les autres écritures de cette ressource :
+     * le logo est ce que le client voit avant de valider un paiement, donc un
+     * élément d'identification du commerce, pas une décoration.
+     */
+    public function logo(Request $request, string $id, LogoMarchand $logos): JsonResponse
+    {
+        $this->exigerSuperAdmin($request);
+
+        $marchand = TondoMarchand::where('project_id', $request->user()->project_id)->find($id);
+        if (! $marchand) {
+            return response()->json(['message' => 'Marchand introuvable.'], 404);
+        }
+
+        $request->validate([
+            // `image` en plus de `mimes` : la règle inspecte réellement le
+            // fichier, là où une extension se renomme.
+            'logo' => [
+                'required',
+                'image',
+                'mimes:' . LogoMarchand::MIMES,
+                'max:' . LogoMarchand::TAILLE_MAX_KO,
+            ],
+        ], [
+            'logo.max'   => 'Le logo ne doit pas dépasser ' . LogoMarchand::TAILLE_MAX_KO . ' Ko.',
+            'logo.mimes' => 'Formats acceptés : PNG, JPEG ou WebP.',
+        ]);
+
+        $resultat = $logos->remplacer($marchand->id, $request->file('logo'));
+
+        $this->journaliser($request, 'marchand_logo', "Logo de {$marchand->nom}", 'info', [
+            'marchand_id' => $marchand->id,
+        ]);
+
+        return response()->json([
+            'logo_url' => LogoMarchand::url($resultat['chemin'], $resultat['maj'], $marchand->id),
+        ]);
+    }
+
+    /**
+     * DELETE /api/admin/marchands/{id}/logo
+     *
+     * Retire le logo : la fiche retombe sur sa pastille d'initiales.
+     */
+    public function supprimerLogo(Request $request, string $id, LogoMarchand $logos): JsonResponse
+    {
+        $this->exigerSuperAdmin($request);
+
+        $marchand = TondoMarchand::where('project_id', $request->user()->project_id)->find($id);
+        if (! $marchand) {
+            return response()->json(['message' => 'Marchand introuvable.'], 404);
+        }
+
+        $logos->retirer($marchand->id);
+
+        $this->journaliser($request, 'marchand_logo_retire', "Logo retiré de {$marchand->nom}", 'info', [
+            'marchand_id' => $marchand->id,
         ]);
 
         return response()->json(['supprime' => true]);
@@ -448,6 +516,9 @@ class MarchandsController extends Controller
             'contact_nom'          => $m->contact_nom,
             'contact_tel'          => $m->contact_tel,
             'contact_email'        => $m->contact_email,
+            // Null quand la fiche n'a pas de logo : le dashboard et l'app
+            // retombent alors sur la pastille d'initiales.
+            'logo_url'             => LogoMarchand::url($m->logo_chemin, $m->logo_maj_at, $m->id),
             'notes'                => $m->notes,
             'actif'                => (bool) $m->actif,
             'nb_paiements'         => (int) $nb,

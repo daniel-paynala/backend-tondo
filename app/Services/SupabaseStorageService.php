@@ -82,6 +82,33 @@ class SupabaseStorageService
     }
 
     /**
+     * Lit le contenu brut d'un objet, ou null s'il est introuvable.
+     *
+     * Sert aux fichiers que l'API rediffuse elle-même plutôt que de signer une
+     * URL par affichage — le logo d'un marchand, lu à chaque ouverture du
+     * carnet. Le binaire est renvoyé tel quel, l'appelant pose les entêtes.
+     *
+     * @return array{contenu: string, mime: string}|null
+     */
+    public function lire(string $path): ?array
+    {
+        $res = Http::withToken($this->key)
+            ->withHeaders(['apikey' => $this->key])
+            ->get("{$this->url}/storage/v1/object/{$this->bucket}/{$path}");
+
+        if ($res->failed()) {
+            // Un objet manquant n'est pas une panne : une fiche peut porter un
+            // chemin dont le fichier a disparu. L'appelant rendra un 404.
+            return null;
+        }
+
+        return [
+            'contenu' => $res->body(),
+            'mime'    => $res->header('Content-Type') ?: 'application/octet-stream',
+        ];
+    }
+
+    /**
      * Supprime un objet (best-effort — n'interrompt pas le flux appelant).
      */
     public function delete(string $path): void
