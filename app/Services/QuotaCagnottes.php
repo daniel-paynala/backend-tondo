@@ -22,11 +22,23 @@ class QuotaCagnottes
      * Statuts qui comptent dans le quota.
      *
      * Une collecte clôturée ne pèse plus : elle ne demande plus de suivi et
-     * son argent est sorti. Le `wallet` est exclu plus bas — c'est un solde
-     * personnel, pas une collecte, et il est unique par personne de toute
-     * façon.
+     * son argent est sorti.
      */
     private const STATUTS_ACTIFS = ['active', 'en_cours'];
+
+    /**
+     * Types qui comptent dans le quota, NOMMÉS plutôt qu'exclus.
+     *
+     * On écrivait `type != 'wallet'`, ce qui a cassé la production : la
+     * colonne est une énumération, et `wallet` n'y existe pas tant que le
+     * solde personnel n'est pas déployé. Postgres refuse la comparaison
+     * entière (22P02), et c'est toute la liste des collectes qui tombait.
+     *
+     * Lister ce qu'on veut, plutôt qu'écarter ce qu'on ne veut pas, ne
+     * dépend d'aucune valeur qui pourrait manquer — et dit mieux l'intention :
+     * le quota porte sur les COLLECTES, pas sur les contenants.
+     */
+    private const TYPES_COMPTES = ['cagnotte_ouverte', 'tontine_periodique'];
 
     public function __construct(private readonly TondoConfigService $config) {}
 
@@ -43,7 +55,10 @@ class QuotaCagnottes
             ->where('project_id', $projectId)
             ->where('user_id', $userId)
             ->whereIn('statut', self::STATUTS_ACTIFS)
-            ->where('type', '!=', 'wallet')
+            // Le solde personnel ne compte pas : ce n'est pas une collecte,
+            // et il est unique par personne de toute façon. Il est écarté en
+            // ne le nommant pas, voir TYPES_COMPTES.
+            ->whereIn('type', self::TYPES_COMPTES)
             ->count();
     }
 
