@@ -63,52 +63,6 @@ class CotisationsController extends Controller
      *    en_attente / rejete / suspendu → la suspension coupe la collecte).
      *  – Particulier / cagnotte privée : jamais bloqué ici.
      */
-    private function collecteBloquee(mixed $cagnotte): ?string
-    {
-        // Lecture DB du gérant + statut d'orga — la décision est déléguée à
-        // CollecteGuard (logique pure testée).
-        $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
-        $orgStatut = null;
-        if ($gerant && $gerant->type_compte === 'association') {
-            $orgStatut = \App\Models\TondoOrganisation::query()
-                ->where('project_id', $cagnotte->project_id)
-                ->where('user_id', $gerant->id)
-                ->value('statut');
-        }
-
-        return CollecteGuard::bloquee(
-            $cagnotte->visibilite,
-            $cagnotte->statut_validation,
-            $gerant?->type_compte,
-            $orgStatut,
-            $cagnotte->type,
-            $cagnotte->date_fin ? (string) $cagnotte->date_fin : null,
-        );
-    }
-
-    private function plafondCagnotte(mixed $cagnotte, array $config): int
-    {
-        $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
-        if ($gerant && $gerant->type_compte === 'association') {
-            $org = \App\Models\TondoOrganisation::query()
-                ->where('user_id', $gerant->id)
-                ->first();
-            return PlafondResolver::resoudre(
-                'association',
-                $org?->plafond_fcfa !== null ? (int) $org->plafond_fcfa : null,
-                null,
-                $config,
-            );
-        }
-
-        return PlafondResolver::resoudre(
-            $gerant?->type_compte,
-            null,
-            $gerant?->plafond_personnalise !== null ? (int) $gerant->plafond_personnalise : null,
-            $config,
-        );
-    }
-
     /**
      * Taux de frais de retrait applicable (décimal), lu dans la matrice config
      * croisant le type de cotisation (cagnotte/tontine) et le type de compte du
@@ -181,19 +135,23 @@ class CotisationsController extends Controller
         // Garde de collecte (sécurité) : cagnotte publique VALIDÉE par la
         // modération + association gérante APPROUVÉE (bloque une asso en attente,
         // rejetée ou suspendue). Ne dépend pas du gate client.
-        if ($raison = $this->collecteBloquee($cagnotte)) {
+        // Le COTISANT lui-même : un compte suspendu ne cotise plus nulle part,
+        // pas même chez quelqu'un d'autre. Contrôlé avant la collecte, parce
+        // que la raison le concerne lui et non la cagnotte qu'il visait.
+        if ($raison = app(\App\Services\CompteSuspendu::class)->refus($user)) {
+            throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
+        }
+
+        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)) {
             throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
         }
 
         // ── Plafond total de collecte (selon le type de cagnotte) ────────────
         // Chargé une fois ici, réutilisé pour la commission plus bas.
         $config  = app(TondoConfigService::class)->getOperatorConfig($user->project_id);
-        $plafond = $this->plafondCagnotte($cagnotte, $config);
-        if ((int) $cagnotte->montant_collecte + (int) $data['montant'] > $plafond) {
-            throw ValidationException::withMessages([
-                'montant' => 'Cette cagnotte a atteint son plafond de '
-                    . number_format($plafond, 0, ',', ' ') . ' FCFA.',
-            ]);
+        $plafonds = app(\App\Services\PlafondCollecte::class);
+        if ($refus = $plafonds->refus($cagnotte, (int) $data['montant'], $config)) {
+            throw ValidationException::withMessages(['montant' => $refus]);
         }
 
         // Contrôle double cotisation (tontine uniquement) :

@@ -100,6 +100,10 @@ class CagnottesController extends Controller
             'titre'            => $c->titre,
             'description'      => $c->description,
             'montant_collecte' => (int) $c->montant_collecte,
+            // L'annuaire public affiche « collecté sur objectif » : c'est le
+            // cumul qui le dit, pas le solde. Sans lui, la progression d'une
+            // collecte reculerait au vu de tous dès que l'organisateur reverse.
+            'cumul_cotisations' => (int) ($c->cumul_cotisations ?? 0),
             'montant_cible'    => $c->montant_cible,
             'nombre_inscrits'  => (int) $c->nombre_inscrits,
             'date_creation'    => $c->date_creation?->toIso8601String(),

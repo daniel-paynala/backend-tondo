@@ -88,9 +88,41 @@ class CagnottesController extends Controller
             ->sortByDesc('date_creation')
             ->values();
 
+        // Quota renvoyé avec la liste : l'accueil s'en sert pour griser
+        // « Créer une collecte ». Il vient d'ici plutôt que d'un comptage côté
+        // client, qui compterait ce que la liste contient — or elle mêle les
+        // collectes gérées et celles où l'on cotise, et le quota ne porte que
+        // sur les premières.
+        $quota = app(\App\Services\QuotaCagnottes::class);
+        $user  = $request->user();
+        $actives = $quota->actives($user->id, $user->project_id);
+        $limite  = $quota->limite($user->project_id);
+
         return response()->json([
             'data'  => $all->all(),
             'total' => $all->count(),
+            'quota' => [
+                'actives'    => $actives,
+                'limite'     => $limite,
+                // Calculé serveur : l'app n'a pas à refaire la comparaison,
+                // et le jour où la règle se complique elle n'aura rien à
+                // réapprendre.
+                'peut_creer' => $actives < $limite,
+            ],
+            // État du COMPTE, à côté de son quota — les deux ferment le même
+            // bouton, l'app doit donc les recevoir ensemble.
+            //
+            // Rendu avec la liste des collectes parce que c'est la requête de
+            // l'accueil, celle que l'app rejoue à chaque retour sur l'écran :
+            // une suspension posée pendant qu'elle était ouverte se voit au
+            // rafraîchissement suivant.
+            'compte' => [
+                'suspendu' => ($raisonCompte = app(\App\Services\CompteSuspendu::class)
+                    ->refus($user)) !== null,
+                // La raison exacte que le serveur opposera au refus : l'écran
+                // et le refus doivent dire la même chose.
+                'raison'   => $raisonCompte,
+            ],
         ]);
     }
 
@@ -128,6 +160,23 @@ class CagnottesController extends Controller
             throw ValidationException::withMessages([
                 'type' => 'Type invalide.',
             ]);
+        }
+
+        // Compte suspendu : plus de création non plus. Sans ce contrôle, la
+        // mesure se contourne en ouvrant une collecte neuve — qui n'est pas
+        // encore verrouillée, puisqu'elle vient de naître.
+        if ($suspendu = app(\App\Services\CompteSuspendu::class)->refus($request->user())) {
+            throw ValidationException::withMessages(['type' => $suspendu]);
+        }
+
+        // Quota de collectes actives. Contrôlé AVANT toute autre validation :
+        // inutile de faire remplir un formulaire entier pour refuser à la fin.
+        // L'app grise déjà le bouton, mais griser n'est pas interdire — le
+        // refus vit ici.
+        $quota = app(\App\Services\QuotaCagnottes::class)
+            ->refus($request->user()->id, $request->user()->project_id);
+        if ($quota !== null) {
+            throw ValidationException::withMessages(['type' => $quota]);
         }
 
         // Les comptes association n'ont pas accès aux tontines : une tontine est
@@ -538,6 +587,35 @@ class CagnottesController extends Controller
             'participants' => $participants,
             'historique'   => $historique,
             'sorties'      => $sorties,
+            // État de la COLLECTE, pour que l'écran le dise avant que le
+            // cotisant ait saisi un montant. Sans ça, un verrou posé au
+            // dashboard ne se voyait nulle part : l'app affichait une collecte
+            // normale, et le refus n'arrivait qu'à la validation — au bout du
+            // parcours, après la saisie.
+            //
+            // Rendu ici plutôt que dans la liste : la résolution lit le gérant
+            // et la config, ce qui ferait autant de requêtes que de lignes.
+            // On le calcule là où il sert, sur l'écran d'où l'on cotise.
+            'collecte'     => [
+                // DEUX causes, et il faut les deux : la collecte peut être
+                // fermée, ou bien c'est CELUI QUI REGARDE qui est suspendu.
+                //
+                // N'en lire qu'une était le défaut : sur la cagnotte de
+                // quelqu'un d'autre, un compte suspendu voyait un bouton
+                // Cotiser bien actif, et n'apprenait son refus qu'après avoir
+                // saisi un montant.
+                //
+                // L'état du compte PRIME : il voyage avec la personne, il
+                // vaudra sur la collecte suivante aussi. Annoncer le verrou de
+                // la collecte l'enverrait en essayer une autre pour rien.
+                'autorisee' => ($raisonCollecte =
+                    app(\App\Services\CompteSuspendu::class)->refus($request->user())
+                    ?? app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)
+                ) === null,
+                // La raison exacte, telle que le serveur la rendra au refus :
+                // l'écran et le refus doivent dire la même chose.
+                'raison'    => $raisonCollecte,
+            ],
         ]);
     }
 
@@ -1308,6 +1386,12 @@ class CagnottesController extends Controller
             'statut'                => $c->statut,
             'numero_retrait_masque' => $c->numero_retrait_masque,
             'montant_collecte'      => (int) $c->montant_collecte,
+            // Total jamais redescendu, par opposition au solde ci-dessus qui
+            // baisse à chaque reversement. C'est LUI que la barre de
+            // progression doit suivre : l'objectif porte sur ce qui a été
+            // collecté, pas sur ce qui reste en caisse. C'est aussi l'assiette
+            // du plafond pour une cagnotte ouverte.
+            'cumul_cotisations'     => (int) ($c->cumul_cotisations ?? 0),
             'montant_beneficiaire'  => $c->montant_beneficiaire,
             'montant_avec_frais'    => $c->montant_avec_frais,
             'total_a_envoyer'       => $c->total_a_envoyer,
