@@ -24,6 +24,22 @@ class CotisationInterneTest extends TestCase
     {
         parent::setUp();
 
+        // Un mouvement interne obéit désormais aux règles de collecte : le
+        // service lit le gérant de la destination et la config du projet.
+        // Tables vides : rien n'est verrouillé, rien n'est suspendu, ce qui
+        // est l'état qu'attendent les cas ci-dessous.
+        Schema::create('users', function ($t) {
+            $t->uuid('id')->primary();
+            $t->string('type_compte')->nullable();
+            $t->bigInteger('plafond_personnalise')->nullable();
+            $t->timestamp('suspendu_at')->nullable();
+        });
+        Schema::create('tondo_project_config', function ($t) {
+            $t->uuid('id')->primary();
+            $t->string('project_id');
+            $t->string('operateur');
+            $t->string('pays');
+        });
         Schema::create('tondo_cagnottes', function ($t) {
             $t->uuid('id')->primary();
             $t->string('project_id');
@@ -32,6 +48,10 @@ class CotisationInterneTest extends TestCase
             $t->string('titre');
             $t->string('type');
             $t->string('statut')->default('active');
+            $t->string('visibilite')->default('prive');
+            $t->string('statut_validation')->nullable();
+            $t->boolean('cotisation_bloquee')->default(false);
+            $t->timestamp('date_fin')->nullable();
             $t->bigInteger('montant_collecte')->default(0);
             $t->bigInteger('cumul_cotisations')->default(0);
             $t->timestamps();

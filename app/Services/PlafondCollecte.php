@@ -24,12 +24,13 @@ use App\Support\PlafondResolver;
  *    recommencer — autant de fois qu'on voulait. Le plafond était décoratif
  *    pour quiconque retire son argent.
  *
- *  – **tontine périodique → le SOLDE** (`montant_collecte`), comme avant. Une
- *    tontine n'accumule pas, elle fait circuler : l'argent entre et ressort à
- *    chaque tour. Lui appliquer un plafond à vie bloquerait définitivement une
- *    tontine de 500 000 par cycle au bout de cinq mois, alors qu'elle n'a
- *    jamais détenu plus de 500 000 à la fois. Ce qu'on borne ici, c'est ce
- *    qu'elle détient.
+ *  – **tontine périodique ET solde personnel → le SOLDE**
+ *    (`montant_collecte`), comme avant. Ni l'une ni l'autre n'accumule : les
+ *    deux font circuler, l'argent entre et ressort. Un plafond à vie
+ *    bloquerait définitivement une tontine de 500 000 par cycle au bout de
+ *    cinq mois, et interdirait de recharger un solde personnel passé 2,5 M
+ *    cumulés — même vide. Ce qu'on borne pour eux, c'est ce qu'ils
+ *    détiennent.
  */
 class PlafondCollecte
 {
@@ -68,7 +69,16 @@ class PlafondCollecte
      */
     public function assiette(mixed $cagnotte): int
     {
-        return ($cagnotte->type ?? null) === 'tontine_periodique'
+        // Tontine et solde personnel : on borne ce qu'ils DÉTIENNENT.
+        //
+        // Ni l'un ni l'autre n'accumule, les deux font circuler. Un plafond à
+        // vie sur un solde personnel interdirait de le recharger passé 2,5 M
+        // cumulés — même vide. Sur une tontine, il la bloquerait au cinquième
+        // cycle. Seule la cagnotte ouverte accumule vraiment, et c'est la
+        // seule que son cumul borne.
+        $circulant = in_array($cagnotte->type ?? null, ['tontine_periodique', 'wallet'], true);
+
+        return $circulant
             ? (int) ($cagnotte->montant_collecte ?? 0)
             : (int) ($cagnotte->cumul_cotisations ?? 0);
     }

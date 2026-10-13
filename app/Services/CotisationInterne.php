@@ -48,6 +48,30 @@ class CotisationInterne
             throw new RuntimeException('Impossible de cotiser à son propre solde.');
         }
 
+        // ── Mêmes règles de collecte que n'importe quelle cotisation ─────────
+        //
+        // Un mouvement interne reste une cotisation : il fait entrer de
+        // l'argent dans une collecte. Il n'y avait pourtant AUCUN contrôle ici
+        // — ni verrou de collecte, ni suspension de l'organisateur, ni
+        // plafond, ni garde de modération. Cotiser depuis son solde
+        // contournait tout, d'un bout à l'autre.
+        //
+        // Le contrôle vit dans le SERVICE et non dans le contrôleur, à la
+        // différence des deux autres chemins : c'est l'entrée unique de tout
+        // mouvement interne, présent et à venir — le transfert entre soldes
+        // passera par ici, et il doit hériter des mêmes refus sans qu'on ait à
+        // y penser.
+        if ($refus = app(CollecteAutorisee::class)->refus($destination)) {
+            throw new RuntimeException($refus);
+        }
+
+        $config = app(TondoConfigService::class)
+            ->getOperatorConfig($destination->project_id);
+
+        if ($refus = app(PlafondCollecte::class)->refus($destination, $montant, $config)) {
+            throw new RuntimeException($refus);
+        }
+
         $transId = Registre::nouvelleReference('paiement_interne');
 
         return DB::transaction(function () use ($source, $destination, $montant, $commentaire, $transId) {
