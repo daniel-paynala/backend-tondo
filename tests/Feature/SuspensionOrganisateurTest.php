@@ -106,9 +106,15 @@ class SuspensionOrganisateurTest extends TestCase
 
         $this->assertFalse($etat['transfert']);
         $this->assertFalse($etat['marchand']);
-        // Le service lui-même est présenté comme fermé : l'app ne doit pas
-        // construire un bouton qui ne mènera nulle part.
-        $this->assertFalse($etat['marchand_actif']);
+
+        // Mais le SERVICE reste présenté comme actif : c'est cette collecte-ci
+        // qui est fermée, pas le paiement marchand en général.
+        //
+        // La nuance pilote l'affichage : `marchand_actif` à faux retire le
+        // bouton « Payer », là où `marchand` à faux le grise. Une suspension
+        // se lève — faire disparaître le bouton laisserait croire que la
+        // collecte a changé de nature.
+        $this->assertTrue($etat['marchand_actif']);
     }
 
     public function test_la_suspension_ferme_TOUTES_ses_collectes(): void

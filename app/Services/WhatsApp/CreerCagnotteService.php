@@ -48,6 +48,10 @@ class CreerCagnotteService
         // Même quota que l'app : le bot a sa propre entrée, et un canal qui
         // ignore la règle la rend inexistante — on l'a déjà vécu avec la
         // vérification du numéro de retrait.
+        if ($suspendu = app(\App\Services\CompteSuspendu::class)->refus($user)) {
+            throw new \RuntimeException($suspendu);
+        }
+
         $quota = app(\App\Services\QuotaCagnottes::class)
             ->refus($user->id, $user->project_id);
         if ($quota !== null) {

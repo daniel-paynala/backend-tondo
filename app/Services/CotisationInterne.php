@@ -61,6 +61,11 @@ class CotisationInterne
         // mouvement interne, présent et à venir — le transfert entre soldes
         // passera par ici, et il doit hériter des mêmes refus sans qu'on ait à
         // y penser.
+        // Le cotisant, ici, est le titulaire du solde d'où part l'argent.
+        if ($refus = app(CompteSuspendu::class)->refusParId($source->user_id)) {
+            throw new RuntimeException($refus);
+        }
+
         if ($refus = app(CollecteAutorisee::class)->refus($destination)) {
             throw new RuntimeException($refus);
         }

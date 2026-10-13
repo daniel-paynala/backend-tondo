@@ -61,7 +61,12 @@ class SortiesAutorisees
         // collectes viderait la mesure de son sens — il en a souvent
         // plusieurs, et il suffirait d'en prendre une autre.
         if ($gerant['suspendu']) {
-            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => false];
+            // `marchand_actif` reste VRAI : le service existe toujours, c'est
+            // cette collecte-ci qui est fermée. Le passer à faux faisait
+            // disparaître le bouton « Payer » au lieu de le griser — or une
+            // suspension se lève, et un bouton qui s'évapore laisse croire que
+            // la collecte a changé de nature.
+            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => true];
         }
 
         $global = $this->global($projectId, $gerant['type_compte']);
