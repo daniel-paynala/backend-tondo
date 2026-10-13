@@ -182,13 +182,10 @@ class CotisationService
         // ── Plafond total de collecte selon le type de cagnotte ──────────────
         // Chargé une fois ici, réutilisé pour la commission plus bas.
         $config  = $this->config->getOperatorConfig($cagnotte->project_id);
-        $plafond = $this->plafondCagnotte($cagnotte, $config);
-        if ((int) $cagnotte->montant_collecte + $montant > $plafond) {
-            return [
-                'statut'  => 'erreur',
-                'message' => 'Cette cagnotte a atteint son plafond de '
-                    . number_format($plafond, 0, ',', ' ') . ' FCFA.',
-            ];
+        $refusPlafond = app(\App\Services\PlafondCollecte::class)
+            ->refus($cagnotte, $montant, $config);
+        if ($refusPlafond !== null) {
+            return ['statut' => 'erreur', 'message' => $refusPlafond];
         }
 
         // Garde de collecte (sécurité) : cagnotte publique validée par la
@@ -267,29 +264,6 @@ class CotisationService
      *    rejete / suspendu → la suspension coupe la collecte).
      *  – Particulier / cagnotte privée : jamais bloqué ici.
      */
-    private function plafondCagnotte(TondoCagnotte $cagnotte, array $config): int
-    {
-        $gerant = TondoUser::find($cagnotte->user_id);
-        if ($gerant && $gerant->type_compte === 'association') {
-            $org = \App\Models\TondoOrganisation::query()
-                ->where('user_id', $gerant->id)
-                ->first();
-            return PlafondResolver::resoudre(
-                'association',
-                $org?->plafond_fcfa !== null ? (int) $org->plafond_fcfa : null,
-                null,
-                $config,
-            );
-        }
-
-        return PlafondResolver::resoudre(
-            $gerant?->type_compte,
-            null,
-            $gerant?->plafond_personnalise !== null ? (int) $gerant->plafond_personnalise : null,
-            $config,
-        );
-    }
-
     /**
      * Taux de frais de retrait applicable (décimal) : matrice config croisant
      * cotisation (cagnotte/tontine) × user (particulier/association). 0 par défaut.
