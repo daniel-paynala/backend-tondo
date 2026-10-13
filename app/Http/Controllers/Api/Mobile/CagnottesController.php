@@ -116,6 +116,20 @@ class CagnottesController extends Controller
                 // réapprendre.
                 'peut_creer' => $actives < $limite,
             ],
+            // État du COMPTE, à côté de son quota — les deux ferment le même
+            // bouton, l'app doit donc les recevoir ensemble.
+            //
+            // Rendu avec la liste des collectes parce que c'est la requête de
+            // l'accueil, celle que l'app rejoue à chaque retour sur l'écran :
+            // une suspension posée pendant qu'elle était ouverte se voit au
+            // rafraîchissement suivant.
+            'compte' => [
+                'suspendu' => ($raisonCompte = app(\App\Services\CompteSuspendu::class)
+                    ->refus($user)) !== null,
+                // La raison exacte que le serveur opposera au refus : l'écran
+                // et le refus doivent dire la même chose.
+                'raison'   => $raisonCompte,
+            ],
         ]);
     }
 
