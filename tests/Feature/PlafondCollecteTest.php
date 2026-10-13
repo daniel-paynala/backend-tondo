@@ -82,6 +82,24 @@ class PlafondCollecteTest extends TestCase
         $this->assertNotNull(app(PlafondCollecte::class)->refus($c, 1_000, $this->config));
     }
 
+    public function test_un_solde_personnel_n_est_pas_plafonne_a_vie(): void
+    {
+        // Régression introduite en passant le plafond sur le cumul : un solde
+        // ayant vu passer 3 M au fil de l'année n'aurait plus jamais pu être
+        // rechargé, même à zéro. Un solde circule, il n'accumule pas.
+        $c = $this->collecte('wallet', solde: 0, cumul: 3_000_000);
+
+        $this->assertNull(app(PlafondCollecte::class)->refus($c, 50_000, $this->config));
+    }
+
+    public function test_un_solde_personnel_trop_charge_est_refuse(): void
+    {
+        // Ce qu'on borne pour lui, c'est ce qu'il détient.
+        $c = $this->collecte('wallet', solde: 2_500_000, cumul: 2_500_000);
+
+        $this->assertNotNull(app(PlafondCollecte::class)->refus($c, 1_000, $this->config));
+    }
+
     public function test_le_message_dit_ce_qu_il_reste(): void
     {
         // « a atteint son plafond de 2 500 000 » était faux à 2 450 000, et ne
