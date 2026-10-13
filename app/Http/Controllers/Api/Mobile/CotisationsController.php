@@ -135,6 +135,13 @@ class CotisationsController extends Controller
         // Garde de collecte (sécurité) : cagnotte publique VALIDÉE par la
         // modération + association gérante APPROUVÉE (bloque une asso en attente,
         // rejetée ou suspendue). Ne dépend pas du gate client.
+        // Le COTISANT lui-même : un compte suspendu ne cotise plus nulle part,
+        // pas même chez quelqu'un d'autre. Contrôlé avant la collecte, parce
+        // que la raison le concerne lui et non la cagnotte qu'il visait.
+        if ($raison = app(\App\Services\CompteSuspendu::class)->refus($user)) {
+            throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
+        }
+
         if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)) {
             throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
         }
