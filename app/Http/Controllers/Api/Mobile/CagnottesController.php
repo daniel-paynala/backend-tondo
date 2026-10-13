@@ -1338,6 +1338,12 @@ class CagnottesController extends Controller
             'statut'                => $c->statut,
             'numero_retrait_masque' => $c->numero_retrait_masque,
             'montant_collecte'      => (int) $c->montant_collecte,
+            // Total jamais redescendu, par opposition au solde ci-dessus qui
+            // baisse à chaque reversement. C'est LUI que la barre de
+            // progression doit suivre : l'objectif porte sur ce qui a été
+            // collecté, pas sur ce qui reste en caisse. C'est aussi l'assiette
+            // du plafond pour une cagnotte ouverte.
+            'cumul_cotisations'     => (int) ($c->cumul_cotisations ?? 0),
             'montant_beneficiaire'  => $c->montant_beneficiaire,
             'montant_avec_frais'    => $c->montant_avec_frais,
             'total_a_envoyer'       => $c->total_a_envoyer,

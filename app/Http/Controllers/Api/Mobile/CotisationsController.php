@@ -63,29 +63,6 @@ class CotisationsController extends Controller
      *    en_attente / rejete / suspendu → la suspension coupe la collecte).
      *  – Particulier / cagnotte privée : jamais bloqué ici.
      */
-    private function plafondCagnotte(mixed $cagnotte, array $config): int
-    {
-        $gerant = \App\Models\TondoUser::find($cagnotte->user_id);
-        if ($gerant && $gerant->type_compte === 'association') {
-            $org = \App\Models\TondoOrganisation::query()
-                ->where('user_id', $gerant->id)
-                ->first();
-            return PlafondResolver::resoudre(
-                'association',
-                $org?->plafond_fcfa !== null ? (int) $org->plafond_fcfa : null,
-                null,
-                $config,
-            );
-        }
-
-        return PlafondResolver::resoudre(
-            $gerant?->type_compte,
-            null,
-            $gerant?->plafond_personnalise !== null ? (int) $gerant->plafond_personnalise : null,
-            $config,
-        );
-    }
-
     /**
      * Taux de frais de retrait applicable (décimal), lu dans la matrice config
      * croisant le type de cotisation (cagnotte/tontine) et le type de compte du
@@ -165,12 +142,9 @@ class CotisationsController extends Controller
         // ── Plafond total de collecte (selon le type de cagnotte) ────────────
         // Chargé une fois ici, réutilisé pour la commission plus bas.
         $config  = app(TondoConfigService::class)->getOperatorConfig($user->project_id);
-        $plafond = $this->plafondCagnotte($cagnotte, $config);
-        if ((int) $cagnotte->montant_collecte + (int) $data['montant'] > $plafond) {
-            throw ValidationException::withMessages([
-                'montant' => 'Cette cagnotte a atteint son plafond de '
-                    . number_format($plafond, 0, ',', ' ') . ' FCFA.',
-            ]);
+        $plafonds = app(\App\Services\PlafondCollecte::class);
+        if ($refus = $plafonds->refus($cagnotte, (int) $data['montant'], $config)) {
+            throw ValidationException::withMessages(['montant' => $refus]);
         }
 
         // Contrôle double cotisation (tontine uniquement) :
