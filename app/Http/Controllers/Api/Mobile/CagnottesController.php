@@ -155,6 +155,13 @@ class CagnottesController extends Controller
             ]);
         }
 
+        // Compte suspendu : plus de création non plus. Sans ce contrôle, la
+        // mesure se contourne en ouvrant une collecte neuve — qui n'est pas
+        // encore verrouillée, puisqu'elle vient de naître.
+        if ($suspendu = app(\App\Services\CompteSuspendu::class)->refus($request->user())) {
+            throw ValidationException::withMessages(['type' => $suspendu]);
+        }
+
         // Quota de collectes actives. Contrôlé AVANT toute autre validation :
         // inutile de faire remplir un formulaire entier pour refuser à la fin.
         // L'app grise déjà le bouton, mais griser n'est pas interdire — le

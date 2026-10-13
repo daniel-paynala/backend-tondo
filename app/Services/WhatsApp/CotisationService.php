@@ -182,6 +182,12 @@ class CotisationService
         // ── Plafond total de collecte selon le type de cagnotte ──────────────
         // Chargé une fois ici, réutilisé pour la commission plus bas.
         $config  = $this->config->getOperatorConfig($cagnotte->project_id);
+        // Le cotisant : même règle que sur l'app, et c'est ce canal qui
+        // l'oublie d'habitude.
+        if ($suspendu = app(\App\Services\CompteSuspendu::class)->refus($user)) {
+            return ['statut' => 'erreur', 'message' => $suspendu];
+        }
+
         $refusPlafond = app(\App\Services\PlafondCollecte::class)
             ->refus($cagnotte, $montant, $config);
         if ($refusPlafond !== null) {
