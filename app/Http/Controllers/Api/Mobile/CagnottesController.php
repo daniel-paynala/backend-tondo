@@ -566,6 +566,22 @@ class CagnottesController extends Controller
             'participants' => $participants,
             'historique'   => $historique,
             'sorties'      => $sorties,
+            // État de la COLLECTE, pour que l'écran le dise avant que le
+            // cotisant ait saisi un montant. Sans ça, un verrou posé au
+            // dashboard ne se voyait nulle part : l'app affichait une collecte
+            // normale, et le refus n'arrivait qu'à la validation — au bout du
+            // parcours, après la saisie.
+            //
+            // Rendu ici plutôt que dans la liste : la résolution lit le gérant
+            // et la config, ce qui ferait autant de requêtes que de lignes.
+            // On le calcule là où il sert, sur l'écran d'où l'on cotise.
+            'collecte'     => [
+                'autorisee' => ($raisonCollecte = app(\App\Services\CollecteAutorisee::class)
+                    ->refus($cagnotte)) === null,
+                // La raison exacte, telle que le serveur la rendra au refus :
+                // l'écran et le refus doivent dire la même chose.
+                'raison'    => $raisonCollecte,
+            ],
         ]);
     }
 
