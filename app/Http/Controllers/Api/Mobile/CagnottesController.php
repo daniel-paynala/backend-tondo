@@ -597,8 +597,21 @@ class CagnottesController extends Controller
             // et la config, ce qui ferait autant de requêtes que de lignes.
             // On le calcule là où il sert, sur l'écran d'où l'on cotise.
             'collecte'     => [
-                'autorisee' => ($raisonCollecte = app(\App\Services\CollecteAutorisee::class)
-                    ->refus($cagnotte)) === null,
+                // DEUX causes, et il faut les deux : la collecte peut être
+                // fermée, ou bien c'est CELUI QUI REGARDE qui est suspendu.
+                //
+                // N'en lire qu'une était le défaut : sur la cagnotte de
+                // quelqu'un d'autre, un compte suspendu voyait un bouton
+                // Cotiser bien actif, et n'apprenait son refus qu'après avoir
+                // saisi un montant.
+                //
+                // L'état du compte PRIME : il voyage avec la personne, il
+                // vaudra sur la collecte suivante aussi. Annoncer le verrou de
+                // la collecte l'enverrait en essayer une autre pour rien.
+                'autorisee' => ($raisonCollecte =
+                    app(\App\Services\CompteSuspendu::class)->refus($request->user())
+                    ?? app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)
+                ) === null,
                 // La raison exacte, telle que le serveur la rendra au refus :
                 // l'écran et le refus doivent dire la même chose.
                 'raison'    => $raisonCollecte,
