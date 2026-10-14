@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\CleanReceiptsCommand;
+use App\Console\Commands\RapportActiviteCommand;
 use App\Console\Commands\SanteCommand;
 use App\Console\Commands\ResumeQuotidienCommand;
 use App\Console\Commands\TontineRappelsCommand;
@@ -119,6 +120,20 @@ Schedule::command(AgregerEvenementsCommand::class)
 // ─────────────────────────────────────────────────────────────────────────────
 Schedule::command(SanteCommand::class, ['--alerter'])
     ->dailyAt('07:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rapport d'activité — tous les jours à 07h05
+//
+// Celui-ci part MÊME quand tout va bien, à l'inverse de la sonde ci-dessus.
+// Ce n'est pas une alerte mais une mesure : c'est sa régularité qui rend un
+// jour anormal visible. Cinq minutes après la santé, pour que les deux
+// courriels arrivent ensemble sans se concurrencer sur la même minute.
+// ─────────────────────────────────────────────────────────────────────────────
+Schedule::command(RapportActiviteCommand::class, ['--envoyer'])
+    ->dailyAt('07:05')
     ->timezone('Africa/Libreville')
     ->withoutOverlapping()
     ->runInBackground();
