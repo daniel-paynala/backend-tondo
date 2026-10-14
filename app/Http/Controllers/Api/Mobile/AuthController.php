@@ -386,6 +386,7 @@ class AuthController extends Controller
                 'user_exists' => false,
                 'operateur'   => 'airtel',
                 'kyc_ok'      => true,
+                'email_requis' => false,
                 'bloque'      => false,
                 'nom'         => config('services.otp.test_nom', 'REVIEW'),
                 'prenom'      => config('services.otp.test_prenom', 'Test'),
@@ -448,14 +449,25 @@ class AuthController extends Controller
             ]);
         }
 
-        // ── 4. Seul Airtel a une API KYC — tout autre opérateur actif est bloqué ─
-        if ($operateur !== 'airtel') {
+        // ── 4. Opérateur sans vérification d'identité ───────────────────────
+        //
+        // Il était bloqué d'office, avec un message disant d'utiliser Airtel.
+        // Règle de Daniel du 2026-10-14 : on ne ferme plus la porte. On laisse
+        // passer, et l'e-mail devient obligatoire — seule trace déclarée de
+        // l'identité, et seul canal de secours si le SMS se perd.
+        if (! app(\App\Services\CapacitesOperateur::class)->a($projectId, $operateur, $pays, 'kyc')) {
             return response()->json([
-                'user_exists' => false,
-                'operateur'   => $operateur,
-                'kyc_ok'      => null,
-                'bloque'      => true,
-                'message'     => 'Le numéro doit être Airtel Money.',
+                'user_exists'  => false,
+                'operateur'    => $operateur,
+                'kyc_ok'       => null,
+                'bloque'       => false,
+                // L'app s'en sert pour afficher le champ et le rendre
+                // obligatoire. Le serveur le réexige de son côté : l'écran
+                // guide, il ne garantit pas.
+                'email_requis' => true,
+                'type_client'  => 'particulier',
+                'message'      => 'Cet opérateur ne permet pas de vérifier votre identité : '
+                    . 'une adresse e-mail vous sera demandée.',
             ]);
         }
 
