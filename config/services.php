@@ -243,6 +243,12 @@ return [
 
     // Supabase Storage — stockage des pièces des associations (bucket PRIVÉ).
     // Réutilise l'URL + la clé service_role déjà présentes dans le .env.
+    // Alertes administrateurs : retenues hors production, sauf si l'on veut
+    // justement vérifier la chaîne d'envoi depuis la recette.
+    'admin_alertes' => [
+        'hors_prod' => env('ADMIN_ALERTES_HORS_PROD', false),
+    ],
+
     'supabase' => [
         'url'          => env('SUPABASE_URL'),
         'service_role' => env('SUPABASE_SERVICE_ROLE_KEY'),
