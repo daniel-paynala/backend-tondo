@@ -45,6 +45,7 @@ class AuditCommand extends Command
             $this->controlerSchema();
             $this->controlerDeriveDonnees();
             $this->controlerCumulCotisations();
+            $this->controlerEtancheitePays();
         } else {
             $this->ajouter('ignore', 'données', 'Contrôles en base non exécutés (ajoutez --donnees).');
         }
@@ -351,6 +352,94 @@ class AuditCommand extends Command
     }
 
     // ── Restitution ─────────────────────────────────────────────────────────
+
+    /**
+     * L'étanchéité des écosystèmes tient-elle ?
+     *
+     * Les pays sont séparés (décision du 2026-10-14) mais partagent un seul
+     * `project_id` : la frontière est tenue par du CODE, pas par la structure.
+     * Une requête qui l'oublierait ne casserait rien — elle laisserait
+     * simplement passer, en silence, et personne ne le verrait.
+     *
+     * Ce contrôle est la contrepartie de ce choix. Il cherche les traces d'une
+     * fuite plutôt que de faire confiance.
+     */
+    private function controlerEtancheitePays(): void
+    {
+        $cagnottes = project_table('cagnottes');
+        $paiements = project_table('paiements');
+
+        if (! Schema::hasTable($cagnottes) || ! Schema::hasColumn($cagnottes, 'pays')) {
+            $this->ajouter('avertissement', 'pays',
+                'Colonne cagnottes.pays absente : le SQL 046 n\'est pas joué.');
+
+            return;
+        }
+
+        // ── 1. Des cotisations qui traversent une frontière ─────────────────
+        if (Schema::hasTable($paiements) && Schema::hasTable('users')) {
+            $fuites = DB::table("{$paiements} as p")
+                ->join("{$cagnottes} as c", 'c.id', '=', 'p.cagnotte_id')
+                ->join('users as u', 'u.id', '=', 'p.user_id')
+                ->whereNotNull('c.pays')
+                ->whereNotNull('u.pays')
+                ->whereColumn('c.pays', '!=', 'u.pays')
+                ->count();
+
+            if ($fuites > 0) {
+                $this->ajouter('anomalie', 'pays',
+                    "{$fuites} cotisation(s) d'un pays vers une collecte d'un autre : "
+                    . 'l\'étanchéité des écosystèmes est percée.');
+            } else {
+                $this->ajouter('ok', 'pays', 'Aucune cotisation transfrontalière.');
+            }
+        }
+
+        // ── 2. Une collecte dont le pays a divergé de son organisateur ──────
+        // Le pays est recopié à la création et censé être immuable. Un écart
+        // signifie qu'on l'a modifié après coup, ou que l'organisateur a
+        // changé de pays — ce qui ne devrait pas arriver non plus.
+        if (Schema::hasTable('users')) {
+            $divergences = DB::table("{$cagnottes} as c")
+                ->join('users as u', 'u.id', '=', 'c.user_id')
+                ->whereNotNull('c.pays')
+                ->whereNotNull('u.pays')
+                ->whereColumn('c.pays', '!=', 'u.pays')
+                ->count();
+
+            if ($divergences > 0) {
+                $this->ajouter('anomalie', 'pays',
+                    "{$divergences} collecte(s) dont le pays diffère de celui de leur organisateur.");
+            }
+        }
+
+        // ── 3. Ce qui n'est rattaché à rien ─────────────────────────────────
+        // Sans pays, un compte n'a aucune capacité et ne peut donc rien faire.
+        // Ce n'est pas une fuite mais une impasse : autant la voir.
+        $orphelines = DB::table($cagnottes)->whereNull('pays')->count();
+        if ($orphelines > 0) {
+            $this->ajouter('avertissement', 'pays',
+                "{$orphelines} collecte(s) sans pays : personne ne pourra y cotiser.");
+        }
+
+        if (Schema::hasTable('users') && Schema::hasColumn('users', 'pays')) {
+            $comptes = DB::table('users')->whereNull('pays')->count();
+            if ($comptes > 0) {
+                $this->ajouter('avertissement', 'pays',
+                    "{$comptes} compte(s) sans pays : ils ne peuvent ni créer ni cotiser.");
+            }
+        }
+
+        // ── 4. Des opérateurs dont personne n'a décrit les capacités ────────
+        $config = project_table('project_config');
+        if (Schema::hasColumn($config, 'capacites')) {
+            $muets = DB::table($config)->whereNull('capacites')->count();
+            if ($muets > 0) {
+                $this->ajouter('avertissement', 'pays',
+                    "{$muets} opérateur(s) sans capacités décrites : ils ne savent rien faire.");
+            }
+        }
+    }
 
     private function ajouter(string $niveau, string $controle, string $message): void
     {

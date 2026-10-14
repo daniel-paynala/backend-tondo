@@ -176,6 +176,16 @@ class CagnottesController extends Controller
             throw ValidationException::withMessages(['type' => $suspendu]);
         }
 
+        // Le pays sait-il reverser ? Contrôlé à la CRÉATION et non au
+        // retrait : une collecte qui encaisse sans pouvoir reverser piège
+        // l'argent de ses cotisants, et le refus arriverait quand le
+        // bénéficiaire a déjà collecté.
+        $refusPays = app(\App\Services\CapacitesOperateur::class)
+            ->refusPourCreation($request->user()->project_id, $request->user()->pays);
+        if ($refusPays !== null) {
+            throw ValidationException::withMessages(['type' => $refusPays]);
+        }
+
         // Quota de collectes actives. Contrôlé AVANT toute autre validation :
         // inutile de faire remplir un formulaire entier pour refuser à la fin.
         // L'app grise déjà le bouton, mais griser n'est pas interdire — le
@@ -230,6 +240,10 @@ class CagnottesController extends Controller
         $cagnotte->id = (string) Str::uuid();
         $cagnotte->project_id = $user->project_id;
         $cagnotte->user_id = $user->id;
+        // L'écosystème de la collecte, repris de son organisateur. Immuable
+        // ensuite, comme le numéro de retrait : c'est lui qui détermine qui a
+        // le droit de cotiser.
+        $cagnotte->pays = $user->pays;
         $cagnotte->titre = $base['titre'];
         $cagnotte->type = $type;
         $cagnotte->statut = 'active';
@@ -617,7 +631,11 @@ class CagnottesController extends Controller
                 // la collecte l'enverrait en essayer une autre pour rien.
                 'autorisee' => ($raisonCollecte =
                     app(\App\Services\CompteSuspendu::class)->refus($request->user())
-                    ?? app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)
+                    // Le cotisant compte : c'est lui qui décide si la
+                    // collecte lui est accessible — son pays, et le moyen de
+                    // paiement disponible chez lui. Sans le transmettre, le
+                    // refus n'arrivait qu'à la validation du montant.
+                    ?? app(\App\Services\CollecteAutorisee::class)->refus($cagnotte, $request->user())
                 ) === null,
                 // La raison exacte, telle que le serveur la rendra au refus :
                 // l'écran et le refus doivent dire la même chose.

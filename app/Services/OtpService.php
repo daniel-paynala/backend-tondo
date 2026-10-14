@@ -68,7 +68,7 @@ class OtpService
      * @return string|null             Code OTP si driver=dev, null sinon.
      * @throws RuntimeException        Si l'envoi SMS échoue (propagé depuis le driver).
      */
-    public function sendOtp(string $phoneE164): ?string
+    public function sendOtp(string $phoneE164, ?string $emailDirect = null): ?string
     {
         // Numéro de test (review Apple) : aucun SMS envoyé.
         if ($this->estNumeroTest($phoneE164)) {
@@ -76,7 +76,7 @@ class OtpService
         }
         return match ($this->driver) {
             'twilio'  => $this->sendViaTwilio($phoneE164),
-            'paynala' => $this->sendViaPaynala($phoneE164),
+            'paynala' => $this->sendViaPaynala($phoneE164, $emailDirect),
             default   => self::DEV_CODE,  // driver=dev : on n'envoie rien, code fixe.
         };
     }
@@ -117,9 +117,9 @@ class OtpService
     }
 
     /** Envoie via Wirepick (driver Paynala). Retourne null (code en cache, pas exposé). */
-    private function sendViaPaynala(string $phoneE164): ?string
+    private function sendViaPaynala(string $phoneE164, ?string $emailDirect = null): ?string
     {
-        $this->paynala->sendOtp($phoneE164);
+        $this->paynala->sendOtp($phoneE164, $emailDirect);
         return null;
     }
 }

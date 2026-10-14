@@ -49,6 +49,9 @@ class AuthController extends Controller
             //            toujours l'OTP, c'est explicitement une création
             //            de compte.
             'intent' => ['nullable', 'in:login,signup'],
+            // Facultatif ici, exigé plus bas quand l'opérateur n'a pas de KYC :
+            // la règle dépend du numéro, qu'on ne connaît qu'après validation.
+            'email'  => ['nullable', 'email', 'max:190'],
         ]);
 
         $intent = $data['intent'] ?? 'login';
@@ -128,17 +131,34 @@ class AuthController extends Controller
                     ]);
                 }
 
-                // Airtel actif : le KYC a déjà été mis en cache par kycCheck() appelé
-                // depuis l'app pendant la saisie. Si absent du cache (saisie directe sans
-                // appel kycCheck), on vérifie maintenant — null = indisponible, on laisse passer.
-                if ($operateur === 'airtel') {
-                    $msisdn = '0' . ltrim($data['numero'], '0');
+                // Le KYC suit la CAPACITÉ de l'opérateur, plus son nom.
+                //
+                // Là où une vérification existe, elle reste obligatoire : un
+                // numéro sans compte Mobile Money actif ne s'inscrit pas.
+                //
+                // Là où il n'y en a pas — règle de Daniel du 2026-10-14 — on
+                // ne refuse PAS : l'utilisateur saisit ses informations, son
+                // e-mail devient obligatoire, et le code part par les deux
+                // canaux. Mieux vaut une identité déclarée et deux voies de
+                // vérification qu'une porte fermée.
+                $aLeKyc = app(\App\Services\CapacitesOperateur::class)
+                    ->a($projectId, $operateur, $pays, 'kyc');
+
+                if ($aLeKyc) {
+                    $msisdn = app(\App\Services\NumeroTelephone::class)->versLocal($phone);
                     $kycOk  = app(PaynalaPaymentService::class)->checkKyc($msisdn);
                     if ($kycOk === false) {
                         throw ValidationException::withMessages([
-                            'numero' => 'Ce numéro ne possède pas de compte Airtel Money actif.',
+                            'numero' => 'Ce numéro ne possède pas de compte Mobile Money actif.',
                         ]);
                     }
+                } elseif (empty($data['email'])) {
+                    // Sans KYC, l'adresse est la seule trace vérifiable de
+                    // l'identité, et le seul canal de secours si le SMS se
+                    // perd — ce qui vient d'arriver une semaine durant.
+                    throw ValidationException::withMessages([
+                        'email' => 'Une adresse e-mail est nécessaire pour vous inscrire avec ce numéro.',
+                    ]);
                 }
             }
         }
@@ -150,7 +170,9 @@ class AuthController extends Controller
             // (ex : WirepickSmsService mal configuré) soit capturée et transformée
             // en message utilisateur lisible, sans exposer les détails internes.
             $otp     = app(OtpService::class);
-            $devHint = $otp->sendOtp($phone);
+            // L'adresse part avec : à l'inscription, le compte n'existe pas
+            // encore, donc le repli par e-mail n'a aucune ligne à interroger.
+            $devHint = $otp->sendOtp($phone, $data['email'] ?? null);
         } catch (Throwable $e) {
             Log::error("[mobile] request-otp failed for {$phone}: {$e->getMessage()}");
             throw ValidationException::withMessages([
@@ -208,6 +230,9 @@ class AuthController extends Controller
             'date_naissance' => ['nullable', 'date', 'before:today'],
             'type_client' => ['nullable', 'in:particulier,entreprise,marchand'],
             'device_name' => ['nullable', 'string', 'max:64'],
+            // Reprise de l'étape précédente : sans KYC elle y était obligatoire,
+            // et c'est ici qu'on la conserve sur le compte.
+            'email' => ['nullable', 'email', 'max:190'],
         ]);
 
         $phone = $this->formatPhone($data['indicatif'], $data['numero']);
@@ -263,6 +288,13 @@ class AuthController extends Controller
             $kycMsisdn     = '0' . ltrim($data['numero'], '0');
             $kycTypeClient = app(PaynalaPaymentService::class)->resolveTypeClientFromKyc($kycMsisdn);
             $user->type_client = $kycTypeClient ?? $data['type_client'] ?? $user->type_client ?? 'particulier';
+
+            // L'adresse saisie à l'inscription sans KYC. On n'écrase jamais
+            // une adresse déjà connue : elle a pu être confirmée depuis, et
+            // une saisie plus récente n'est pas forcément plus juste.
+            if (! empty($data['email']) && empty($user->email)) {
+                $user->email = $data['email'];
+            }
             $user->compte_type    = 'full';
             // KYC déjà vérifié dans requestOtp (intent=signup) — on marque
             // kyc_valide=true pour les numéros Airtel qui ont passé ce contrôle.
@@ -354,6 +386,7 @@ class AuthController extends Controller
                 'user_exists' => false,
                 'operateur'   => 'airtel',
                 'kyc_ok'      => true,
+                'email_requis' => false,
                 'bloque'      => false,
                 'nom'         => config('services.otp.test_nom', 'REVIEW'),
                 'prenom'      => config('services.otp.test_prenom', 'Test'),
@@ -416,14 +449,25 @@ class AuthController extends Controller
             ]);
         }
 
-        // ── 4. Seul Airtel a une API KYC — tout autre opérateur actif est bloqué ─
-        if ($operateur !== 'airtel') {
+        // ── 4. Opérateur sans vérification d'identité ───────────────────────
+        //
+        // Il était bloqué d'office, avec un message disant d'utiliser Airtel.
+        // Règle de Daniel du 2026-10-14 : on ne ferme plus la porte. On laisse
+        // passer, et l'e-mail devient obligatoire — seule trace déclarée de
+        // l'identité, et seul canal de secours si le SMS se perd.
+        if (! app(\App\Services\CapacitesOperateur::class)->a($projectId, $operateur, $pays, 'kyc')) {
             return response()->json([
-                'user_exists' => false,
-                'operateur'   => $operateur,
-                'kyc_ok'      => null,
-                'bloque'      => true,
-                'message'     => 'Le numéro doit être Airtel Money.',
+                'user_exists'  => false,
+                'operateur'    => $operateur,
+                'kyc_ok'       => null,
+                'bloque'       => false,
+                // L'app s'en sert pour afficher le champ et le rendre
+                // obligatoire. Le serveur le réexige de son côté : l'écran
+                // guide, il ne garantit pas.
+                'email_requis' => true,
+                'type_client'  => 'particulier',
+                'message'      => 'Cet opérateur ne permet pas de vérifier votre identité : '
+                    . 'une adresse e-mail vous sera demandée.',
             ]);
         }
 

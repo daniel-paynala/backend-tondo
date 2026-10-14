@@ -83,6 +83,8 @@ class TondoProjectConfig extends Model
         'franchise_retrait'            => 'integer',
         'sorties_bloquees'             => 'array',
         'cotisations_bloquees'         => 'array',
+        // Registre des capacités de l'intégration (voir CapacitesOperateur).
+        'capacites'                    => 'array',
         'tranches'           => 'array',   // Tranches de frais opérateur (JSON array).
         'prefixes'           => 'array',   // Préfixes locaux valides (JSON array).
         'actif'              => 'boolean',

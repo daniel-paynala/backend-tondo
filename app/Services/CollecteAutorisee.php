@@ -24,7 +24,10 @@ use App\Support\CollecteGuard;
  */
 class CollecteAutorisee
 {
-    public function __construct(private readonly TondoConfigService $config) {}
+    public function __construct(
+        private readonly TondoConfigService $config,
+        private readonly CapacitesOperateur $capacites,
+    ) {}
 
     /**
      * Message de refus à rendre au cotisant, ou null si la collecte est ouverte.
@@ -33,8 +36,27 @@ class CollecteAutorisee
      *                           statut_validation, type, date_fin et
      *                           cotisation_bloquee.
      */
-    public function refus(mixed $cagnotte): ?string
+    public function refus(mixed $cagnotte, mixed $cotisant = null): ?string
     {
+        // ── Écosystème et moyen de paiement ─────────────────────────────────
+        //
+        // Deux questions distinctes, et dans cet ordre.
+        //
+        // 1. Le cotisant est-il du MÊME PAYS que la collecte ? Les écosystèmes
+        //    sont étanches (décision du 2026-10-14) : XAF et XOF sont deux
+        //    monnaies sous deux banques centrales, et une cotisation d'un pays
+        //    à l'autre serait un transfert transfrontalier que nous ne savons
+        //    pas assumer.
+        //
+        // 2. Son pays sait-il encaisser ? Sans intégration locale, le bouton
+        //    doit le dire plutôt que d'ouvrir un formulaire qui échouera.
+        //
+        // Le cotisant est facultatif : certains appelants n'évaluent que l'état
+        // de la collecte elle-même, sans savoir qui regarde.
+        if ($cotisant !== null && ($refusPays = $this->refusPays($cagnotte, $cotisant)) !== null) {
+            return $refusPays;
+        }
+
         $gerant    = TondoUser::find($cagnotte->user_id);
         $orgStatut = null;
 
@@ -63,6 +85,40 @@ class CollecteAutorisee
             (bool) ($cagnotte->cotisation_bloquee ?? false) || $suspendu,
             $this->verrouGlobal($cagnotte->project_id, $gerant?->type_compte),
         );
+    }
+
+    /**
+     * Le cotisant peut-il verser dans CETTE collecte, depuis son pays ?
+     *
+     * La comparaison porte sur le pays, jamais sur l'indicatif : celui-ci
+     * cohabitait sous deux formes en base — « +241 » et « 241 » — et une
+     * comparaison ratée laisse passer, c'est-à-dire tombe du mauvais côté.
+     */
+    private function refusPays(mixed $cagnotte, mixed $cotisant): ?string
+    {
+        $paysCotisant = $cotisant->pays ?? null;
+        $paysCollecte = $cagnotte->pays ?? null;
+
+        if ($paysCotisant === null) {
+            return 'Votre compte n\'est rattaché à aucun pays. Contactez le support.';
+        }
+
+        // Une collecte d'avant le rattachement : on ne la ferme pas, mais on
+        // n'ouvre pas non plus les frontières — seul son organisateur peut
+        // encore la régulariser. Elle reste accessible à son propre pays dès
+        // que le SQL l'aura renseignée.
+        if ($paysCollecte !== null && $paysCollecte !== $paysCotisant) {
+            return 'Cette collecte n\'est pas accessible depuis votre pays.';
+        }
+
+        // Au niveau du PAYS, pas d'un opérateur précis : savoir si l'écran
+        // s'ouvre ne demande pas de choisir par quel opérateur on paiera.
+        // Ce choix vient après, au moment de payer.
+        if (! $this->capacites->pourLePays((string) $cagnotte->project_id, $paysCotisant)['payin']) {
+            return 'Aucun moyen de paiement local pour le moment.';
+        }
+
+        return null;
     }
 
     /**

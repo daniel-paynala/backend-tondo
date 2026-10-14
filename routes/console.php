@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\CleanReceiptsCommand;
+use App\Console\Commands\EtancheiteCommand;
 use App\Console\Commands\RapportActiviteCommand;
 use App\Console\Commands\SanteCommand;
 use App\Console\Commands\ResumeQuotidienCommand;
@@ -132,6 +133,21 @@ Schedule::command(SanteCommand::class, ['--alerter'])
 // jour anormal visible. Cinq minutes après la santé, pour que les deux
 // courriels arrivent ensemble sans se concurrencer sur la même minute.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Étanchéité des écosystèmes — chaque jour à 06h50
+//
+// Les pays partagent un seul `project_id` : la frontière est tenue par du code,
+// pas par la structure. Une requête qui l'oublierait laisserait passer en
+// silence. Cet audit cherche les traces plutôt que de faire confiance, et
+// n'écrit que s'il trouve quelque chose — juste avant la sonde de 07h00, pour
+// que les deux arrivent ensemble.
+// ─────────────────────────────────────────────────────────────────────────────
+Schedule::command(EtancheiteCommand::class, ['--alerter'])
+    ->dailyAt('06:50')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
 Schedule::command(RapportActiviteCommand::class, ['--envoyer'])
     ->dailyAt('07:05')
     ->timezone('Africa/Libreville')

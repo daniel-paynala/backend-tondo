@@ -142,7 +142,7 @@ class CotisationsController extends Controller
             throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
         }
 
-        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)) {
+        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte, $user)) {
             throw ValidationException::withMessages(['cagnotte_reference' => $raison]);
         }
 

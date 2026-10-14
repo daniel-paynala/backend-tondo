@@ -76,9 +76,23 @@ class TraiterRetraitsTontines extends Command
 
         // Même verrou que l'app, le web et le cron des cagnottes : il n'y a
         // qu'un seul endroit qui décide si l'argent peut sortir d'une collecte.
-        $sorties = app(\App\Services\SortiesAutorisees::class);
+        $sorties   = app(\App\Services\SortiesAutorisees::class);
+        $capacites = app(\App\Services\CapacitesOperateur::class);
 
         foreach ($tontines as $cagnotte) {
+            // Le pays sait-il reverser ?
+            //
+            // Plus grave ici que pour une cagnotte ouverte : c'est le tour
+            // d'un membre, il attend son argent à une date connue de tous. Le
+            // retenter chaque jour sans le dire laisserait le bénéficiaire
+            // sans explication et le groupe sans recours.
+            if (! $capacites->pourLePays((string) $cagnotte->project_id, $cagnotte->pays)['payout']) {
+                $this->line("  {$cagnotte->reference} ignorée — aucun décaissement pour le pays "
+                    . ($cagnotte->pays ?? 'inconnu') . '.');
+                $ignores++;
+                continue;
+            }
+
             // ── Verrou des sorties ───────────────────────────────────────────
             //
             // Une tontine reverse d'elle-même au tour de chacun : c'est la
