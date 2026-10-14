@@ -44,12 +44,18 @@ class SortiesAutorisees
     {
         $cagnotte = DB::table(project_table('cagnottes'))
             ->where('id', $cagnotteId)
-            ->first(['user_id', 'transfert_bloque', 'paiement_marchand_bloque']);
+            // `pays` compte depuis le rattachement par écosystème : sans lui
+            // dans la sélection, la capacité se lisait sur un champ absent,
+            // donc toujours nulle — et toutes les sorties se fermaient.
+            ->first(['user_id', 'pays', 'transfert_bloque', 'paiement_marchand_bloque']);
 
         if ($cagnotte === null) {
             // Collecte inconnue : on refuse tout. Autoriser par défaut ferait
             // d'une référence erronée un contournement du verrou.
-            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => false];
+            return [
+                'transfert' => false, 'marchand' => false, 'marchand_actif' => false,
+                'raison' => null,
+            ];
         }
 
         $gerant = $this->gerant($cagnotte->user_id);
@@ -66,7 +72,27 @@ class SortiesAutorisees
             // disparaître le bouton « Payer » au lieu de le griser — or une
             // suspension se lève, et un bouton qui s'évapore laisse croire que
             // la collecte a changé de nature.
-            return ['transfert' => false, 'marchand' => false, 'marchand_actif' => true];
+            return [
+                'transfert' => false, 'marchand' => false, 'marchand_actif' => true,
+                'raison' => null,
+            ];
+        }
+
+        // Le pays sait-il reverser ?
+        //
+        // Quatrième terme, et il ne ferme pas le SERVICE : `marchand_actif`
+        // reste vrai, donc le bouton est construit puis grisé, avec la raison.
+        // C'est la règle de Daniel — « aucun moyen de paiement local pour le
+        // moment » — et non une disparition, qui laisserait croire que la
+        // collecte a changé de nature.
+        $paysReverse = app(CapacitesOperateur::class)
+            ->pourLePays($projectId, $cagnotte->pays ?? null)['payout'];
+
+        if (! $paysReverse) {
+            return [
+                'transfert' => false, 'marchand' => false, 'marchand_actif' => true,
+                'raison' => 'Aucun moyen de paiement local pour le moment.',
+            ];
         }
 
         $global = $this->global($projectId, $gerant['type_compte']);
@@ -75,6 +101,9 @@ class SortiesAutorisees
             'transfert'      => ! $cagnotte->transfert_bloque && ! $global['transfert'],
             'marchand'       => ! $cagnotte->paiement_marchand_bloque && ! $global['marchand'],
             'marchand_actif' => ! $global['marchand'],
+            // Null quand rien ne bloque : l'app n'affiche un motif que s'il y
+            // en a un.
+            'raison'         => null,
         ];
     }
 

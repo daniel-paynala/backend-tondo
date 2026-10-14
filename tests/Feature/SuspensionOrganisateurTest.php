@@ -49,6 +49,9 @@ class SuspensionOrganisateurTest extends TestCase
             $t->boolean('paiement_marchand_bloque')->default(false);
             $t->boolean('cotisation_bloquee')->default(false);
             $t->timestamp('date_fin')->nullable();
+            // Depuis le rattachement par pays, une sortie exige que le pays de
+            // la collecte sache reverser.
+            $t->string('pays')->nullable();
         });
 
         Schema::create('tondo_project_config', function ($t) {
@@ -56,7 +59,21 @@ class SuspensionOrganisateurTest extends TestCase
             $t->string('project_id');
             $t->string('operateur');
             $t->string('pays');
+            $t->boolean('actif')->nullable();
+            $t->text('capacites')->nullable();
         });
+
+        // Le pays d'exploitation sait tout faire : ces cas-là portent sur la
+        // suspension, pas sur les capacités.
+        DB::table('tondo_project_config')->insert([
+            'id' => (string) Str::uuid(), 'project_id' => $this->projectId,
+            'operateur' => 'airtel', 'pays' => 'GA', 'actif' => true,
+            'capacites' => json_encode([
+                'kyc' => true, 'verification_numero' => true,
+                'payin' => true, 'payout' => true,
+                'frais' => true, 'plafonds' => true,
+            ]),
+        ]);
 
         $this->userId = (string) Str::uuid();
         DB::table('users')->insert([
@@ -77,6 +94,7 @@ class SuspensionOrganisateurTest extends TestCase
             'reference'  => (string) random_int(100000, 999999),
             'type'       => $type,
             'statut'     => $statut,
+            'pays'       => 'GA',
         ]);
 
         return $id;

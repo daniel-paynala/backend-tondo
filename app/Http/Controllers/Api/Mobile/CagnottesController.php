@@ -624,7 +624,11 @@ class CagnottesController extends Controller
                 // la collecte l'enverrait en essayer une autre pour rien.
                 'autorisee' => ($raisonCollecte =
                     app(\App\Services\CompteSuspendu::class)->refus($request->user())
-                    ?? app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)
+                    // Le cotisant compte : c'est lui qui décide si la
+                    // collecte lui est accessible — son pays, et le moyen de
+                    // paiement disponible chez lui. Sans le transmettre, le
+                    // refus n'arrivait qu'à la validation du montant.
+                    ?? app(\App\Services\CollecteAutorisee::class)->refus($cagnotte, $request->user())
                 ) === null,
                 // La raison exacte, telle que le serveur la rendra au refus :
                 // l'écran et le refus doivent dire la même chose.

@@ -29,7 +29,14 @@ class ConfigController extends Controller
      * Opérateurs pour lesquels le paiement est réellement intégré (live).
      * Les autres sont en mode mock — les cotisations sont simulées immédiatement.
      */
-    private const OPERATEURS_INTEGRES = ['airtel'];
+    /**
+     * Plus de liste en dur ici.
+     *
+     * L'état d'intégration se lit dans le registre des capacités : un
+     * opérateur est opérationnel quand il sait encaisser ET reverser. Nommer
+     * « airtel » dans le code obligeait à le modifier pour chaque pays
+     * nouveau — et la liste se serait désynchronisée du réel au premier oubli.
+     */
 
     /**
      * GET /api/admin/config
@@ -47,9 +54,17 @@ class ConfigController extends Controller
 
         // Ajout du statut d'intégration pour que le dashboard affiche un badge visuel.
         $enriched = $rows->map(function (array $op): array {
-            $op['integration_paiement'] = in_array($op['operateur'], self::OPERATEURS_INTEGRES)
+            $capacites = app(\App\Services\CapacitesOperateur::class)
+                ->pour($request->user()->project_id, $op['operateur'] ?? null, $op['pays'] ?? null);
+
+            $op['capacites'] = $capacites;
+            // Opérationnel = sait encaisser ET reverser. L'un sans l'autre
+            // n'est pas un demi-service : collecter sans pouvoir rendre est
+            // pire que ne rien faire.
+            $op['integration_paiement'] = ($capacites['payin'] && $capacites['payout'])
                 ? 'effective'
                 : 'en_attente';
+
             return $op;
         });
 
@@ -171,6 +186,16 @@ class ConfigController extends Controller
             'prefixes'               => ['nullable', 'array'],
             'prefixes.*'             => ['string', 'regex:/^\d{2,6}$/'],
             'logo'                   => ['nullable', 'string'],
+            // Ce que l'intégration sait faire pour ce couple opérateur/pays.
+            // Chaque clé est facultative : ne pas l'envoyer la laisse à sa
+            // valeur actuelle, et l'absence vaut faux à la lecture.
+            'capacites'                       => ['nullable', 'array'],
+            'capacites.kyc'                   => ['nullable', 'boolean'],
+            'capacites.verification_numero'   => ['nullable', 'boolean'],
+            'capacites.payin'                 => ['nullable', 'boolean'],
+            'capacites.payout'                => ['nullable', 'boolean'],
+            'capacites.frais'                 => ['nullable', 'boolean'],
+            'capacites.plafonds'              => ['nullable', 'boolean'],
         ];
 
         if ($withKeys) {
