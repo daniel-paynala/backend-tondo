@@ -52,6 +52,13 @@ class CreerCagnotteService
             throw new \RuntimeException($suspendu);
         }
 
+        // Même verrou que sur l'app : c'est ce canal qui l'oublie d'habitude.
+        $refusPays = app(\App\Services\CapacitesOperateur::class)
+            ->refusPourCreation($user->project_id, $user->pays);
+        if ($refusPays !== null) {
+            throw new \RuntimeException($refusPays);
+        }
+
         $quota = app(\App\Services\QuotaCagnottes::class)
             ->refus($user->id, $user->project_id);
         if ($quota !== null) {
@@ -68,6 +75,8 @@ class CreerCagnotteService
         $cagnotte->id                    = (string) Str::uuid();
         $cagnotte->project_id            = $user->project_id;
         $cagnotte->user_id               = $user->id;
+        // Même écosystème que l'organisateur, et figé dès la création.
+        $cagnotte->pays                  = $user->pays;
         $cagnotte->titre                 = $data['titre'];
         $cagnotte->type                  = $type;
         $cagnotte->statut                = 'active';

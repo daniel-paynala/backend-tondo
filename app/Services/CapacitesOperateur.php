@@ -112,6 +112,37 @@ class CapacitesOperateur
         return $this->cache[$cle] = $cumul;
     }
 
+    /**
+     * Message de refus si ce pays ne peut pas accueillir une nouvelle collecte.
+     *
+     * **Le contrôle est à la CRÉATION, pas au reversement**, et c'est tout
+     * l'enjeu. Une collecte qui encaisse sans pouvoir reverser piège l'argent
+     * de ses cotisants : le refus arriverait au moment du retrait, quand le
+     * bénéficiaire a déjà collecté et attend son dû. On ne peut pas revenir en
+     * arrière à ce moment-là.
+     *
+     * `payout` suffit donc à décider. Une collecte sans encaissement local est
+     * inutile mais inoffensive ; sans décaissement, elle est un piège.
+     */
+    public function refusPourCreation(string $projectId, ?string $pays): ?string
+    {
+        if ($pays === null) {
+            // Les comptes dont le numéro n'a pas permis de déduire un pays.
+            // Les rattacher au Gabon par défaut les ferait entrer dans le
+            // mauvais écosystème ; mieux vaut un refus qui mène au support.
+            return 'Votre compte n\'est rattaché à aucun pays. Contactez le support.';
+        }
+
+        if (! $this->pourLePays($projectId, $pays)['payout']) {
+            // Le motif réel — aucune API de décaissement — ne regarde pas
+            // l'utilisateur. Ce qu'il doit savoir, c'est que ce n'est pas
+            // encore ouvert chez lui.
+            return 'Les collectes ne sont pas encore disponibles dans votre pays.';
+        }
+
+        return null;
+    }
+
     /** @return array<string, bool> */
     private function lire(string $projectId, string $operateur, string $pays): array
     {
