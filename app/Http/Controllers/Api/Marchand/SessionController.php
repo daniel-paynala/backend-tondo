@@ -8,6 +8,7 @@ use App\Support\JetonMarchand;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -132,10 +133,13 @@ class SessionController extends Controller
     /** Forme stockée en base : +241 suivi du numéro sans son zéro initial. */
     private static function versE164(string $numero): string
     {
-        $chiffres = preg_replace('/\D/', '', $numero) ?? '';
-
-        return str_starts_with($chiffres, '241')
-            ? '+' . $chiffres
-            : '+241' . ltrim($chiffres, '0');
+        // Même règle que le dashboard, et désormais au même endroit : les deux
+        // copies de cette fonction divergeaient dès qu'on en corrigeait une.
+        return app(\App\Services\NumeroTelephone::class)->versE164(
+            $numero,
+            (string) (Schema::hasTable(project_table('project_config'))
+                ? (DB::table(project_table('project_config'))->value('indicatif') ?? '241')
+                : '241'),
+        );
     }
 }

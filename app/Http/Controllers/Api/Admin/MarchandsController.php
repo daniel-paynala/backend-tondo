@@ -11,6 +11,7 @@ use App\Services\VerificationNumeroRetrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -403,11 +404,22 @@ class MarchandsController extends Controller
      */
     private static function versE164(mixed $numero): string
     {
-        $chiffres = preg_replace('/\D/', '', (string) $numero) ?? '';
+        // L'indicatif par défaut est celui du projet, pas une constante : un
+        // numéro saisi sans indicatif se rattache au pays de l'opérateur
+        // configuré, et une saisie qui en porte un est respectée telle quelle.
+        return app(\App\Services\NumeroTelephone::class)
+            ->versE164((string) $numero, self::indicatifDefaut());
+    }
 
-        return str_starts_with($chiffres, '241')
-            ? '+' . $chiffres
-            : '+241' . ltrim($chiffres, '0');
+    /** Indicatif du premier opérateur déclaré — le pays d'exploitation. */
+    private static function indicatifDefaut(): string
+    {
+        // Indicatif du pays d'exploitation. « 241 » reste le repli quand la
+        // configuration n'est pas lisible — un contexte de test, une
+        // installation neuve : c'est le comportement d'avant, pas une règle.
+        return (string) (Schema::hasTable(project_table('project_config'))
+            ? (DB::table(project_table('project_config'))->value('indicatif') ?? '241')
+            : '241');
     }
 
     /**
@@ -462,7 +474,11 @@ class MarchandsController extends Controller
             // plusieurs fiches : une chaîne encaisse sur
             // un seul numéro pour plusieurs établissements. C'est le marchand
             // choisi au paiement qui dit où l'on a payé.
-            'numero_tel'    => [$requis, 'string', 'regex:/^\+241[0-9]{8,9}$/'],
+            // Forme E.164, sans nommer de pays : le rattachement se fait par
+            // les indicatifs déclarés en configuration, pas par une expression
+            // gravée ici. Miroir du CHECK en base (SQL 047), pour un message
+            // lisible plutôt qu'une erreur Postgres.
+            'numero_tel'    => [$requis, 'string', 'regex:/^\+[1-9][0-9]{7,14}$/'],
             // Référence à la liste administrée : un texte libre finissait en
             // « Santé » / « santé » / « Pharmacie » pour la même réalité.
             'categorie_id'  => ['sometimes', 'nullable', 'uuid',

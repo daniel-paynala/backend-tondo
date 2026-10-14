@@ -77,7 +77,10 @@ class ReversementsController extends Controller
     {
         $data = $request->validate([
             'cagnotte_reference'  => ['required', 'string', 'regex:/^\d{6}$/'],
-            'numero_beneficiaire' => ['nullable', 'string', 'regex:/^\d{9}$/'],
+            // Numéro national, sans indicatif ni zéro de tête. Neuf chiffres
+            // était la longueur gabonaise ; ailleurs elle diffère, et un
+            // bénéficiaire étranger était rejeté avant même d'être considéré.
+            'numero_beneficiaire' => ['nullable', 'string', 'regex:/^\d{8,12}$/'],
             'participant_id'      => ['nullable', 'string', 'uuid'],
             // Destination marchande : le client envoie le solde chez un
             // commerçant enregistré plutôt que sur un numéro qu'il saisit.

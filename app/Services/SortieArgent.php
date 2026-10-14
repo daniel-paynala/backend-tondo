@@ -148,10 +148,10 @@ class SortieArgent
             );
         }
 
-        // Numéro local 0XXXXXXXX attendu par l'API Airtel.
-        $msisdnLocal = str_starts_with($numeroE164, '+241')
-            ? '0' . substr($numeroE164, 4)
-            : ltrim($numeroE164, '+');
+        // Forme nationale attendue par l'API de l'opérateur, déduite des
+        // indicatifs déclarés plutôt que du seul « +241 » : un numéro étranger
+        // était jusqu'ici transmis avec son indicatif, donc rejeté.
+        $msisdnLocal = app(\App\Services\NumeroTelephone::class)->versLocal($numeroE164);
 
         $reference = 'TONJIDISBURSEMENT' . now()->getTimestampMs();
         $payoutId  = (string) Str::uuid();
