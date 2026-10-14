@@ -48,7 +48,15 @@ class PaynalaOtpService
      * @param string $phoneE164  Numéro destinataire au format E.164 (ex : "+24177123456").
      * @throws RuntimeException  Si Wirepick rejette l'envoi (propagé depuis WirepickSmsService).
      */
-    public function sendOtp(string $phoneE164): void
+    /**
+     * @param  ?string $emailDirect  Adresse fournie par l'appelant, quand le
+     *                               compte n'existe pas encore. À l'inscription
+     *                               il n'y a aucune ligne `users` à interroger,
+     *                               donc aucun repli possible sans elle — et
+     *                               c'est précisément le cas où l'opérateur
+     *                               n'a pas de KYC et où l'e-mail est exigé.
+     */
+    public function sendOtp(string $phoneE164, ?string $emailDirect = null): void
     {
         // Génère un code à 6 chiffres avec zéro-padding (ex : "007341").
         $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
@@ -64,7 +72,7 @@ class PaynalaOtpService
         // envoie aussi le code. Best-effort — ne doit jamais bloquer le SMS,
         // d'où le placement AVANT l'envoi SMS (qui, lui, peut lever une
         // exception) et la capture de toute erreur à l'intérieur.
-        $this->envoyerParEmail($phoneE164, $code);
+        $this->envoyerParEmail($phoneE164, $code, $emailDirect);
 
         $message = "Tonji - Votre code de vérification : {$code}. Valable 5 minutes. Ne le partagez jamais.";
 
@@ -84,10 +92,12 @@ class PaynalaOtpService
      * @param string $phoneE164  Numéro E.164 de l'utilisateur.
      * @param string $code       Code OTP à 6 chiffres (identique à celui du SMS).
      */
-    private function envoyerParEmail(string $phoneE164, string $code): void
+    private function envoyerParEmail(string $phoneE164, string $code, ?string $emailDirect = null): void
     {
         try {
-            $email = TondoUser::where('project_id', Project::tondoId())
+            // L'adresse fournie prime : à l'inscription, elle est la seule
+            // qu'on ait. Pour une connexion, on retombe sur celle du compte.
+            $email = $emailDirect ?: TondoUser::where('project_id', Project::tondoId())
                 ->where('numero', $phoneE164)
                 ->value('email');
 
