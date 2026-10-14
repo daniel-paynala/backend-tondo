@@ -276,6 +276,7 @@ final class Registre
         'tonji:agreger-evenements'     => 'chaque jour à 02:00',
         'tonji:sante'                  => 'chaque jour à 07:00',
         'tonji:rapport-activite'       => 'chaque jour à 07:05',
+        'tonji:etancheite'             => 'chaque jour à 06:50',
         'queue:work'                   => 'chaque minute',
     ];
 
@@ -297,6 +298,7 @@ final class Registre
         'tonji:agreger-evenements'     => 93600,  // 26 h
         'tonji:sante'                  => 93600,  // 26 h
         'tonji:rapport-activite'       => 93600,  // 26 h
+        'tonji:etancheite'             => 93600,  // 26 h
         'queue:work'                   => 300,    // 5 min
     ];
 
