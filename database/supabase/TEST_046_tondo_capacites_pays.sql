@@ -17,20 +17,26 @@
 --    Les lignes EXISTANTES (airtel/GA, moov/GA) reçoivent tout à vrai : ouvrir
 --    un nouveau pays ne doit surtout pas fermer celui qui tourne.
 --
--- 2. `cagnottes.pays` — une collecte appartient à un écosystème. Recopié depuis
---    son organisateur à la création, et IMMUABLE ensuite, comme le numéro de
---    retrait (RÈGLE 3) : c'est lui qui détermine qui a le droit de cotiser, il
---    ne peut pas changer après coup.
---
--- 3. `users.indicatif` normalisé. Il cohabitait sous deux formes — « +241 » et
+-- 2. `users.indicatif` normalisé. Il cohabitait sous deux formes — « +241 » et
 --    « 241 » — selon les comptes. Comparer des pays là-dessus échouerait une
 --    fois sur deux, et dans le mauvais sens : une comparaison ratée laisse
 --    passer. La forme retenue est celle de la config : SANS le plus.
 --
--- 4. `users.pays` rattrapé quand le numéro permet de le déduire. Les numéros
+-- 3. `users.pays` rattrapé quand le numéro permet de le déduire. Les numéros
 --    manifestement factices restent sans pays — on ne devine pas.
 --
--- Idempotent : rejouable sans dommage.
+-- 4. `cagnottes.pays` — une collecte appartient à un écosystème. Recopié depuis
+--    son organisateur à la création, et IMMUABLE ensuite, comme le numéro de
+--    retrait (RÈGLE 3) : c'est lui qui détermine qui a le droit de cotiser, il
+--    ne peut pas changer après coup.
+--
+-- L'ORDRE COMPTE. La recopie vers les collectes vient en DERNIER, parce
+-- qu'elle lit `users.pays` que l'étape 3 vient de déduire. Dans l'autre sens,
+-- seules les collectes des comptes déjà rattachés recevaient un pays : toutes
+-- les autres restaient nues, tenues par le seul repli sur leur organisateur.
+--
+-- Idempotent : rejouable sans dommage — et il FAUT le rejouer là où il a été
+-- joué dans l'ancien ordre, pour que les collectes portent enfin leur pays.
 -- ============================================================================
 
 -- ── 1. Le registre des capacités ────────────────────────────────────────────
@@ -53,7 +59,31 @@ UPDATE public.tondo_project_config
        }'::jsonb
  WHERE capacites IS NULL;
 
--- ── 2. Le pays d'une collecte ───────────────────────────────────────────────
+-- ── 2. Indicatif sous une seule forme ───────────────────────────────────────
+-- « +241 » et « 241 » cohabitaient. On retient la forme de la config.
+UPDATE public.users
+   SET indicatif = ltrim(indicatif, '+')
+ WHERE indicatif LIKE '+%';
+
+COMMENT ON COLUMN public.users.indicatif IS
+  'Indicatif pays SANS le plus (ex : 241), même forme que tondo_project_config.indicatif.';
+
+-- ── 3. Pays déduit du numéro, quand c'est possible ──────────────────────────
+-- Un numéro manifestement factice ne donne rien : on préfère un pays vide à un
+-- pays faux, qui rattacherait un compte au mauvais écosystème.
+UPDATE public.users u
+   SET pays = cfg.pays
+  FROM (SELECT DISTINCT indicatif, pays FROM public.tondo_project_config) cfg
+ WHERE u.pays IS NULL
+   AND u.numero IS NOT NULL
+   AND u.numero LIKE '+' || cfg.indicatif || '%';
+
+-- ── 4. Le pays d'une collecte ───────────────────────────────────────────────
+-- EN DERNIER, et c'est tout l'enjeu de l'ordre : cette recopie lit
+-- `users.pays`, que la section 3 vient seulement de déduire. Placée avant,
+-- elle ne voyait que les comptes déjà rattachés et laissait toutes les autres
+-- collectes sans pays — elles ne tenaient plus que par le repli sur leur
+-- organisateur, au lieu de porter leur écosystème en propre.
 ALTER TABLE public.tondo_cagnottes
   ADD COLUMN IF NOT EXISTS pays char(2);
 
@@ -69,22 +99,3 @@ UPDATE public.tondo_cagnottes c
 
 CREATE INDEX IF NOT EXISTS tondo_cagnottes_pays_idx
   ON public.tondo_cagnottes (pays);
-
--- ── 3. Indicatif sous une seule forme ───────────────────────────────────────
--- « +241 » et « 241 » cohabitaient. On retient la forme de la config.
-UPDATE public.users
-   SET indicatif = ltrim(indicatif, '+')
- WHERE indicatif LIKE '+%';
-
-COMMENT ON COLUMN public.users.indicatif IS
-  'Indicatif pays SANS le plus (ex : 241), même forme que tondo_project_config.indicatif.';
-
--- ── 4. Pays déduit du numéro, quand c'est possible ──────────────────────────
--- Un numéro manifestement factice ne donne rien : on préfère un pays vide à un
--- pays faux, qui rattacherait un compte au mauvais écosystème.
-UPDATE public.users u
-   SET pays = cfg.pays
-  FROM (SELECT DISTINCT indicatif, pays FROM public.tondo_project_config) cfg
- WHERE u.pays IS NULL
-   AND u.numero IS NOT NULL
-   AND u.numero LIKE '+' || cfg.indicatif || '%';
