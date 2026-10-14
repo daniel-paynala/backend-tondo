@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -38,6 +39,7 @@ final class Sante
             $this->paiementsEnSouffrance(),
             $this->decaissementsARegulariser(),
             ...$this->reglages(),
+            $this->acheminementSms(),
             $this->schema(),
         ];
 
@@ -236,6 +238,45 @@ final class Sante
      *
      * @return array<string, mixed>
      */
+    /**
+     * Les SMS partent-ils réellement ?
+     *
+     * Le seul signal fiable est le PRIX : un message accepté et facturé zéro
+     * franc n'arrive jamais. Le statut ne dit rien — un SMS effectivement reçu
+     * reste affiché « DLG, Delivered to Upstream gateway », comme un message
+     * perdu.
+     *
+     * Ce contrôle existe parce que la chose est arrivée : du 7 au 14 octobre
+     * 2026, pas un seul OTP n'a été délivré. Wirepick acceptait tout, rendait
+     * un identifiant, facturait zéro. Le repli par e-mail masquait la panne
+     * pour les comptes qui ont une adresse ; les autres ne pouvaient pas
+     * s'inscrire, et personne ne l'a su pendant une semaine.
+     *
+     * CRITIQUE et non ALERTE : sans SMS, un nouvel utilisateur sans e-mail
+     * n'entre pas du tout.
+     */
+    private function acheminementSms(): array
+    {
+        $n = (int) Cache::get(\App\Services\WirepickSmsService::CLE_NON_FACTURES, 0);
+
+        if ($n === 0) {
+            return [
+                'cle' => 'sms', 'titre' => 'Acheminement des SMS', 'etat' => self::OK,
+                'detail' => 'Les envois récents sont facturés.',
+            ];
+        }
+
+        // Un envoi isolé à zéro peut arriver ; une série signifie que la route
+        // est coupée. Le compteur se remet à zéro au premier envoi payé.
+        return [
+            'cle' => 'sms', 'titre' => 'Acheminement des SMS',
+            'mesures' => ['non_factures' => $n],
+            'etat' => $n >= 3 ? self::CRITIQUE : self::ALERTE,
+            'detail' => $n . ' SMS accepté(s) par Wirepick mais facturé(s) zéro franc : '
+                . 'ils ne sont pas arrivés. Vérifier le compte et l\'acheminement.',
+        ];
+    }
+
     private function schema(): array
     {
         $manquantes = [];
