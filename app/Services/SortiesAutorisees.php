@@ -85,8 +85,21 @@ class SortiesAutorisees
         // C'est la règle de Daniel — « aucun moyen de paiement local pour le
         // moment » — et non une disparition, qui laisserait croire que la
         // collecte a changé de nature.
+        // Même repli que pour l'entrée d'argent (voir CollecteAutorisee) : une
+        // collecte d'avant le rattachement suit le pays de son organisateur.
+        // Sans cette symétrie, elle encaisserait par le repli sans jamais
+        // pouvoir reverser — l'argent de ses cotisants resterait pris.
+        $paysCollecte = $cagnotte->pays ?? $gerant['pays'];
+
+        if ($paysCollecte === null) {
+            return [
+                'transfert' => false, 'marchand' => false, 'marchand_actif' => true,
+                'raison' => 'Cette collecte est en cours de régularisation. Contactez le support.',
+            ];
+        }
+
         $paysReverse = app(CapacitesOperateur::class)
-            ->pourLePays($projectId, $cagnotte->pays ?? null)['payout'];
+            ->pourLePays($projectId, $paysCollecte)['payout'];
 
         if (! $paysReverse) {
             return [
@@ -171,15 +184,18 @@ class SortiesAutorisees
     private function gerant(?string $userId): array
     {
         if ($userId === null) {
-            return ['type_compte' => 'particulier', 'suspendu' => false];
+            return ['type_compte' => 'particulier', 'suspendu' => false, 'pays' => null];
         }
 
+        // `pays` sert de repli quand la collecte ne porte pas le sien : la
+        // ligne est déjà lue ici, inutile d'y revenir en seconde requête.
         $u = DB::table('users')->where('id', $userId)
-            ->first(['type_compte', 'suspendu_at']);
+            ->first(['type_compte', 'suspendu_at', 'pays']);
 
         return [
             'type_compte' => ($u->type_compte ?? null) === 'association' ? 'association' : 'particulier',
             'suspendu'    => ($u->suspendu_at ?? null) !== null,
+            'pays'        => $u->pays ?? null,
         ];
     }
 }

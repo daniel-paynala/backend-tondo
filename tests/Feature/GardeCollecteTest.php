@@ -45,6 +45,10 @@ class GardeCollecteTest extends TestCase
             $t->bigInteger('plafond_personnalise')->nullable();
             $t->boolean('kyc_valide')->default(false);
             $t->timestamps();
+            // Le pays du compte : les décisions de sortie et de collecte le
+            // lisent ici. Sans la colonne, SQLite rend la chaîne « pays »
+            // au lieu d'échouer, et le repli n'est jamais exercé.
+            $t->string('pays')->nullable();
         });
 
         Schema::create('tondo_organisations', function ($t) {

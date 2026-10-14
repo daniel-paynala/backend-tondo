@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\TondoOrganisation;
 use App\Models\TondoUser;
 use App\Support\CollecteGuard;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Une cagnotte accepte-t-elle une cotisation, à cet instant ?
@@ -103,11 +105,21 @@ class CollecteAutorisee
             return 'Votre compte n\'est rattaché à aucun pays. Contactez le support.';
         }
 
-        // Une collecte d'avant le rattachement : on ne la ferme pas, mais on
-        // n'ouvre pas non plus les frontières — seul son organisateur peut
-        // encore la régulariser. Elle reste accessible à son propre pays dès
-        // que le SQL l'aura renseignée.
-        if ($paysCollecte !== null && $paysCollecte !== $paysCotisant) {
+        // Une collecte d'avant le rattachement n'a pas de pays en colonne. La
+        // laisser passer l'ouvrirait à TOUS les pays qui encaissent — le trou
+        // exact que l'étanchéité cherche à fermer. On retombe donc sur son
+        // organisateur, qui est la source dont la colonne est elle-même
+        // recopiée : une collecte appartient à l'écosystème de qui l'a créée.
+        $paysCollecte ??= $this->paysDeLOrganisateur($cagnotte);
+
+        // Si même son organisateur n'est rattaché à rien, on ferme. Un pays
+        // qu'on ne sait pas nommer ne peut pas être comparé, et laisser passer
+        // reviendrait à ouvrir la frontière faute de savoir où elle est.
+        if ($paysCollecte === null) {
+            return 'Cette collecte est en cours de régularisation. Contactez le support.';
+        }
+
+        if ($paysCollecte !== $paysCotisant) {
             return 'Cette collecte n\'est pas accessible depuis votre pays.';
         }
 
@@ -119,6 +131,25 @@ class CollecteAutorisee
         }
 
         return null;
+    }
+
+    /**
+     * Le pays de l'organisateur, quand la collecte ne le porte pas encore.
+     *
+     * Lecture directe plutôt que par la relation : ce chemin sert aux
+     * collectes anciennes, et la relation n'est pas toujours chargée là où le
+     * refus est évalué. Toute absence — table, colonne, ligne — rend `null`,
+     * et c'est l'appelant qui ferme.
+     */
+    private function paysDeLOrganisateur(mixed $cagnotte): ?string
+    {
+        $userId = $cagnotte->user_id ?? null;
+
+        if ($userId === null || ! Schema::hasTable('users') || ! Schema::hasColumn('users', 'pays')) {
+            return null;
+        }
+
+        return DB::table('users')->where('id', $userId)->value('pays');
     }
 
     /**

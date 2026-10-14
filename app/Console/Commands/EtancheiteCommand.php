@@ -215,7 +215,28 @@ class EtancheiteCommand extends Command
     {
         $cagnottes = project_table('cagnottes');
 
-        if ($n = DB::table($cagnottes)->whereNull('pays')->count()) {
+        // Une collecte sans pays en colonne n'est pas forcément une impasse :
+        // la décision retombe sur l'organisateur (voir CollecteAutorisee). On
+        // sépare donc les deux cas, parce qu'ils ne demandent pas le même
+        // geste — l'un se régularise en recopiant un pays connu, l'autre
+        // exige d'abord de rattacher un compte.
+        if (Schema::hasTable('users') && Schema::hasColumn('users', 'pays')) {
+            $sansPays = DB::table($cagnottes . ' as c')
+                ->leftJoin('users as u', 'u.id', '=', 'c.user_id')
+                ->whereNull('c.pays')
+                ->selectRaw('count(*) total, count(u.pays) rattrapables')
+                ->first();
+
+            if ($bloquees = (int) $sansPays->total - (int) $sansPays->rattrapables) {
+                $this->impasses[] = "{$bloquees} collecte(s) sans pays et sans organisateur rattaché : "
+                    . 'personne ne pourra y cotiser.';
+            }
+
+            if ($n = (int) $sansPays->rattrapables) {
+                $this->impasses[] = "{$n} collecte(s) sans pays en colonne, tenues par celui de leur "
+                    . 'organisateur : à recopier pour ne pas dépendre du repli.';
+            }
+        } elseif ($n = DB::table($cagnottes)->whereNull('pays')->count()) {
             $this->impasses[] = "{$n} collecte(s) sans pays : personne ne pourra y cotiser.";
         }
 

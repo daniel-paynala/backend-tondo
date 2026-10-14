@@ -29,6 +29,10 @@ class SortiesPaysTest extends TestCase
             $t->string('id')->primary();
             $t->string('type_compte')->nullable();
             $t->timestamp('suspendu_at')->nullable();
+            // Le pays du compte : les décisions de sortie et de collecte le
+            // lisent ici. Sans la colonne, SQLite rend la chaîne « pays »
+            // au lieu d'échouer, et le repli n'est jamais exercé.
+            $t->string('pays')->nullable();
         });
         Schema::create('tondo_cagnottes', function ($t) {
             $t->string('id')->primary();
@@ -106,10 +110,34 @@ class SortiesPaysTest extends TestCase
         );
     }
 
+    public function test_une_collecte_sans_pays_suit_celui_de_son_organisateur(): void
+    {
+        // Symétrique du repli à l'entrée (CotisationPaysTest) : une collecte
+        // d'avant le rattachement doit pouvoir reverser, sinon elle encaisse
+        // sans jamais rendre — l'argent de ses cotisants resterait pris.
+        $this->pays('GA', ['payout' => true]);
+        DB::table('users')->where('id', $this->gerant)->update(['pays' => 'GA']);
+
+        $this->assertTrue($this->etat(null)['transfert']);
+    }
+
     public function test_une_collecte_sans_pays_ne_sort_pas(): void
     {
+        // Ni en colonne, ni chez l'organisateur : on ferme, faute de savoir
+        // où est la frontière.
         $this->pays('GA', ['payout' => true]);
 
         $this->assertFalse($this->etat(null)['transfert']);
+    }
+
+    public function test_sans_pays_nulle_part_la_raison_parle_de_regularisation(): void
+    {
+        // Et pas « aucun moyen de paiement local » : le pays du Gabon reverse
+        // très bien, c'est le rattachement de la collecte qui manque. Un
+        // message faux enverrait l'organisateur attendre une intégration qui
+        // existe déjà.
+        $this->pays('GA', ['payout' => true]);
+
+        $this->assertStringContainsString('régularisation', $this->etat(null)['raison']);
     }
 }

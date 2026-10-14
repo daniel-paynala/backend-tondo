@@ -34,6 +34,10 @@ class SuspensionOrganisateurTest extends TestCase
             $t->string('type_compte')->nullable();
             $t->timestamp('suspendu_at')->nullable();
             $t->string('suspendu_motif')->nullable();
+            // Le pays du compte : les décisions de sortie et de collecte le
+            // lisent ici. Sans la colonne, SQLite rend la chaîne « pays »
+            // au lieu d'échouer, et le repli n'est jamais exercé.
+            $t->string('pays')->nullable();
         });
 
         Schema::create('tondo_cagnottes', function ($t) {

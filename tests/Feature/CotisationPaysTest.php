@@ -123,14 +123,43 @@ class CotisationPaysTest extends TestCase
         $this->assertStringContainsString('support', $this->refus('GA', null));
     }
 
-    public function test_une_collecte_sans_pays_reste_ouverte_aux_siens(): void
+    public function test_une_collecte_sans_pays_suit_celui_de_son_organisateur(): void
     {
-        // Les collectes créées avant le rattachement. On ne les ferme pas :
-        // leur pays sera renseigné par le SQL, et d'ici là seul le défaut de
-        // capacité peut encore les bloquer.
+        // Les collectes créées avant le rattachement n'ont pas de pays en
+        // colonne. Elles restent ouvertes aux leurs, par le pays de celui qui
+        // les a créées.
         $this->pays('GA', ['payin' => true, 'payout' => true]);
+        $gerant = $this->cotisant('GA');
 
-        $this->assertNull($this->refus(null, 'GA'));
+        $this->assertNull(app(CollecteAutorisee::class)->refus(
+            $this->collecte(null, $gerant->id),
+            $this->cotisant('GA'),
+        ));
+    }
+
+    public function test_une_collecte_sans_pays_reste_fermee_aux_autres(): void
+    {
+        // La fuite que le repli ferme : sans lui, une collecte sans pays était
+        // atteignable depuis TOUS les pays qui encaissent, et l'étanchéité
+        // sautait silencieusement dès le deuxième pays ouvert.
+        $this->pays('GA', ['payin' => true]);
+        $this->pays('SN', ['payin' => true]);
+        $gerant = $this->cotisant('GA');
+
+        $this->assertStringContainsString('depuis votre pays', app(CollecteAutorisee::class)->refus(
+            $this->collecte(null, $gerant->id),
+            $this->cotisant('SN'),
+        ));
+    }
+
+    public function test_une_collecte_sans_pays_ni_organisateur_est_fermee(): void
+    {
+        // Un pays qu'on ne sait pas nommer ne se compare pas. On ferme plutôt
+        // que d'ouvrir faute de savoir où est la frontière, et le message dit
+        // que ça se règle avec le support — pas que c'est définitif.
+        $this->pays('GA', ['payin' => true]);
+
+        $this->assertStringContainsString('régularisation', $this->refus(null, 'GA'));
     }
 
     public function test_l_etancheite_prime_sur_la_capacite(): void
