@@ -197,7 +197,7 @@ class CotisationService
         // Garde de collecte (sécurité) : cagnotte publique validée par la
         // modération + association gérante approuvée (bloque en attente / rejetée
         // / suspendue).
-        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte)) {
+        if ($raison = app(\App\Services\CollecteAutorisee::class)->refus($cagnotte, $user)) {
             return ['statut' => 'erreur', 'message' => $raison];
         }
 
