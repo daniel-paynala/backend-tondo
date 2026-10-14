@@ -41,13 +41,25 @@ class ReconcilierPayinsCommand extends Command
 
         // Cible : les payin encore en attente. Soit un trans_id précis, soit la
         // fenêtre récente pour le balayage périodique.
-        $query = DB::table(project_table('payin'))->where('statut', 'initie');
+        // Colonnes QUALIFIÉES : la jointure sur les collectes ci-dessous
+        // ramène un `statut` et une `date_creation` homonymes, et Postgres
+        // refuse alors la requête entière (42702).
+        $payin = project_table('payin');
+        $query = DB::table($payin)->where("{$payin}.statut", 'initie');
         if ($transId) {
-            $query->where('trans_id', $transId);
+            $query->where("{$payin}.trans_id", $transId);
         } else {
-            $query->where('date_creation', '>=', now()->subDays($jours));
+            $query->where("{$payin}.date_creation", '>=', now()->subDays($jours));
         }
-        $payins = $query->orderBy('date_creation')->limit(500)->get();
+        // Le pays de la collecte vient avec, en une jointure : sans lui il
+        // faudrait une requête par encaissement pour savoir s'il faut
+        // l'interroger.
+        $cagnottes = project_table('cagnottes');
+        $payins = $query
+            ->leftJoin($cagnottes, "{$cagnottes}.id", '=', "{$payin}.cagnotte_id")
+            ->orderBy("{$payin}.date_creation")
+            ->limit(500)
+            ->get(["{$payin}.*", "{$cagnottes}.pays as cagnotte_pays"]);
 
         $this->info("Payin en 'initie' à revérifier : {$payins->count()}");
 
@@ -55,7 +67,21 @@ class ReconcilierPayinsCommand extends Command
         $attente  = 0;
         $echecs   = 0;
 
+        $capacites = app(\App\Services\CapacitesOperateur::class);
+
         foreach ($payins as $p) {
+            // N'interroger que les pays dont on sait encaisser.
+            //
+            // `verifierStatut` appelle l'agrégateur Airtel. Pour un
+            // encaissement d'un pays servi par une autre intégration, la
+            // question n'a pas de sens : on obtiendrait une erreur toutes les
+            // cinq minutes, sur chaque ligne, indéfiniment — et le journal
+            // d'erreurs cesserait d'être lisible.
+            if (! $capacites->pourLePays((string) $p->project_id, $p->cagnotte_pays ?? null)['payin']) {
+                $attente++;
+                continue;
+            }
+
             try {
                 // verifierStatut re-interroge Paynala et, sur SUCCESS, crédite via
                 // crediterSurSucces (claim atomique). Sur PENDING → laisse initie.

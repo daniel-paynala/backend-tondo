@@ -82,7 +82,23 @@ class TraiterReversementsAutoCagnottes extends Command
 
         $sorties = app(\App\Services\SortiesAutorisees::class);
 
+        $capacites = app(\App\Services\CapacitesOperateur::class);
+
         foreach ($cagnottes as $cagnotte) {
+            // Le pays de la collecte sait-il reverser ?
+            //
+            // Sans ce contrôle, une collecte d'un pays sans décaissement
+            // serait retentée CHAQUE SOIR, indéfiniment, avec une alerte à
+            // chaque échec — un bruit quotidien qui finirait par masquer les
+            // vraies pannes. Le verrou de création l'empêche désormais
+            // d'exister, mais une capacité peut aussi être retirée après coup.
+            if (! $capacites->pourLePays((string) $cagnotte->project_id, $cagnotte->pays)['payout']) {
+                $this->line("  {$cagnotte->reference} ignorée — aucun décaissement pour le pays "
+                    . ($cagnotte->pays ?? 'inconnu') . '.');
+                $ignores++;
+                continue;
+            }
+
             $mode = $this->determinerMode($cagnotte, $today);
 
             if (! $mode) {
