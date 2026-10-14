@@ -105,6 +105,10 @@ class AuthController extends Controller
         $data = $request->validate([
             'signalements' => ['required', 'boolean'],
             'problemes'    => ['required', 'boolean'],
+            // Facultatif : un dashboard pas encore à jour n'envoie pas la
+            // clé, et son absence ne doit pas faire échouer l'enregistrement
+            // des autres préférences.
+            'rapports'     => ['sometimes', 'boolean'],
             'autre'        => ['required', 'boolean'],
         ]);
 
@@ -112,6 +116,10 @@ class AuthController extends Controller
         $admin->notif_prefs = [
             'signalements' => $data['signalements'],
             'problemes'    => $data['problemes'],
+            // La valeur actuelle si le client ne l'envoie pas : écrire `false`
+            // par défaut couperait un rapport que personne n'a demandé à
+            // couper.
+            'rapports'     => $data['rapports'] ?? ($admin->notifPrefs()['rapports'] ?? true),
             'autre'        => $data['autre'],
         ];
         $admin->save();

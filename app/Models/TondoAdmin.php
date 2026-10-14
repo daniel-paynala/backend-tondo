@@ -53,6 +53,7 @@ class TondoAdmin extends Authenticatable
         'signalements' => true,   // Nouveaux signalements (cagnottes / utilisateurs)
         'problemes'    => true,   // Problèmes techniques / erreurs système
         'autre'        => true,   // Autres événements système
+        'rapports'     => true,   // Rapport d'activité quotidien
     ];
 
     /**
