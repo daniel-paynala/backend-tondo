@@ -110,6 +110,53 @@ class InscriptionEtrangereTest extends TestCase
         $reponse->assertStatus(200);
     }
 
+    public function test_l_adresse_peut_etre_exigee_la_ou_le_kyc_fonctionne(): void
+    {
+        // Le réglage demandé le 2026-10-15 : l'apparition du champ e-mail se
+        // commande, elle n'est plus seulement la conséquence d'un KYC absent.
+        $this->operateur('airtel', 'GA', '241', [
+            'kyc' => true, 'email_obligatoire' => true,
+        ], prefixes: ['077']);
+
+        // Le KYC est remplacé : un test ne doit pas appeler l'API d'un tiers.
+        // Sans ça celui-ci partait réellement sur le réseau — quatre secondes,
+        // et rouge dès qu'on travaille hors ligne.
+        $this->app->bind(\App\Services\PaynalaPaymentService::class, fn () => new class extends \App\Services\PaynalaPaymentService
+        {
+            public function __construct() {}
+
+            public function checkKycData(string $msisdn): ?array
+            {
+                return [
+                    'ok' => true, 'nom' => 'DOVI', 'prenom' => 'Daniel',
+                    'type_client' => 'particulier', 'type_compte' => 'particulier',
+                ];
+            }
+        });
+
+        $reponse = $this->getJson('/api/mobile/auth/kyc-check?numero=077607752');
+
+        $reponse->assertStatus(200);
+        $this->assertTrue(
+            $reponse->json('email_requis'),
+            'Cocher la case doit faire apparaître le champ, même quand le KYC réussit.',
+        );
+    }
+
+    public function test_sans_kyc_l_adresse_reste_exigee_meme_sans_la_case(): void
+    {
+        // L'exigence explicite AJOUTE, elle ne retire jamais : décocher la
+        // case ne doit pas rouvrir une inscription sans aucune trace
+        // d'identité là où l'opérateur ne vérifie rien.
+        $this->operateur('orange', 'SN', '221', [
+            'kyc' => false, 'email_obligatoire' => false,
+        ], prefixes: ['77']);
+
+        $reponse = $this->getJson('/api/mobile/auth/kyc-check?numero=771234567&indicatif=221');
+
+        $this->assertTrue($reponse->json('email_requis'));
+    }
+
     public function test_les_pays_servis_viennent_de_la_configuration(): void
     {
         $this->operateur('airtel', 'GA', '241', ['payin' => true, 'payout' => true]);

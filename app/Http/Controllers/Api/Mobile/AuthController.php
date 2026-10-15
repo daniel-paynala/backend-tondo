@@ -141,8 +141,8 @@ class AuthController extends Controller
                 // e-mail devient obligatoire, et le code part par les deux
                 // canaux. Mieux vaut une identité déclarée et deux voies de
                 // vérification qu'une porte fermée.
-                $aLeKyc = app(\App\Services\CapacitesOperateur::class)
-                    ->a($projectId, $operateur, $pays, 'kyc');
+                $registre = app(\App\Services\CapacitesOperateur::class);
+                $aLeKyc   = $registre->a($projectId, $operateur, $pays, 'kyc');
 
                 if ($aLeKyc) {
                     $msisdn = app(\App\Services\NumeroTelephone::class)->versLocal($phone);
@@ -152,10 +152,21 @@ class AuthController extends Controller
                             'numero' => 'Ce numéro ne possède pas de compte Mobile Money actif.',
                         ]);
                     }
-                } elseif (empty($data['email'])) {
-                    // Sans KYC, l'adresse est la seule trace vérifiable de
-                    // l'identité, et le seul canal de secours si le SMS se
-                    // perd — ce qui vient d'arriver une semaine durant.
+                }
+
+                // L'adresse est exigée pour l'une ou l'autre de ces raisons,
+                // et il suffit d'une : pas de KYC — elle est alors la seule
+                // trace déclarée de l'identité et le seul canal de secours si
+                // le SMS se perd, ce qui est arrivé une semaine durant — ou
+                // exigence posée dans le dashboard pour ce pays.
+                //
+                // Contrôlé ICI et pas seulement à l'écran : `kyc-check` guide
+                // le formulaire, il ne garantit rien. Un appel direct à
+                // l'inscription contournerait l'écran.
+                $emailExige = ! $aLeKyc
+                    || $registre->a($projectId, $operateur, $pays, 'email_obligatoire');
+
+                if ($emailExige && empty($data['email'])) {
                     throw ValidationException::withMessages([
                         'email' => 'Une adresse e-mail est nécessaire pour vous inscrire avec ce numéro.',
                     ]);
@@ -471,7 +482,22 @@ class AuthController extends Controller
         // Règle de Daniel du 2026-10-14 : on ne ferme plus la porte. On laisse
         // passer, et l'e-mail devient obligatoire — seule trace déclarée de
         // l'identité, et seul canal de secours si le SMS se perd.
-        if (! app(\App\Services\CapacitesOperateur::class)->a($projectId, $operateur, $pays, 'kyc')) {
+        $registre = app(\App\Services\CapacitesOperateur::class);
+
+        // Deux raisons distinctes de demander l'adresse, et il suffit d'une.
+        //
+        //  – pas de KYC : elle est la seule trace déclarée de l'identité ;
+        //  – exigence posée dans le dashboard pour ce couple opérateur/pays,
+        //    indépendamment du KYC. C'est un réglage, pas une conséquence :
+        //    on peut vouloir l'adresse là où le KYC existe déjà.
+        //
+        // L'exigence explicite AJOUTE, elle ne retire jamais : un opérateur
+        // sans KYC demande l'adresse même si personne n'a coché la case.
+        $aLeKyc      = $registre->a($projectId, $operateur, $pays, 'kyc');
+        $emailExige  = $registre->a($projectId, $operateur, $pays, 'email_obligatoire');
+        $emailRequis = ! $aLeKyc || $emailExige;
+
+        if (! $aLeKyc) {
             return response()->json([
                 'user_exists'  => false,
                 'operateur'    => $operateur,
@@ -538,6 +564,11 @@ class AuthController extends Controller
             'bloque'      => false,
             'nom'         => $kycData['nom']        ?? '',
             'prenom'      => $kycData['prenom']      ?? '',
+            // Le KYC a réussi, et l'adresse peut quand même être exigée : c'est
+            // un réglage du pays, pas une conséquence de l'absence de KYC.
+            // Sans cette ligne, cocher la case n'aurait eu aucun effet là où
+            // la vérification fonctionne — c'est-à-dire au Gabon.
+            'email_requis' => $emailRequis,
             'type_client' => $kycData['type_client'] ?? 'particulier',
             // Type de compte déduit du grade : l'app affichera quand même le
             // choix, mais un choix contraire sera refusé côté serveur.

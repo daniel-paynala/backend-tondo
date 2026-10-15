@@ -38,14 +38,33 @@ class CapacitesOperateur
      */
     public const CONNUES = [
         'kyc', 'verification_numero', 'payin', 'payout', 'frais', 'plafonds',
+        // Le septième n'est pas une capacité de l'intégration mais une EXIGENCE
+        // que nous posons : demander l'adresse à l'inscription. Il vit ici
+        // parce qu'il se règle au même endroit et pour le même couple
+        // opérateur/pays, et parce qu'une exigence oubliée doit valoir « non »
+        // comme le reste.
+        //
+        // Il n'a rien à voir avec l'envoi du code par courriel, qui se fait
+        // dès qu'une adresse est connue. Celui-ci ne décide que de
+        // l'APPARITION du champ dans le formulaire.
+        'email_obligatoire',
     ];
 
     /** Aucune capacité — l'état d'un opérateur dont on ne sait rien. */
-    private const AUCUNE = [
-        'kyc' => false, 'verification_numero' => false,
-        'payin' => false, 'payout' => false,
-        'frais' => false, 'plafonds' => false,
-    ];
+    /**
+     * Le registre vide : toutes les clés connues à faux.
+     *
+     * Dérivé de CONNUES plutôt que recopié. La liste existait en double, et
+     * ajouter une septième capacité d'un seul côté a cassé dix-neuf tests :
+     * le cumul lisait une clé que ce tableau n'avait pas. Une liste en double
+     * finit toujours par diverger — autant qu'il n'y en ait qu'une.
+     *
+     * @return array<string, bool>
+     */
+    private static function aucune(): array
+    {
+        return array_fill_keys(self::CONNUES, false);
+    }
 
     /** @var array<string, array<string, bool>> Mémoire d'instance. */
     private array $cache = [];
@@ -58,7 +77,7 @@ class CapacitesOperateur
     public function pour(string $projectId, ?string $operateur, ?string $pays): array
     {
         if ($operateur === null || $pays === null) {
-            return self::AUCUNE;
+            return self::aucune();
         }
 
         $cle = "{$projectId}|{$operateur}|{$pays}";
@@ -85,7 +104,7 @@ class CapacitesOperateur
     public function pourLePays(string $projectId, ?string $pays): array
     {
         if ($pays === null) {
-            return self::AUCUNE;
+            return self::aucune();
         }
 
         $cle = "{$projectId}|*|{$pays}";
@@ -102,7 +121,7 @@ class CapacitesOperateur
             })
             ->pluck('capacites');
 
-        $cumul = self::AUCUNE;
+        $cumul = self::aucune();
         foreach ($lignes as $brut) {
             foreach ($this->decoder($brut) as $capacite => $valeur) {
                 $cumul[$capacite] = $cumul[$capacite] || $valeur;
@@ -166,15 +185,15 @@ class CapacitesOperateur
     private function decoder(mixed $brut): array
     {
         if ($brut === null) {
-            return self::AUCUNE;
+            return self::aucune();
         }
 
         $decode = is_array($brut) ? $brut : json_decode((string) $brut, true);
         if (! is_array($decode)) {
-            return self::AUCUNE;
+            return self::aucune();
         }
 
-        $capacites = self::AUCUNE;
+        $capacites = self::aucune();
         foreach (self::CONNUES as $capacite) {
             $capacites[$capacite] = ($decode[$capacite] ?? false) === true;
         }
