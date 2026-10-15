@@ -56,8 +56,18 @@ class OperateurDetectorService
             $prefixes = is_array($config->prefixes) ? $config->prefixes : [];
             foreach ($prefixes as $prefix) {
                 $prefix = (string) $prefix;
-                // La partie locale avec zéro commence-t-elle par ce préfixe ?
-                if (str_starts_with($localAvecZero, $prefix)) {
+                // Les deux écritures du numéro local, parce que la convention
+                // change d'un pays à l'autre : au Gabon on écrit « 077 », au
+                // Sénégal « 77 ». Ne comparer qu'à la forme avec zéro était
+                // une hypothèse gabonaise de plus — un préfixe sénégalais ne
+                // pouvait jamais correspondre, et le numéro était déclaré
+                // rattaché à aucun opérateur connu.
+                //
+                // Essayer les deux ne crée pas d'ambiguïté : un préfixe est
+                // comparé au numéro du même pays, celui dont l'indicatif vient
+                // d'être reconnu.
+                if (str_starts_with($localAvecZero, $prefix)
+                    || str_starts_with($localSansZero, $prefix)) {
                     return [
                         'operateur' => $config->operateur, // Ex : 'airtel'.
                         'pays'      => $config->pays,      // Ex : 'GA'.

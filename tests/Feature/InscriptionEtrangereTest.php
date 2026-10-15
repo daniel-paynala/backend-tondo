@@ -84,6 +84,21 @@ class InscriptionEtrangereTest extends TestCase
         );
     }
 
+    public function test_un_numero_senegalais_trouve_son_operateur(): void
+    {
+        // La validation ne suffisait pas : la détection ajoutait un zéro
+        // devant le numéro local — « 077 » au Gabon — et un préfixe
+        // sénégalais écrit « 77 » ne pouvait jamais correspondre.
+        $this->operateur('orange', 'SN', '221', prefixes: ['77', '78']);
+
+        $reponse = $this->getJson('/api/mobile/auth/kyc-check?numero=771234567&indicatif=221');
+
+        $reponse->assertStatus(200);
+        $this->assertSame('orange', $reponse->json('operateur'));
+        $this->assertFalse($reponse->json('bloque'), 'Un pays sans KYC laisse passer, en mode dégradé.');
+        $this->assertTrue($reponse->json('email_requis'), 'Sans KYC, l\'adresse devient obligatoire.');
+    }
+
     public function test_le_numero_gabonais_habituel_passe_toujours(): void
     {
         // Les versions déjà publiées n'envoient pas d'indicatif : elles
