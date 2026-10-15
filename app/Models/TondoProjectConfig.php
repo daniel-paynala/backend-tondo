@@ -183,6 +183,18 @@ class TondoProjectConfig extends Model
             $row->logo = $data['logo'] ?: null;
         }
 
+        // Capacités : même prudence que le logo — une clé absente laisse la
+        // valeur en place, car tous les appelants n'envoient pas le registre.
+        //
+        // C'est ce qui manquait : le dashboard pouvait poster des capacités,
+        // elles étaient validées, puis jetées ici. Tout opérateur créé depuis
+        // l'écran naissait donc avec `capacites` à NULL — donc sans aucune
+        // capacité, donc invisible pour l'application, sans qu'aucun réglage
+        // ne permette d'y remédier.
+        if (array_key_exists('capacites', $data)) {
+            $row->capacites = $data['capacites'] ?: null;
+        }
+
         $row->save();
 
         return $row;
