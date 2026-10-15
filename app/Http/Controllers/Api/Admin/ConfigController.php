@@ -50,12 +50,17 @@ class ConfigController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $rows = $this->svc->listOperatorConfigs($request->user()->project_id);
+        // Résolus AVANT la boucle, et capturés explicitement : la fermeture
+        // n'hérite de rien du contexte en PHP. Sans le `use`, `$request` y
+        // était indéfini et la page entière tombait en 500.
+        $projectId = $request->user()->project_id;
+        $registre  = app(\App\Services\CapacitesOperateur::class);
+
+        $rows = $this->svc->listOperatorConfigs($projectId);
 
         // Ajout du statut d'intégration pour que le dashboard affiche un badge visuel.
-        $enriched = $rows->map(function (array $op): array {
-            $capacites = app(\App\Services\CapacitesOperateur::class)
-                ->pour($request->user()->project_id, $op['operateur'] ?? null, $op['pays'] ?? null);
+        $enriched = $rows->map(function (array $op) use ($projectId, $registre): array {
+            $capacites = $registre->pour($projectId, $op['operateur'] ?? null, $op['pays'] ?? null);
 
             $op['capacites'] = $capacites;
             // Opérationnel = sait encaisser ET reverser. L'un sans l'autre
