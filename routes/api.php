@@ -296,6 +296,11 @@ Route::prefix('mobile')->group(function () {
     // Appelé dès que le champ téléphone atteint 9 chiffres — pas d'auth
     Route::get('/auth/kyc-check',    [MobileAuthController::class, 'kycCheck'])->middleware('throttle:kyc-check');
 
+    // Les pays servis, pour le sélecteur d'indicatif de l'inscription. Public :
+    // il est lu AVANT qu'un compte existe. Lu depuis la configuration, pour
+    // qu'ouvrir un pays dans le dashboard suffise à le faire apparaître.
+    Route::get('/pays', [\App\Http\Controllers\Api\Mobile\PaysController::class, 'index']);
+
     // Protégé par token Sanctum (guard mobile)
     // CGU rendues depuis la config opérateur — PUBLIQUE : elles se lisent à
     // l'inscription, avant d'avoir un compte. L'acceptation, elle, est

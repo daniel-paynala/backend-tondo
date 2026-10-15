@@ -359,12 +359,25 @@ class AuthController extends Controller
     public function kycCheck(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'numero' => ['required', 'string', 'regex:/^0\d{8}$/'],
+            // Même gabarit que `request-otp` et `verify-otp` : un numéro local
+            // de longueur variable, et l'indicatif à part. Le motif gabonais
+            // « 0 + 8 chiffres » était gravé ici, et il refusait tout numéro
+            // étranger avant même la moindre vérification.
+            'numero'    => ['required', 'string', 'regex:/^\d{6,12}$/'],
+            // Facultatif : les versions déjà publiées ne l'envoient pas, et
+            // elles doivent continuer de fonctionner au Gabon.
+            'indicatif' => ['nullable', 'string', 'regex:/^\+?\d{1,4}$/'],
         ]);
 
         $projectId = Project::tondoId();
-        $msisdn    = $data['numero'];           // 0XXXXXXXX
-        $phoneE164 = '+241' . substr($msisdn, 1);
+        $msisdn    = $data['numero'];
+
+        // La conversion passe par le service, qui respecte un indicatif déjà
+        // présent dans la saisie. Concaténer « +241 » en dur réécrivait un
+        // numéro sénégalais en numéro gabonais — le compte était alors créé
+        // sur un numéro qui n'existe pas, et l'OTP partait dans le vide.
+        $phoneE164 = app(\App\Services\NumeroTelephone::class)
+            ->versE164($msisdn, $data['indicatif'] ?? '241');
 
         // ── 0. Numéro de test (revue Apple / Google) ─────────────────────────
         // Placé AVANT toute autre vérification, à dessein.
@@ -420,13 +433,16 @@ class AuthController extends Controller
         $detected = app(OperateurDetectorService::class)->detect($projectId, $phoneE164);
 
         if (! $detected) {
-            // Préfixe non configuré → seul Airtel est accepté pour l'instant
+            // Préfixe non configuré. Le message nommait « Airtel Money », ce
+            // qui est faux dès qu'un deuxième pays existe : l'utilisateur
+            // sénégalais lisait qu'il lui fallait un opérateur gabonais.
             return response()->json([
                 'user_exists' => false,
                 'operateur'   => null,
                 'kyc_ok'      => null,
                 'bloque'      => true,
-                'message'     => 'Le numéro doit être Airtel Money.',
+                'message'     => 'Ce numéro n\'est rattaché à aucun opérateur connu. '
+                    . 'Vérifiez le pays et le numéro saisis.',
             ]);
         }
 
