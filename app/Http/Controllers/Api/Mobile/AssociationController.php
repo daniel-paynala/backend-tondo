@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\TondoOrganisation;
+use App\Services\CapacitesOperateur;
+use App\Services\NumeroTelephone;
+use App\Services\OperateurDetectorService;
 use App\Services\PaynalaPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -59,11 +62,40 @@ class AssociationController extends Controller
         $user   = $request->user();
         $choisi = $data['type_compte'];
 
+        // ── L'opérateur sait-il vérifier une identité ? ─────────────────────
+        //
+        // Ce contrôle croisé interrogeait le KYC Airtel POUR TOUT LE MONDE.
+        // Sur un numéro sénégalais, Airtel ne connaît rien, rend `null`, et
+        // l'appel partait en 422 « vérification temporairement indisponible ».
+        // L'application avale cette erreur en silence : le type restait nul,
+        // et le gate du routeur reposait la question du type de compte à un
+        // utilisateur qui venait d'y répondre.
+        //
+        // Là où aucune vérification n'existe, on retient la DÉCLARATION — même
+        // règle que l'inscription elle-même depuis le 2026-10-14 : mieux vaut
+        // une identité déclarée qu'une porte fermée. Là où elle existe, elle
+        // reste obligatoire : le contrôle croisé plus bas est inchangé.
+        $detecte   = app(OperateurDetectorService::class)
+            ->detect($user->project_id, (string) $user->numero);
+        $aLeKyc = app(CapacitesOperateur::class)->a(
+            (string) $user->project_id,
+            $detecte['operateur'] ?? null,
+            $detecte['pays'] ?? null,
+            'kyc',
+        );
+
+        if (! $aLeKyc) {
+            $user->type_compte = $choisi;
+            $user->save();
+
+            return response()->json(['user' => $user->toApiArray()]);
+        }
+
         // Numéro local 0XXXXXXXX : c'est sous cette forme que le KYC a été mis
-        // en cache à l'inscription, quelques instants plus tôt.
-        $msisdn = str_starts_with((string) $user->numero, '+241')
-            ? '0' . substr((string) $user->numero, 4)
-            : ltrim((string) $user->numero, '+');
+        // en cache à l'inscription, quelques instants plus tôt. Passe par le
+        // service plutôt que par un découpage sur « +241 », qui ne valait que
+        // pour le Gabon.
+        $msisdn = app(NumeroTelephone::class)->versLocal((string) $user->numero);
 
         $kyc = app(PaynalaPaymentService::class)->checkKycData($msisdn);
 
