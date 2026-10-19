@@ -47,7 +47,7 @@ class EcheancesCagnottesCommand extends Command
         $cagnottes = DB::table(project_table('cagnottes'))
             ->where('type', EcheanceCagnotte::TYPE_CONCERNE)
             ->whereIn('statut', ['active', 'en_cours'])
-            ->get(['id', 'project_id', 'user_id', 'reference', 'nom', 'type',
+            ->get(['id', 'project_id', 'user_id', 'reference', 'titre', 'type',
                    'statut', 'date_creation', 'date_fin', 'date_echeance']);
 
         $poses = 0;
@@ -129,7 +129,7 @@ class EcheancesCagnottesCommand extends Command
         }
 
         $quand  = $this->enClair($palier);
-        $nom    = $cagnotte->nom ?: "la cagnotte {$cagnotte->reference}";
+        $nom    = $cagnotte->titre ?: "la cagnotte {$cagnotte->reference}";
         $titre  = 'Clôture dans ' . $quand;
         $corps  = "« {$nom} » sera clôturée dans {$quand}. Les fonds collectés "
             . 'seront automatiquement reversés sur le numéro de retrait.';

@@ -55,7 +55,9 @@ class RappelsEcheanceTest extends TestCase
             $t->string('project_id');
             $t->string('user_id');
             $t->string('reference');
-            $t->string('nom')->nullable();
+            // `titre`, comme en base : une fixture qui invente un nom de
+            // colonne fait passer le test et casser la production.
+            $t->string('titre')->nullable();
             $t->string('type');
             $t->string('statut');
             $t->timestamp('date_creation');
@@ -127,7 +129,7 @@ class RappelsEcheanceTest extends TestCase
         DB::table('tondo_cagnottes')->insert([
             'id' => $id, 'project_id' => $this->projet, 'user_id' => $userId,
             'reference' => (string) random_int(100000, 999999),
-            'nom' => 'Mariage de Fidèle', 'type' => 'cagnotte_ouverte', 'statut' => 'active',
+            'titre' => 'Mariage de Fidèle', 'type' => 'cagnotte_ouverte', 'statut' => 'active',
             'date_creation' => now()->timezone('Africa/Libreville')->startOfDay()
                 ->addDays($dans)->subDays(self::DUREE),
         ]);
@@ -213,7 +215,7 @@ class RappelsEcheanceTest extends TestCase
         $id = (string) Str::uuid();
         DB::table('tondo_cagnottes')->insert([
             'id' => $id, 'project_id' => $this->projet, 'user_id' => $userId,
-            'reference' => '123456', 'nom' => 'Rentrée', 'type' => 'cagnotte_ouverte',
+            'reference' => '123456', 'titre' => 'Rentrée', 'type' => 'cagnotte_ouverte',
             'statut' => 'active', 'date_creation' => now()->subDays(10),
         ]);
 
