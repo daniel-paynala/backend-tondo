@@ -103,10 +103,16 @@ class EcheanceCagnotte
      */
     public function pourAffichage(mixed $cagnotte, ?int $jours, Carbon $aujourdhui): ?string
     {
-        if (! empty($cagnotte->date_echeance)) {
-            return $this->effective($cagnotte);
-        }
-
+        // On RECALCULE toujours, au lieu de préférer la colonne dès qu'elle
+        // existe. Cette préférence figeait l'écran : une durée changée dans le
+        // back-office n'apparaissait jamais, puisque la colonne gardait la
+        // valeur du dernier passage — et sur un environnement sans
+        // planificateur, ce passage peut ne jamais revenir.
+        //
+        // Recalculer ne contredit pas la colonne : `calculer()` la relit pour
+        // préserver le répit, et rend exactement ce que le prochain passage
+        // écrira. L'écran annonce donc ce qui VA se produire, pas ce qu'on
+        // avait cru un jour.
         $dates = [];
 
         if (! empty($cagnotte->date_fin)) {
