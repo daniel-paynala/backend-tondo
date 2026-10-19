@@ -142,6 +142,44 @@ class EcheanceCagnotteTest extends TestCase
         );
     }
 
+    public function test_la_date_s_affiche_avant_meme_que_le_cron_soit_passe(): void
+    {
+        // Le défaut trouvé le 2026-10-19 : la durée était réglée, et l'app
+        // n'affichait rien — la colonne n'est écrite que par le passage de 8 h.
+        $service = $this->service(365);
+
+        $this->assertSame(
+            '2027-07-01',
+            $service->pourAffichage($this->cagnotte('2026-07-01'), 365, $this->aujourdhui),
+            'La date montrée doit être celle que le prochain passage écrira.',
+        );
+    }
+
+    public function test_l_affichage_respecte_le_repit(): void
+    {
+        // Même avec rien en base, une cagnotte trop vieille montre la date de
+        // grâce — pas une date passée qui laisserait croire à une fermeture
+        // imminente.
+        $service = $this->service(30);
+
+        $this->assertSame(
+            '2026-11-18',
+            $service->pourAffichage($this->cagnotte('2026-01-01'), 30, $this->aujourdhui),
+        );
+    }
+
+    public function test_l_affichage_prefere_la_colonne_quand_elle_existe(): void
+    {
+        // La colonne fait foi dès qu'elle est posée : c'est elle que le cron
+        // de clôture lira, l'écran ne doit pas annoncer autre chose.
+        $service = $this->service(365);
+
+        $this->assertSame(
+            '2026-11-18',
+            $service->pourAffichage($this->cagnotte('2026-07-01', echeance: '2026-11-18'), 365, $this->aujourdhui),
+        );
+    }
+
     public function test_les_paliers_tombent_sur_le_jour_exact(): void
     {
         $service = $this->service(30);

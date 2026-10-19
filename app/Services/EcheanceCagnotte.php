@@ -72,9 +72,53 @@ class EcheanceCagnotte
      */
     public function dureeMax(string $projectId): ?int
     {
+        // Mémorisé : le sérialiseur des collectes appelle ceci une fois par
+        // cagnotte, et une liste de trente en ferait trente requêtes pour une
+        // valeur qui ne bouge pas au sein d'une même requête.
+        if (array_key_exists($projectId, $this->dureeParProjet)) {
+            return $this->dureeParProjet[$projectId];
+        }
+
         $jours = $this->config->getOperatorConfig($projectId)['duree_max_cagnotte_jours'] ?? null;
 
-        return $jours ? (int) $jours : null;
+        return $this->dureeParProjet[$projectId] = $jours ? (int) $jours : null;
+    }
+
+    /** @var array<string, ?int> */
+    private array $dureeParProjet = [];
+
+    /**
+     * La date de clôture à MONTRER, même si rien n'est encore écrit en base.
+     *
+     * `date_echeance` n'est posée que par le passage quotidien. S'en tenir à
+     * elle ferait qu'un réglage posé le matin, ou une cagnotte créée dans la
+     * journée, n'afficheraient aucune date avant le lendemain — l'utilisateur
+     * réglerait quelque chose et ne verrait rien.
+     *
+     * Le calcul rendu ici est exactement celui que le passage écrira, grâce
+     * compris. La colonne reste la matérialisation : c'est elle, et elle
+     * seule, qui fait foi pour FERMER — sans quoi une cagnotte déjà trop
+     * vieille serait close le soir même, avant que le moindre rappel ne soit
+     * parti.
+     */
+    public function pourAffichage(mixed $cagnotte, ?int $jours, Carbon $aujourdhui): ?string
+    {
+        if (! empty($cagnotte->date_echeance)) {
+            return $this->effective($cagnotte);
+        }
+
+        $dates = [];
+
+        if (! empty($cagnotte->date_fin)) {
+            $dates[] = Carbon::parse($cagnotte->date_fin)
+                ->timezone('Africa/Libreville')->toDateString();
+        }
+
+        if (($calculee = $this->calculer($cagnotte, $jours, $aujourdhui)) !== null) {
+            $dates[] = $calculee;
+        }
+
+        return $dates ? min($dates) : null;
     }
 
     /**

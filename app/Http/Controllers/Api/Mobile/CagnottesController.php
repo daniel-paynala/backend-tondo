@@ -1405,7 +1405,19 @@ class CagnottesController extends Controller
             // obligerait l'application à refaire le calcul du minimum, et la
             // règle vivrait à deux endroits — celui qui change et celui qu'on
             // oublie.
-            'date_cloture_auto'     => app(\App\Services\EcheanceCagnotte::class)->effective($c),
+            'date_cloture_auto'     => (function () use ($c) {
+                $service = app(\App\Services\EcheanceCagnotte::class);
+
+                // `pourAffichage` et non `effective` : la colonne n'est écrite
+                // que par le passage quotidien, et s'en tenir à elle ferait
+                // qu'une durée réglée le matin n'apparaîtrait que le
+                // lendemain. Le calcul rendu est celui que le passage écrira.
+                return $service->pourAffichage(
+                    $c,
+                    $service->dureeMax((string) $c->project_id),
+                    now()->timezone('Africa/Libreville')->startOfDay(),
+                );
+            })(),
             'montant_par_cycle'     => $c->montant_par_cycle,
             'periodicite'           => $c->periodicite,
             'intervalle'            => $c->intervalle,
