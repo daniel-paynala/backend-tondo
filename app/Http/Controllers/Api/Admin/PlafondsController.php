@@ -8,7 +8,6 @@ use App\Models\TondoProjectConfig;
 use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Plafonds TOTAUX de collecte d'une cagnotte (particulier / association).
@@ -26,10 +25,6 @@ class PlafondsController extends Controller
         return response()->json([
             'plafond_cagnotte_particulier' => (int) ($config['plafond_cagnotte_particulier'] ?? 2500000),
             'plafond_cagnotte_association' => (int) ($config['plafond_cagnotte_association'] ?? 10000000),
-            // Jamais converti en entier : `null` doit rester `null` jusqu'à
-            // l'écran, sans quoi « aucune limite » s'afficherait comme « 0
-            // jour » — l'exact contraire.
-            'duree_max_cagnotte_jours'     => $config['duree_max_cagnotte_jours'] ?? null,
         ]);
     }
 
@@ -45,17 +40,6 @@ class PlafondsController extends Controller
         $data = $request->validate([
             'plafond_cagnotte_particulier' => ['required', 'integer', 'min:1000', 'max:1000000000'],
             'plafond_cagnotte_association' => ['required', 'integer', 'min:1000', 'max:1000000000'],
-            // Durée de vie maximale d'une cagnotte ouverte, en jours.
-            //
-            // `nullable` est le cœur du réglage : une valeur vide vaut AUCUNE
-            // limite, et doit pouvoir être reposée pour annuler la mesure. La
-            // rendre obligatoire interdirait de revenir en arrière.
-            //
-            // Plancher à 7 jours : en deçà, les rappels n'ont pas le temps de
-            // se dérouler et l'organisateur verrait sa cagnotte fermer presque
-            // sans préavis. Plafond à 10 ans, qui n'est pas une limite mais un
-            // garde-fou contre la faute de frappe.
-            'duree_max_cagnotte_jours'     => ['nullable', 'integer', 'min:7', 'max:3650'],
         ]);
 
         // Applique à toutes les config du projet (Tonji = airtel/GA) pour rester
@@ -63,12 +47,6 @@ class PlafondsController extends Controller
         $maj = TondoProjectConfig::where('project_id', Project::tondoId())->update([
             'plafond_cagnotte_particulier' => $data['plafond_cagnotte_particulier'],
             'plafond_cagnotte_association' => $data['plafond_cagnotte_association'],
-            // `array_key_exists` et non `??` : la clé absente veut dire « ne
-            // touche pas », la clé à null veut dire « retire la limite ». Les
-            // confondre rendrait la suppression impossible.
-            'duree_max_cagnotte_jours'     => array_key_exists('duree_max_cagnotte_jours', $data)
-                ? $data['duree_max_cagnotte_jours']
-                : DB::raw('duree_max_cagnotte_jours'),
             'updated_at' => now(),
         ]);
 
@@ -82,7 +60,6 @@ class PlafondsController extends Controller
             'message'                      => 'Plafonds mis à jour.',
             'plafond_cagnotte_particulier' => $data['plafond_cagnotte_particulier'],
             'plafond_cagnotte_association' => $data['plafond_cagnotte_association'],
-            'duree_max_cagnotte_jours'     => $data['duree_max_cagnotte_jours'] ?? null,
         ]);
     }
 
@@ -120,6 +97,10 @@ class PlafondsController extends Controller
             'cotisations_bloquees' => $config['cotisations_bloquees']
                 ?? TondoProjectConfig::COLLECTES_OUVERTES,
             // Collectes actives par organisateur.
+            // Jamais converti en entier : `null` doit rester `null` jusqu'à
+            // l'écran, sans quoi « aucune limite » s'afficherait « 0 jour » —
+            // l'exact contraire.
+            'duree_max_cagnotte_jours' => $config['duree_max_cagnotte_jours'] ?? null,
             'max_cagnottes_actives' => (int) ($config['max_cagnottes_actives']
                 ?? TondoProjectConfig::MAX_CAGNOTTES_ACTIVES),
         ]);
@@ -168,6 +149,17 @@ class PlafondsController extends Controller
             // de créer quoi que ce soit, ce qui n'est pas un réglage mais une
             // panne. Le maximum garde le champ dans le raisonnable.
             'max_cagnottes_actives' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            // Durée de vie maximale d'une cagnotte ouverte, en jours.
+            //
+            // `nullable` est le cœur du réglage : vide vaut AUCUNE limite, et
+            // doit pouvoir être reposé pour annuler la mesure. L'exiger
+            // interdirait de revenir en arrière.
+            //
+            // Plancher à 7 jours : en deçà, les cinq rappels n'ont pas le
+            // temps de se dérouler et l'organisateur verrait sa cagnotte
+            // fermer presque sans préavis. Plafond à dix ans, qui n'est pas
+            // une limite mais un garde-fou contre la faute de frappe.
+            'duree_max_cagnotte_jours' => ['sometimes', 'nullable', 'integer', 'min:7', 'max:3650'],
         ]);
 
         $champs  = ['updated_at' => now()];
@@ -198,6 +190,15 @@ class PlafondsController extends Controller
         if (array_key_exists('franchise_retrait', $data)) {
             $champs['franchise_retrait'] = (int) $data['franchise_retrait'];
         }
+        // `array_key_exists` et non `??` : la clé absente veut dire « ne touche
+        // pas », la clé à null veut dire « retire la limite ». Les confondre
+        // rendrait la suppression du réglage impossible.
+        if (array_key_exists('duree_max_cagnotte_jours', $data)) {
+            $champs['duree_max_cagnotte_jours'] = $data['duree_max_cagnotte_jours'] !== null
+                ? (int) $data['duree_max_cagnotte_jours']
+                : null;
+        }
+
         if (array_key_exists('max_cagnottes_actives', $data)) {
             $champs['max_cagnottes_actives'] = (int) $data['max_cagnottes_actives'];
         }
