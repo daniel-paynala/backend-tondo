@@ -148,6 +148,21 @@ class RappelsEcheanceTest extends TestCase
         $this->assertSame('7', $this->pushEnvoyes[0]['palier']);
     }
 
+    public function test_le_rappel_porte_de_quoi_ouvrir_la_collecte(): void
+    {
+        // Sans l'identifiant, le tap renvoyait à l'accueil : l'organisateur
+        // devait retrouver lui-même la collecte dont on venait de lui
+        // annoncer la fermeture.
+        $this->reglage(self::DUREE);
+        $id = $this->cagnotte(7);
+
+        $this->artisan('tonji:echeances-cagnottes')->assertSuccessful();
+
+        $this->assertSame('echeance_cagnotte', $this->pushEnvoyes[0]['type']);
+        $this->assertSame($id, $this->pushEnvoyes[0]['cagnotte_id']);
+        $this->assertNotEmpty($this->pushEnvoyes[0]['reference']);
+    }
+
     public function test_aucun_rappel_un_jour_qui_n_est_pas_un_palier(): void
     {
         $this->reglage(self::DUREE);

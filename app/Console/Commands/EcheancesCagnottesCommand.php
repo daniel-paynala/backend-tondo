@@ -135,9 +135,15 @@ class EcheancesCagnottesCommand extends Command
             . 'seront automatiquement reversés sur le numéro de retrait.';
 
         $push->notifyOne((string) $cagnotte->user_id, $titre, $corps, [
-            'type'      => 'echeance_cagnotte',
-            'cagnotte'  => (string) $cagnotte->reference,
-            'palier'    => (string) $palier,
+            'type'        => 'echeance_cagnotte',
+            // L'identifiant ET la référence : l'app ouvre le détail par
+            // l'identifiant, l'humain reconnaît la collecte à sa référence.
+            // N'envoyer que la seconde renvoyait le rappel vers l'accueil, et
+            // l'organisateur devait retrouver lui-même la collecte dont on
+            // venait de lui annoncer la fermeture.
+            'cagnotte_id' => (string) $cagnotte->id,
+            'reference'   => (string) $cagnotte->reference,
+            'palier'      => (string) $palier,
         ]);
 
         if ($email) {
