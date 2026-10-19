@@ -276,6 +276,7 @@ final class Registre
         'tonji:agreger-evenements'     => 'chaque jour à 02:00',
         'tonji:sante'                  => 'chaque jour à 07:00',
         'tonji:rapport-activite'       => 'chaque jour à 07:05',
+        'tonji:echeances-cagnottes'    => 'chaque jour à 08:00',
         'queue:work'                   => 'chaque minute',
     ];
 
@@ -289,6 +290,7 @@ final class Registre
     public const RETARD_TOLERE = [
         'tontines:traiter-retraits'    => 93600,  // 26 h
         'cotisations:reversements-auto' => 93600, // 26 h
+        'tonji:echeances-cagnottes'     => 93600, // 26 h
         'tontines:rappels'             => 93600,  // 26 h
         'tondo:verifier-paiements'     => 300,    // 5 min
         'tonji:reconcilier-payins'     => 900,    // 15 min

@@ -29,6 +29,21 @@ Artisan::command('inspire', function () {
 /*
  * Retrait automatique des tontines périodiques — 20h heure de Libreville.
  */
+// ─────────────────────────────────────────────────────────────────────────────
+// Échéances des cagnottes — chaque jour à 08h00
+//
+// Recalcule l'échéance de chaque cagnotte ouverte depuis la durée maximale
+// réglée dans le back-office, et envoie les rappels (J-30, J-14, J-7, J-3,
+// J-1). AVANT le reversement de 18 h : un réglage changé le matin produit
+// ainsi les bons rappels le jour même, et la clôture reste au cron qui sait
+// déjà déplacer de l'argent.
+// ─────────────────────────────────────────────────────────────────────────────
+Schedule::command(\App\Console\Commands\EcheancesCagnottesCommand::class)
+    ->dailyAt('08:00')
+    ->timezone('Africa/Libreville')
+    ->withoutOverlapping()
+    ->runInBackground();
+
 Schedule::command(TraiterRetraitsTontines::class)
     ->dailyAt('20:00')
     ->timezone('Africa/Libreville')
