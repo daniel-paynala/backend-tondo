@@ -1417,6 +1417,15 @@ class CagnottesController extends Controller
             'total_a_envoyer'       => $c->total_a_envoyer,
             'montant_cible'         => $c->montant_cible,
             'date_fin'              => $c->date_fin?->toIso8601String(),
+            // LA date qui fermera la cagnotte : la plus proche entre celle que
+            // l'organisateur s'est donnée et l'échéance dérivée de la durée
+            // maximale réglée dans le back-office.
+            //
+            // Une seule date est envoyée, déjà arbitrée. Transmettre les deux
+            // obligerait l'application à refaire le calcul du minimum, et la
+            // règle vivrait à deux endroits — celui qui change et celui qu'on
+            // oublie.
+            'date_cloture_auto'     => app(\App\Services\EcheanceCagnotte::class)->effective($c),
             'montant_par_cycle'     => $c->montant_par_cycle,
             'periodicite'           => $c->periodicite,
             'intervalle'            => $c->intervalle,

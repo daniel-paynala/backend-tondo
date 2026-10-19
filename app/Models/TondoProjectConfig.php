@@ -117,6 +117,10 @@ class TondoProjectConfig extends Model
             // pas n'est pas une limite, c'est une impasse : elle vit donc en
             // base, et le code ne porte qu'un défaut.
             'max_cagnottes_actives' => (int) ($this->max_cagnottes_actives ?? self::MAX_CAGNOTTES_ACTIVES),
+            // Durée de vie maximale d'une cagnotte ouverte, en jours. NULL est
+            // une valeur à part entière : aucune limite. La convertir en 0
+            // fermerait tout le parc le soir même.
+            'duree_max_cagnotte_jours' => $this->duree_max_cagnotte_jours ?? null,
             'plafond_par_envoi'  => $this->plafond_par_envoi,
             'plafond_journalier' => $this->plafond_journalier,
             'plafond_cagnotte_particulier' => (int) ($this->plafond_cagnotte_particulier ?? 2500000),

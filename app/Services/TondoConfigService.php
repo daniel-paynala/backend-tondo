@@ -57,6 +57,8 @@ class TondoConfigService
             'plafond_frais_retrait' => (int) ($c['plafond_frais_retrait'] ?? 0),
             'franchise_retrait'     => (int) ($c['franchise_retrait'] ?? 0),
             'tranches'           => $c['tranches'] ?? [],
+            // Aucune durée maximale tant qu'aucune n'est réglée en base.
+            'duree_max_cagnotte_jours' => null,
         ];
     }
 

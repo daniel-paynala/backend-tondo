@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -77,6 +78,24 @@ class WirepickSmsService
     {
         // Wirepick n'accepte pas le `+` — on le retire.
         $phone = ltrim($phoneE164, '+');
+
+        // ── Pas un seul caractère accentué dans un SMS ──────────────────────
+        //
+        // Un accent fait basculer le message de l'alphabet GSM-7 vers l'UCS-2,
+        // et quelque chose en aval de Wirepick le perd : le message est
+        // accepté, facturé, annoncé « DLG » — et n'arrive jamais.
+        //
+        // Ce n'est pas une hypothèse. Du 7 au 14 octobre 2026, AUCUN OTP n'a
+        // été délivré, parce que le texte disait « Votre code de vérification ».
+        // La même phrase écrite « verification » est arrivée dans la seconde.
+        // Vérifié deux fois sur le même téléphone, le 2026-10-14.
+        //
+        // La translittération vaut pour TOUS les SMS, pas seulement les codes :
+        // les messages de retrait passent par ici aussi.
+        //
+        // ⚠️ Ne pas « rétablir les accents pour faire propre ». C'est
+        // exactement ce qui a coûté une semaine d'inscriptions impossibles.
+        $text = Str::ascii($text);
 
         // Paramètres de base — from omis si vide (sender ID non enregistré).
         $params = [

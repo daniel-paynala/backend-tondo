@@ -68,12 +68,7 @@ class TraiterReversementsAutoCagnottes extends Command
 
         // Critères d'éligibilité : cagnotte ouverte, auto-reversement activé,
         // solde positif, et numéro de retrait renseigné.
-        $cagnottes = TondoCagnotte::where('type', 'cagnotte_ouverte')
-            ->where('reversement_auto', true)
-            ->whereIn('statut', ['active', 'en_cours'])
-            ->where('montant_collecte', '>', 0)
-            ->whereNotNull('numero_retrait')
-            ->get();
+        $cagnottes = self::eligibles($today)->get();
 
         $this->line("  {$cagnottes->count()} cotisation(s) éligible(s) trouvée(s).");
 
@@ -182,10 +177,49 @@ class TraiterReversementsAutoCagnottes extends Command
      * @param  string        $today   Date du jour au format 'Y-m-d' (Africa/Libreville).
      * @return string|null            Mode de déclenchement ou null si pas encore le moment.
      */
+    /**
+     * Les cagnottes que ce cron doit examiner ce jour-là.
+     *
+     * Extraite pour être tenue par un test : c'est une requête sur le chemin
+     * de l'argent, et ses deux branches ne se valent pas.
+     *
+     * La seconde est la raison d'être de cette méthode. Les filtres
+     * « reversement automatique demandé » et « solde positif » écartaient une
+     * cagnotte arrivée à échéance dont le gérant avait coupé le reversement,
+     * ou dont le solde était vide : elle serait restée ouverte indéfiniment,
+     * ce que la durée maximale est précisément censée empêcher.
+     */
+    public static function eligibles(string $today): \Illuminate\Database\Eloquent\Builder
+    {
+        return TondoCagnotte::where('type', 'cagnotte_ouverte')
+            ->whereIn('statut', ['active', 'en_cours'])
+            ->whereNotNull('numero_retrait')
+            ->where(function ($q) use ($today) {
+                // Le cas habituel.
+                $q->where(function ($w) {
+                    $w->where('reversement_auto', true)
+                      ->where('montant_collecte', '>', 0);
+                })
+                // L'échéance ferme dans tous les cas.
+                ->orWhere(function ($w) use ($today) {
+                    $w->whereNotNull('date_echeance')
+                      ->whereDate('date_echeance', '<=', $today);
+                });
+            });
+    }
+
     private function determinerMode(TondoCagnotte $cagnotte, string $today): ?string
     {
         // Priorité 1 : date limite atteinte ou dépassée.
-        if ($cagnotte->date_fin && $cagnotte->date_fin->toDateString() <= $today) {
+        //
+        // La date qui fait foi est la plus PROCHE entre celle que
+        // l'organisateur s'est donnée et l'échéance dérivée de la durée
+        // maximale réglée dans le back-office (voir EcheanceCagnotte). La
+        // durée plafonne, elle ne prolonge jamais : trois semaines choisies
+        // restent trois semaines, même si le réglage autorise un an.
+        $echeance = app(\App\Services\EcheanceCagnotte::class)->effective($cagnotte);
+
+        if ($echeance !== null && $echeance <= $today) {
             return 'date';
         }
 
@@ -251,6 +285,22 @@ class TraiterReversementsAutoCagnottes extends Command
         PushNotifier       $notif,
     ): bool {
         $montant = (int) $cagnotte->montant_collecte;
+
+        // Échéance atteinte sans un franc à rapatrier.
+        //
+        // La cagnotte doit quand même se fermer : c'est sa DURÉE qui expire,
+        // pas sa collecte. Passer par le décaissement pour zéro créerait un
+        // payout vide et, au refus de Paynala, une alerte administrateur pour
+        // un incident qui n'existe pas.
+        if ($montant <= 0) {
+            DB::table(project_table('cagnottes'))
+                ->where('id', $cagnotte->id)
+                ->update(['statut' => 'cloturee', 'updated_at' => now()]);
+
+            $this->line('    Échéance atteinte, solde nul — clôturée sans transfert.');
+
+            return true;
+        }
 
         // Le décaissement lui-même vit dans ReversementService, partagé avec la
         // suppression de compte : réservation sous row-lock, appel Paynala, puis
