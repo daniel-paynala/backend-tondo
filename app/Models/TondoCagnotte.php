@@ -63,6 +63,8 @@ class TondoCagnotte extends Model
         'jour_mois'                       => 'integer',  // Jour du mois pour les tontines mensuelles.
         'date_creation'                   => 'datetime',
         'date_fin'                        => 'datetime',
+        // Échéance de clôture automatique, dérivée de la durée maximale.
+        'date_echeance'                   => 'date',
         'date_demarrage'                  => 'datetime',
         'reversement_auto'                => 'boolean',
         'reversement_auto_frequence_mois' => 'integer',
