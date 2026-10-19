@@ -168,15 +168,39 @@ class EcheanceCagnotteTest extends TestCase
         );
     }
 
-    public function test_l_affichage_prefere_la_colonne_quand_elle_existe(): void
+    public function test_changer_le_reglage_change_ce_qui_est_affiche(): void
     {
-        // La colonne fait foi dès qu'elle est posée : c'est elle que le cron
-        // de clôture lira, l'écran ne doit pas annoncer autre chose.
-        $service = $this->service(365);
+        // Le défaut du 2026-10-19 : l'écran préférait la colonne dès qu'elle
+        // existait, et une durée changée dans le back-office n'apparaissait
+        // jamais — la colonne gardant la valeur du dernier passage, qui sur un
+        // environnement sans planificateur peut ne jamais revenir.
+        $service = $this->service(117);
+
+        $this->assertSame(
+            '2026-10-26',
+            $service->pourAffichage(
+                // Colonne écrite lors d'un passage à 365 jours.
+                $this->cagnotte('2026-07-01', echeance: '2027-07-01'),
+                117,
+                $this->aujourdhui,
+            ),
+            'L\'écran doit annoncer ce que le prochain passage écrira.',
+        );
+    }
+
+    public function test_l_affichage_garde_le_repit_deja_accorde(): void
+    {
+        // Recalculer ne doit pas effacer le répit : une cagnotte trop vieille
+        // garde la date qu'on lui a accordée, sur l'écran comme en base.
+        $service = $this->service(30);
 
         $this->assertSame(
             '2026-11-18',
-            $service->pourAffichage($this->cagnotte('2026-07-01', echeance: '2026-11-18'), 365, $this->aujourdhui),
+            $service->pourAffichage(
+                $this->cagnotte('2026-01-01', echeance: '2026-11-18'),
+                30,
+                $this->aujourdhui,
+            ),
         );
     }
 
