@@ -204,6 +204,40 @@ class EcheanceCagnotteTest extends TestCase
         );
     }
 
+    public function test_la_duree_se_dit_dans_l_unite_qui_a_du_sens(): void
+    {
+        // L'unité suit la DIVISIBILITÉ, pas la taille : « 1 mois » pour 45
+        // jours serait faux de moitié. Même règle que le web et l'app — trois
+        // formulations du même réglage feraient croire qu'il a changé.
+        $this->assertSame('1 an', EcheanceCagnotte::dureeEnClair(365));
+        $this->assertSame('2 ans', EcheanceCagnotte::dureeEnClair(730));
+        $this->assertSame('6 mois', EcheanceCagnotte::dureeEnClair(180));
+        $this->assertSame('45 jours', EcheanceCagnotte::dureeEnClair(45));
+        $this->assertSame('1 jour', EcheanceCagnotte::dureeEnClair(1));
+    }
+
+    public function test_le_bot_annonce_la_validite_d_une_cagnotte(): void
+    {
+        $ligne = $this->service(365)->ligneValidite($this->cagnotte('2026-10-19'), 'p');
+
+        $this->assertStringContainsString('Valable 1 an', $ligne);
+        $this->assertStringContainsString('transférés sur le numéro de retrait', $ligne);
+    }
+
+    public function test_le_bot_ne_promet_rien_a_une_tontine(): void
+    {
+        // Sa durée tient au nombre de participants. Annoncer une échéance qui
+        // ne s'applique pas serait pire que de se taire.
+        $this->assertSame('', $this->service(365)->ligneValidite(
+            $this->cagnotte('2026-10-19', type: 'tontine_periodique'), 'p',
+        ));
+    }
+
+    public function test_sans_reglage_le_bot_se_tait(): void
+    {
+        $this->assertSame('', $this->service(null)->ligneValidite($this->cagnotte('2026-10-19'), 'p'));
+    }
+
     public function test_les_paliers_tombent_sur_le_jour_exact(): void
     {
         $service = $this->service(30);

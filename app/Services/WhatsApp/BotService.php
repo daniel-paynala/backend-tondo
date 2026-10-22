@@ -1720,6 +1720,11 @@ class BotService
             ? "\nhttps://wa.me/{$botNum}?text=" . rawurlencode("TONJI {$ref}")
             : " N°*{$ref}*";
 
+        // Vide pour une tontine : sa durée tient au nombre de participants,
+        // elle n'est pas concernée par la limite des cagnottes ouvertes.
+        $validite = app(\App\Services\EcheanceCagnotte::class)
+            ->ligneValidite($cagnotte, (string) $cagnotte->project_id);
+
         return <<<TXT
         🎉 *{$cagnotte->titre}* créée avec succès !
 
@@ -1728,6 +1733,7 @@ class BotService
 
         *{$refLabel} : N°{$ref}*
         Partagez ce lien à vos membres :{$lienWa}
+        {$validite}
 
         TXT . "\n" . $this->afficherMenu($numero);
     }
