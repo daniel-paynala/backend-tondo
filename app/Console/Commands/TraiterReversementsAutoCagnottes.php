@@ -132,7 +132,26 @@ class TraiterReversementsAutoCagnottes extends Command
                 continue;
             }
 
-            $ok = $this->traiter($cagnotte, $mode, $reversements, $notif);
+            // ── Une collecte qui échoue ne doit pas emporter les autres ──────
+            //
+            // Sans ce filet, une exception venue du décaissement — une phase
+            // qui lève, un type inattendu, une colonne absente — arrêtait la
+            // passe ENTIÈRE. Toutes les collectes suivantes restaient
+            // impayées ce soir-là, et les suivants tant que la cause durait,
+            // sans que rien ne distingue cela d'une nuit sans reversement.
+            try {
+                $ok = $this->traiter($cagnotte, $mode, $reversements, $notif);
+            } catch (\Throwable $e) {
+                $this->error("  → [{$cagnotte->reference}] échec inattendu — collecte sautée.");
+                Log::critical('[reversements-auto] exception sur une collecte, passe poursuivie', [
+                    'cagnotte' => $cagnotte->reference,
+                    'erreur'   => $e->getMessage(),
+                    'fichier'  => $e->getFile() . ':' . $e->getLine(),
+                ]);
+                $ignores++;
+                continue;
+            }
+
             if ($ok) {
                 $traites++;
             } else {

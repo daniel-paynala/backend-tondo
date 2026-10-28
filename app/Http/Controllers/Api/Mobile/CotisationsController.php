@@ -159,6 +159,25 @@ class CotisationsController extends Controller
         // un membre ne peut cotiser qu'une fois par cycle.
         // statut_paiement = 'paye' indique que le cycle courant est déjà réglé.
         if ($cagnotte->type === 'tontine_periodique') {
+            // ── Le montant d'une tontine n'est pas libre ──────────────────────
+            //
+            // Il n'était contrôlé QUE sur le canal USSD. Ici, seul `min:100`
+            // s'appliquait : un membre d'une tontine à 50 000 pouvait verser
+            // 100 FCFA et passer `paye`. Le cron verse ensuite au bénéficiaire
+            // dès que « tout le monde a payé » — les autres finançaient donc
+            // celui qui avait sous-payé.
+            //
+            // Égalité STRICTE, comme l'USSD : un montant supérieur n'est pas
+            // plus acceptable, il fausserait la part de chacun dans le tour.
+            $attendu = (int) ($cagnotte->montant_par_cycle ?? 0);
+
+            if ($attendu > 0 && (int) $data['montant'] !== $attendu) {
+                throw ValidationException::withMessages([
+                    'montant' => "Cette tontine impose exactement "
+                        . number_format($attendu, 0, ',', ' ') . ' FCFA par cotisation.',
+                ]);
+            }
+
             $dejaPayeCycle = DB::table(project_table('participants'))
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('user_id', $user->id)
