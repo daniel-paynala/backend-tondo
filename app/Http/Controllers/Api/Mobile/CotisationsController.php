@@ -14,6 +14,7 @@ use App\Services\TondoConfigService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use App\Support\Registre;
@@ -408,23 +409,27 @@ class CotisationsController extends Controller
         $localSansZero  = substr($phoneE164, strlen($operateurIndicatif));
         $phoneAirtel    = '0' . $localSansZero;
 
-        // Appel Paynala (bloquant — initie la notification sur le téléphone du client).
-        try {
-            $paymentData = $this->paynala->createPayment(
-                requestId: $transId,
-                amount:    $montantBrut,
-                phone:     $phoneAirtel,
-                firstName: $user->prenom ?? '',
-                lastName:  $user->nom    ?? '',
-            );
-        } catch (\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 502);
-        }
+        // ── La trace AVANT l'appel, et c'est tout l'enjeu ────────────────────
+        //
+        // L'ordre était inverse : on poussait la notification Airtel, puis on
+        // écrivait la ligne `payin`. Entre les deux, tout échec laissait un
+        // client DÉBITÉ sans aucune trace en base — et `tonji:reconcilier-payins`
+        // ne balaie que les payins `initie`, donc sans ligne il ne pouvait rien
+        // rattraper. L'argent disparaissait sans alerte.
+        //
+        // Il suffisait d'un double appui : le deuxième passage avait déjà poussé
+        // sa notification quand son insertion de participant violait l'index
+        // unique, ce qui annulait toute la transaction.
+        //
+        // Désormais la ligne existe d'abord, en `initie`. Si l'appel échoue
+        // ensuite, elle reste `initie` : la réconciliation interrogera le statut
+        // et tranchera — crédit si le client a confirmé, `echec` sinon.
+        $idPayin = (string) Str::uuid();
 
         try {
             DB::transaction(function () use (
-                $user, $cagnotte, $numeroPayeurE164,
-                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $paymentData, $penalite, $canal,
+                $user, $cagnotte, $numeroPayeurE164, $idPayin,
+                $transId, $montantNet, $montantBrut, $frais, $phoneAirtel, $penalite, $canal,
                 $commentaire
             ) {
                 // 1) Membre (placeholder en_attente).
@@ -467,12 +472,13 @@ class CotisationsController extends Controller
 
                 // 2) Trace payin (statut initie — cagnotte pas encore créditée).
                 DB::table(project_table('payin'))->insert([
-                    'id'            => (string) Str::uuid(),
+                    'id'            => $idPayin,
                     'project_id'    => $cagnotte->project_id,
                     'cagnotte_id'   => $cagnotte->id,
                     'user_id'       => $user->id,
                     'trans_id'      => $transId,
-                    'operateur_id'  => $paymentData['paymentId'] ?? null,
+                    // Renseigné APRÈS l'appel : à cet instant il n'existe pas encore.
+                    'operateur_id'  => null,
                     'numero_tel'    => $numeroPayeurE164,
                     'canal'            => $canal,
                     // Recopié sur la ligne `paiements` à la confirmation Airtel
@@ -491,15 +497,53 @@ class CotisationsController extends Controller
                         'is_new_membre' => $isNew,
                         'cagnotte_type'      => $cagnotte->type,
                     ]),
-                    'response'      => json_encode($paymentData),
+                    'response'      => null,
                     'date_creation' => now(),
                     'created_at'    => now(),
                     'updated_at'    => now(),
                 ]);
             });
         } catch (\Throwable $e) {
+            // Rien n'est parti : la transaction a échoué AVANT tout appel, donc
+            // aucun client n'est débité. On refuse franchement.
             return response()->json(['message' => 'Erreur lors de l\'enregistrement du paiement.', 'error' => $e->getMessage()], 500);
         }
+
+        // ── L'appel, la trace étant posée ────────────────────────────────────
+        //
+        // `Throwable` et non `RuntimeException` : une coupure réseau lève une
+        // `ConnectionException`, qui n'hérite PAS de `RuntimeException` et
+        // passait donc à travers l'ancien filet. Or c'est précisément le cas où
+        // la demande peut avoir atteint Airtel malgré le délai dépassé.
+        try {
+            $paymentData = $this->paynala->createPayment(
+                requestId: $transId,
+                amount:    $montantBrut,
+                phone:     $phoneAirtel,
+                firstName: $user->prenom ?? '',
+                lastName:  $user->nom    ?? '',
+            );
+        } catch (\Throwable $e) {
+            // La ligne reste `initie` : la réconciliation interrogera le statut
+            // et trouvera le paiement si le client a confirmé malgré l'erreur.
+            Log::error('[cotisation] appel de paiement en échec, payin laissé en initie', [
+                'trans_id' => $transId,
+                'erreur'   => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message'  => 'Le paiement n\'a pas pu être lancé. Si vous avez reçu une '
+                    . 'demande de confirmation, ne la validez pas.',
+                'trans_id' => $transId,
+            ], 502);
+        }
+
+        // La trace est complétée avec ce que l'opérateur a rendu.
+        DB::table(project_table('payin'))->where('id', $idPayin)->update([
+            'operateur_id' => $paymentData['paymentId'] ?? null,
+            'response'     => json_encode($paymentData),
+            'updated_at'   => now(),
+        ]);
 
         return response()->json([
             'trans_id'        => $transId,
