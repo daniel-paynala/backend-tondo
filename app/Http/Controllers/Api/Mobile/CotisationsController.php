@@ -381,8 +381,25 @@ class CotisationsController extends Controller
         }
 
         if ($apiStatus === 'FAILED') {
+            // Un paiement JEUNE et « introuvable » n'est pas un échec : il peut
+            // ne pas être encore indexé chez l'opérateur. L'écran interroge ce
+            // statut à la seconde près, donc ce cas est fréquent — et `echec`
+            // est définitif, la réconciliation ne reprenant que les `initie`.
+            if (! empty($statusData['introuvable'])
+                && $payin->date_creation
+                && \Carbon\Carbon::parse($payin->date_creation)->gt(now()->subMinutes(15))) {
+                return response()->json([
+                    'trans_id' => $transId,
+                    'statut'   => 'initie',
+                    'message'  => 'Paiement en cours de vérification.',
+                ]);
+            }
+
+            // `WHERE statut='initie'` : sans cette garde, un échec arrivé en
+            // retard écrasait un succès écrit entre-temps par un autre chemin.
             DB::table(project_table('payin'))
                 ->where('trans_id', $transId)
+                ->where('statut', 'initie')
                 ->update([
                     'statut'     => 'echec',
                     'response'   => json_encode($statusData),

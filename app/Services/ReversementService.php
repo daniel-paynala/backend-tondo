@@ -273,9 +273,27 @@ class ReversementService
                 ]);
 
             if ($cloturer) {
-                DB::table(project_table('cagnottes'))
+                // ── On ne ferme que si rien ne reste ─────────────────────────
+                //
+                // Le montant reversé vient du solde lu AU DÉBUT de la passe, et
+                // la boucle appelle l'opérateur pour chaque collecte — plusieurs
+                // minutes peuvent s'écouler. Une cotisation arrivée entre-temps
+                // n'était pas reversée, et la clôture l'enfermait : plus aucun
+                // cron ne la reprend, leur requête exigeant une collecte active.
+                //
+                // La condition sur le solde rend l'écriture sûre quoi qu'il
+                // arrive entre la lecture et ici : si un crédit est tombé, la
+                // collecte reste ouverte et le passage suivant la reversera.
+                $ferme = DB::table(project_table('cagnottes'))
                     ->where('id', $cagnotte->id)
+                    ->where('montant_collecte', '<=', 0)
                     ->update(['statut' => 'cloturee', 'updated_at' => now()]);
+
+                if ($ferme === 0) {
+                    Log::warning('[reversement] clôture reportée : un crédit est arrivé pendant la passe', [
+                        'cagnotte' => $cagnotte->reference ?? $cagnotte->id,
+                    ]);
+                }
             }
         });
 

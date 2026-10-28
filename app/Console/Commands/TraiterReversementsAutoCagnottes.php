@@ -296,9 +296,19 @@ class TraiterReversementsAutoCagnottes extends Command
         // payout vide et, au refus de Paynala, une alerte administrateur pour
         // un incident qui n'existe pas.
         if ($montant <= 0) {
-            DB::table(project_table('cagnottes'))
+            // Même garde : le solde lu au début de la passe peut être périmé.
+            // Sans la condition, un crédit arrivé entre-temps serait enfermé
+            // dans une collecte clôturée que plus aucun cron ne reprend.
+            $ferme = DB::table(project_table('cagnottes'))
                 ->where('id', $cagnotte->id)
+                ->where('montant_collecte', '<=', 0)
                 ->update(['statut' => 'cloturee', 'updated_at' => now()]);
+
+            if ($ferme === 0) {
+                $this->warn('    Un crédit est arrivé pendant la passe — clôture reportée.');
+
+                return false;
+            }
 
             $this->line('    Échéance atteinte, solde nul — clôturée sans transfert.');
 
