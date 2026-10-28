@@ -338,9 +338,27 @@ class CotisationService
         }
 
         if ($apiStatus === 'FAILED') {
+            // Un paiement JEUNE et « introuvable » n'est pas un échec : il peut
+            // ne pas être encore indexé chez l'opérateur. Le marquer `echec`
+            // serait définitif — la réconciliation ne balaie que les `initie` —
+            // et un client qui confirmerait ensuite serait débité sans crédit.
+            $jeune = ! empty($statusData['introuvable'])
+                && $payin->date_creation
+                && \Carbon\Carbon::parse($payin->date_creation)->gt(now()->subMinutes(15));
+
+            if ($jeune) {
+                Log::info('[payin] introuvable mais récent, laissé en attente', ['trans_id' => $transId]);
+
+                return 'initie';
+            }
+
+            // `WHERE statut='initie'` : sans cette garde, un échec arrivé en
+            // retard écrasait un succès écrit entre-temps par un autre chemin.
             DB::table(project_table('payin'))
                 ->where('trans_id', $transId)
+                ->where('statut', 'initie')
                 ->update(['statut' => 'echec', 'response' => json_encode($statusData), 'updated_at' => now()]);
+
             return 'echec';
         }
 
@@ -391,22 +409,18 @@ class CotisationService
         // Format Airtel local : préfixe "0" (ex : 077123456)
         $phoneAirtel   = '0' . $localSansZero;
 
-        try {
-            $paymentData = $this->paynala->createPayment(
-                requestId: $transId,
-                amount:    $montantBrut,   // le cotisant paie le montant brut (frais inclus)
-                phone:     $phoneAirtel,
-                firstName: $user->prenom ?? '',
-                lastName:  $user->nom    ?? '',
-            );
-        } catch (\RuntimeException $e) {
-            return ['statut' => 'erreur', 'message' => $e->getMessage()];
-        }
+        // ── La trace AVANT l'appel ───────────────────────────────────────────
+        //
+        // Même correction que sur le chemin de l'application : la notification
+        // partait d'abord, et tout échec entre les deux laissait un client
+        // débité sans ligne en base. La réconciliation ne balayant que les
+        // payins `initie`, elle n'avait alors rien à rattraper.
+        $idPayin = (string) Str::uuid();
 
         try {
             DB::transaction(function () use (
-                $user, $cagnotte, $transId,
-                $montantNet, $montantBrut, $frais, $penalite, $paymentData, $phoneAirtel, $canal
+                $user, $cagnotte, $transId, $idPayin,
+                $montantNet, $montantBrut, $frais, $penalite, $phoneAirtel, $canal
             ) {
                 // Vérifier si l'utilisateur est déjà membre (paiement partiel antérieur)
                 $participant = DB::table(project_table('participants'))
@@ -442,12 +456,13 @@ class CotisationService
 
                 // Insérer la ligne de payin avec statut 'initie' (push en attente de validation)
                 DB::table(project_table('payin'))->insert([
-                    'id'               => (string) Str::uuid(),
+                    'id'               => $idPayin,
                     'project_id'       => $cagnotte->project_id,
                     'cagnotte_id'      => $cagnotte->id,
                     'user_id'          => $user->id,
                     'trans_id'         => $transId,
-                    'operateur_id'     => $paymentData['paymentId'] ?? null,  // ID Airtel retourné
+                    // Renseigné APRÈS l'appel : il n'existe pas encore à cet instant.
+                    'operateur_id'     => null,
                     'numero_tel'       => $user->numero,
                     'canal'            => $canal,
                     'montant'          => $montantBrut,   // montant débité au cotisant
@@ -461,15 +476,54 @@ class CotisationService
                         'phone'       => $phoneAirtel,
                         'canal'       => 'whatsapp',
                     ]),
-                    'response'         => json_encode($paymentData),
+                    // Renseignée APRÈS l'appel : elle n'existe pas encore ici.
+                    'response'         => null,
                     'date_creation'    => now(),
                     'created_at'       => now(),
                     'updated_at'       => now(),
                 ]);
             });
         } catch (\Throwable $e) {
-            return ['statut' => 'erreur', 'message' => 'Erreur enregistrement : ' . $e->getMessage()];
+            // Rien n'est parti : l'échec précède tout appel, aucun client n'est
+            // débité. Le détail technique reste au journal, pas à l'écran.
+            Log::error('[bot] enregistrement du payin impossible', [
+                'trans_id' => $transId, 'erreur' => $e->getMessage(),
+            ]);
+
+            return ['statut' => 'erreur', 'message' => "Le paiement n'a pas pu être enregistré. Réessaie dans un instant."];
         }
+
+        // ── L'appel, la trace étant posée ────────────────────────────────────
+        //
+        // `Throwable` et non `RuntimeException` : une coupure réseau lève une
+        // `ConnectionException`, qui n'en hérite pas et passait au travers —
+        // or c'est le cas où la demande peut avoir atteint Airtel malgré tout.
+        try {
+            $paymentData = $this->paynala->createPayment(
+                requestId: $transId,
+                amount:    $montantBrut,   // le cotisant paie le montant brut (frais inclus)
+                phone:     $phoneAirtel,
+                firstName: $user->prenom ?? '',
+                lastName:  $user->nom    ?? '',
+            );
+        } catch (\Throwable $e) {
+            // La ligne reste `initie` : la réconciliation tranchera.
+            Log::error('[bot] appel de paiement en échec, payin laissé en initie', [
+                'trans_id' => $transId, 'erreur' => $e->getMessage(),
+            ]);
+
+            return [
+                'statut'  => 'erreur',
+                'message' => "Le paiement n'a pas pu être lancé. Si tu reçois une demande de confirmation, ne la valide pas.",
+            ];
+        }
+
+        // La trace est complétée avec ce que l'opérateur a rendu.
+        DB::table(project_table('payin'))->where('id', $idPayin)->update([
+            'operateur_id' => $paymentData['paymentId'] ?? null,
+            'response'     => json_encode($paymentData),
+            'updated_at'   => now(),
+        ]);
 
         return [
             'statut'      => 'initie',
@@ -658,22 +712,46 @@ class CotisationService
                     'montant_paye'          => DB::raw('montant_paye + ' . $netAmount),
                     'date_dernier_paiement' => now(),
                 ]);
+            }
 
-                // 3. Insérer dans l'historique des paiements confirmés
-                DB::table(project_table('paiements'))->insert([
-                    'id'             => (string) Str::uuid(),
-                    'project_id'     => $payin->project_id,
-                    'cagnotte_id'    => $payin->cagnotte_id,
-                    'participant_id' => $participant->id,
-                    'user_id'        => $payin->user_id,
-                    'canal'          => $payin->canal ?? 'bot',
-                    // Commentaire saisi par le cotisant à l'initiation (app/web).
-                    // Le bot ne le collecte pas : reste NULL dans ce cas.
-                    'commentaire'    => $payin->commentaire ?? null,
-                    'trans_id'       => $payin->trans_id,
-                    'montant'        => $netAmount,
-                    'date'           => now(),
-                    'created_at'     => now(),
+            // 3. L'historique des paiements, HORS du test sur le membre.
+            //
+            // L'insertion vivait dans le `if` ci-dessus : si la participation
+            // avait disparu entre l'initiation et la confirmation, la cagnotte
+            // était créditée SANS ligne de paiement. Le grand livre perdait une
+            // entrée, et les deux canaux divergeaient — le contrôleur, lui,
+            // écrit toujours la ligne avec un membre nul.
+            DB::table(project_table('paiements'))->insert([
+                'id'             => (string) Str::uuid(),
+                'project_id'     => $payin->project_id,
+                'cagnotte_id'    => $payin->cagnotte_id,
+                'participant_id' => $participant->id ?? null,
+                'user_id'        => $payin->user_id,
+                'canal'          => $payin->canal ?? 'bot',
+                // Commentaire saisi par le cotisant à l'initiation (app/web).
+                // Le bot ne le collecte pas : reste NULL dans ce cas.
+                'commentaire'    => $payin->commentaire ?? null,
+                'trans_id'       => $payin->trans_id,
+                'montant'        => $netAmount,
+                'date'           => now(),
+                'created_at'     => now(),
+            ]);
+
+            // ── Un crédit tardif sur une collecte CLÔTURÉE ───────────────────
+            //
+            // On crédite quand même : l'argent est réellement arrivé, le refuser
+            // le ferait disparaître. Mais plus aucun cron ne reversera ce
+            // reliquat — leur requête exige `statut IN ('active','en_cours')` —
+            // donc il resterait enfermé en silence. On alerte pour qu'un humain
+            // le reverse à la main.
+            $statutCollecte = DB::table(project_table('cagnottes'))
+                ->where('id', $payin->cagnotte_id)->value('statut');
+
+            if ($statutCollecte === 'cloturee') {
+                Log::critical('[payin] crédit sur une collecte clôturée — reliquat à reverser à la main', [
+                    'trans_id'    => $payin->trans_id,
+                    'cagnotte_id' => $payin->cagnotte_id,
+                    'montant_net' => $netAmount,
                 ]);
             }
 

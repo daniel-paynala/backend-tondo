@@ -166,9 +166,14 @@ class PaynalaPaymentService
             ->timeout(4)
             ->get("{$this->baseUrl}/payment_status_v2", ['request_id' => $requestId]);
 
-        // 404 = l'API ne connaît pas ce requestId → le paiement n'a jamais existé.
+        // 404 = l'API ne connaît pas ce requestId.
+        //
+        // Ce n'est PAS la même chose qu'un échec affirmé : un paiement tout
+        // juste lancé peut ne pas être encore indexé. Le drapeau `introuvable`
+        // laisse l'appelant décider selon l'ÂGE du payin — un jeune reste en
+        // attente, un ancien est tenu pour inexistant.
         if ($response->status() === 404) {
-            return ['status' => 'FAILED', 'message' => 'Paiement introuvable.'];
+            return ['status' => 'FAILED', 'introuvable' => true, 'message' => 'Paiement introuvable.'];
         }
 
         if (! $response->successful()) {

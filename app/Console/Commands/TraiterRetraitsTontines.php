@@ -80,6 +80,13 @@ class TraiterRetraitsTontines extends Command
         $capacites = app(\App\Services\CapacitesOperateur::class);
 
         foreach ($tontines as $cagnotte) {
+            // ── Une tontine qui échoue ne doit pas emporter les autres ───────
+            //
+            // Sans ce filet, une exception venue du décaissement arrêtait la
+            // passe ENTIÈRE : toutes les tontines suivantes restaient impayées
+            // ce jour-là, sans que rien ne distingue cela d'une journée sans
+            // retrait dû.
+            try {
             // Le pays sait-il reverser ?
             //
             // Plus grave ici que pour une cagnotte ouverte : c'est le tour
@@ -135,6 +142,32 @@ class TraiterRetraitsTontines extends Command
                 ->where('cagnotte_id', $cagnotte->id)
                 ->where('statut', 'succes')
                 ->count();
+
+            // ── Un décaissement d'issue INCONNUE bloque la tontine ───────────
+            //
+            // `$cyclesCompletes` ne compte que les `succes`. Un payout resté
+            // `initie` ou `en_cours` — l'opérateur a peut-être payé, on ne sait
+            // pas — ne comptait donc pas, et le passage suivant pouvait régler
+            // une SECONDE FOIS le même bénéficiaire, puisque l'ordre de passage
+            // n'avance qu'avec les succès.
+            //
+            // Règle du projet : dans le doute, l'argent ne repart pas. On
+            // s'arrête et on alerte plutôt que de risquer un double virement ;
+            // la réconciliation ou un humain tranchera l'issue réelle.
+            $enSuspens = DB::table(project_table('payout'))
+                ->where('cagnotte_id', $cagnotte->id)
+                ->whereIn('statut', ['initie', 'en_cours'])
+                ->count();
+
+            if ($enSuspens > 0) {
+                $this->warn("  → [{$cagnotte->reference}] {$enSuspens} décaissement(s) d'issue inconnue — tontine suspendue.");
+                Log::warning('[retraits-tontines] décaissement en suspens, tontine sautée', [
+                    'cagnotte'  => $cagnotte->reference,
+                    'en_suspens' => $enSuspens,
+                ]);
+                $ignores++;
+                continue;
+            }
 
             // Rotation déjà terminée — tous les membres ont reçu leur mise.
             if ($cyclesCompletes >= (int) $cagnotte->nombre_inscrits && (int) $cagnotte->nombre_inscrits > 0) {
@@ -439,6 +472,16 @@ class TraiterRetraitsTontines extends Command
 
             $this->info("    ✓ {$montant} FCFA versés à {$beneficiaire->prenom} {$beneficiaire->nom}");
             $traites++;
+            } catch (\Throwable $e) {
+                $this->error("  → [{$cagnotte->reference}] échec inattendu — tontine sautée.");
+                Log::critical('[retraits-tontines] exception sur une tontine, passe poursuivie', [
+                    'cagnotte' => $cagnotte->reference,
+                    'erreur'   => $e->getMessage(),
+                    'fichier'  => $e->getFile() . ':' . $e->getLine(),
+                ]);
+                $ignores++;
+                continue;
+            }
         }
 
         $this->info("Terminé — {$traites} retrait(s) effectué(s), {$ignores} ignoré(s).");

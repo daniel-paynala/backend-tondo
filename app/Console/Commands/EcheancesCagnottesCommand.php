@@ -6,6 +6,7 @@ use App\Contracts\PushNotifier;
 use App\Services\EcheanceCagnotte;
 use App\Services\Mail\EmailLayout;
 use App\Services\Mail\MailgunSender;
+use App\Services\WhatsApp\Contracts\WhatsAppSender;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class EcheancesCagnottesCommand extends Command
         EcheanceCagnotte $echeances,
         PushNotifier     $push,
         MailgunSender    $mailer,
+        WhatsAppSender   $whatsapp,
     ): int {
         $sec        = (bool) $this->option('dry-run');
         $aujourdhui = now()->timezone('Africa/Libreville')->startOfDay();
@@ -76,7 +78,7 @@ class EcheancesCagnottesCommand extends Command
             // le prévenir.
             $palier = $echeances->palierDuJour($echeances->effective($cagnotte), $aujourdhui);
 
-            if ($palier !== null && ! $sec && $this->rappeler($cagnotte, $palier, $push, $mailer)) {
+            if ($palier !== null && ! $sec && $this->rappeler($cagnotte, $palier, $push, $mailer, $whatsapp)) {
                 $rappeles++;
             } elseif ($palier !== null && $sec) {
                 $this->line("  {$cagnotte->reference} : rappel J-{$palier}");
@@ -100,28 +102,32 @@ class EcheancesCagnottesCommand extends Command
      * @return bool vrai si le rappel est bien parti de notre fait
      */
     private function rappeler(
-        object        $cagnotte,
-        int           $palier,
-        PushNotifier  $push,
-        MailgunSender $mailer,
+        object         $cagnotte,
+        int            $palier,
+        PushNotifier   $push,
+        MailgunSender  $mailer,
+        WhatsAppSender $whatsapp,
     ): bool {
-        $canaux = ['push'];
-        $email  = null;
+        $destinataire = DB::table('users')->where('id', $cagnotte->user_id)
+            ->first(['email', 'numero']);
 
-        if (in_array($palier, EcheanceCagnotte::PALIERS_AVEC_EMAIL, true)) {
-            $email = DB::table('users')->where('id', $cagnotte->user_id)->value('email');
-            if ($email) {
-                $canaux[] = 'email';
-            }
-        }
+        $email = in_array($palier, EcheanceCagnotte::PALIERS_AVEC_EMAIL, true)
+            ? ($destinataire->email ?? null)
+            : null;
+
+        // La ligne est posée AVANT tout envoi : c'est elle qui réserve le
+        // palier. Ses canaux sont complétés après coup, avec ceux qui ont
+        // RÉELLEMENT abouti — inscrire une intention ferait croire plus tard
+        // que l'organisateur avait été prévenu.
+        $idRappel = (string) Str::uuid();
 
         try {
             DB::table(project_table('rappels_echeance'))->insert([
-                'id'          => (string) Str::uuid(),
+                'id'          => $idRappel,
                 'project_id'  => $cagnotte->project_id,
                 'cagnotte_id' => $cagnotte->id,
                 'palier'      => $palier,
-                'canaux'      => implode(',', $canaux),
+                'canaux'      => null,
             ]);
         } catch (\Throwable $e) {
             // Déjà envoyé : l'index a fait son travail, il n'y a rien à dire.
@@ -134,6 +140,8 @@ class EcheancesCagnottesCommand extends Command
         $corps  = "« {$nom} » sera clôturée dans {$quand}. Les fonds collectés "
             . 'seront automatiquement reversés sur le numéro de retrait.';
 
+        $envoyes = [];
+
         $push->notifyOne((string) $cagnotte->user_id, $titre, $corps, [
             'type'        => 'echeance_cagnotte',
             // L'identifiant ET la référence : l'app ouvre le détail par
@@ -145,6 +153,35 @@ class EcheancesCagnottesCommand extends Command
             'reference'   => (string) $cagnotte->reference,
             'palier'      => (string) $palier,
         ]);
+        // Le push est compté comme parti : `notifyOne` ne rend rien, et les
+        // jetons morts sont purgés plus bas dans la pile. On ne saura donc pas
+        // ici si un appareil l'a reçu — c'est une limite connue du canal.
+        $envoyes[] = 'push';
+
+        // ── WhatsApp ─────────────────────────────────────────────────────────
+        //
+        // Beaucoup d'organisateurs sont venus par le bot : ni application
+        // installée, ni adresse connue. Sans ce canal, ils ne recevraient
+        // RIEN et verraient leur collecte se fermer sans préavis.
+        //
+        // ⚠️ Hors de la fenêtre de 24 h ouverte par leur dernier message, Meta
+        // refuse un texte libre — il faudrait un modèle approuvé, que le compte
+        // ne peut pas créer aujourd'hui. L'envoi est donc tenté et le canal
+        // n'est inscrit que s'il a abouti : un rappel refusé ne doit pas
+        // laisser croire que la personne a été prévenue.
+        if (! empty($destinataire->numero)) {
+            try {
+                if ($whatsapp->envoyer((string) $destinataire->numero, "{$titre}\n\n{$corps}")) {
+                    $envoyes[] = 'whatsapp';
+                }
+            } catch (\Throwable $e) {
+                Log::warning('[echeances] WhatsApp non envoyé', [
+                    'cagnotte' => $cagnotte->reference,
+                    'palier'   => $palier,
+                    'erreur'   => $e->getMessage(),
+                ]);
+            }
+        }
 
         if ($email) {
             try {
@@ -156,6 +193,7 @@ class EcheancesCagnottesCommand extends Command
                         . 'sur le numéro de retrait enregistré à la création, et la cagnotte '
                         . 'sera fermée. Vous n\'avez rien à faire.</p>',
                 ));
+                $envoyes[] = 'email';
             } catch (\Throwable $e) {
                 // Le courriel est un renfort du push, pas l'inverse : son échec
                 // ne doit pas faire croire que le rappel n'est pas parti.
@@ -167,7 +205,12 @@ class EcheancesCagnottesCommand extends Command
             }
         }
 
-        $this->line("  {$cagnotte->reference} : rappel J-{$palier} (" . implode(' + ', $canaux) . ')');
+        // Ce qui est parti, pas ce qu'on espérait envoyer.
+        DB::table(project_table('rappels_echeance'))
+            ->where('id', $idRappel)
+            ->update(['canaux' => implode(',', $envoyes)]);
+
+        $this->line("  {$cagnotte->reference} : rappel J-{$palier} (" . implode(' + ', $envoyes) . ')');
 
         return true;
     }

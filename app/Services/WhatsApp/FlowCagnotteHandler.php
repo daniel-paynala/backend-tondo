@@ -109,6 +109,13 @@ class FlowCagnotteHandler
             ? "\nhttps://wa.me/{$botNum}?text=" . rawurlencode("TONJI {$ref}")
             : " N°*{$ref}*";
 
+        // La durée de validité, quand une limite est réglée. Dite ICI parce
+        // que le formulaire de création est un Flow hébergé chez Meta : son
+        // texte n'est pas dans ce dépôt, et c'est le seul moment du parcours
+        // où le bot peut encore l'annoncer.
+        $validite = app(\App\Services\EcheanceCagnotte::class)
+            ->ligneValidite($cagnotte, (string) $cagnotte->project_id);
+
         return <<<TXT
         🎉 *{$cagnotte->titre}* créée avec succès !
 
@@ -117,6 +124,7 @@ class FlowCagnotteHandler
 
         *Code de la cagnotte : N°{$ref}*
         Partage ce lien à tes membres :{$lienWa}
+        {$validite}
         TXT;
     }
 

@@ -148,7 +148,26 @@ class TraiterReversementsAutoCagnottes extends Command
                 continue;
             }
 
-            $ok = $this->traiter($cagnotte, $mode, $reversements, $notif);
+            // ── Une collecte qui échoue ne doit pas emporter les autres ──────
+            //
+            // Sans ce filet, une exception venue du décaissement — une phase
+            // qui lève, un type inattendu, une colonne absente — arrêtait la
+            // passe ENTIÈRE. Toutes les collectes suivantes restaient
+            // impayées ce soir-là, et les suivants tant que la cause durait,
+            // sans que rien ne distingue cela d'une nuit sans reversement.
+            try {
+                $ok = $this->traiter($cagnotte, $mode, $reversements, $notif);
+            } catch (\Throwable $e) {
+                $this->error("  → [{$cagnotte->reference}] échec inattendu — collecte sautée.");
+                Log::critical('[reversements-auto] exception sur une collecte, passe poursuivie', [
+                    'cagnotte' => $cagnotte->reference,
+                    'erreur'   => $e->getMessage(),
+                    'fichier'  => $e->getFile() . ':' . $e->getLine(),
+                ]);
+                $ignores++;
+                continue;
+            }
+
             if ($ok) {
                 $traites++;
             } else {
@@ -293,9 +312,19 @@ class TraiterReversementsAutoCagnottes extends Command
         // payout vide et, au refus de Paynala, une alerte administrateur pour
         // un incident qui n'existe pas.
         if ($montant <= 0) {
-            DB::table(project_table('cagnottes'))
+            // Même garde : le solde lu au début de la passe peut être périmé.
+            // Sans la condition, un crédit arrivé entre-temps serait enfermé
+            // dans une collecte clôturée que plus aucun cron ne reprend.
+            $ferme = DB::table(project_table('cagnottes'))
                 ->where('id', $cagnotte->id)
+                ->where('montant_collecte', '<=', 0)
                 ->update(['statut' => 'cloturee', 'updated_at' => now()]);
+
+            if ($ferme === 0) {
+                $this->warn('    Un crédit est arrivé pendant la passe — clôture reportée.');
+
+                return false;
+            }
 
             $this->line('    Échéance atteinte, solde nul — clôturée sans transfert.');
 

@@ -24,6 +24,8 @@ class RappelsEcheanceTest extends TestCase
     private string $projet;
     private array  $pushEnvoyes = [];
     private array  $mailsEnvoyes = [];
+    public array   $whatsappEnvoyes = [];
+    public bool    $whatsappAccepte = true;
 
     protected function setUp(): void
     {
@@ -40,6 +42,10 @@ class RappelsEcheanceTest extends TestCase
         Schema::create('users', function ($t) {
             $t->string('id')->primary();
             $t->string('email')->nullable();
+            // `numero` conditionne le canal WhatsApp. Sans cette colonne, le
+            // chemin n'était jamais emprunté et les tests passaient au vert
+            // sans rien prouver de lui.
+            $t->string('numero')->nullable();
         });
 
         Schema::create('tondo_project_config', function ($t) {
@@ -90,6 +96,24 @@ class RappelsEcheanceTest extends TestCase
             }
         });
 
+        // Le bot est remplacé : aucun appel réseau, et on pilote le refus pour
+        // reproduire la fenêtre de 24 h fermée par Meta.
+        $this->app->bind(\App\Services\WhatsApp\Contracts\WhatsAppSender::class,
+            fn () => new class($this) implements \App\Services\WhatsApp\Contracts\WhatsAppSender {
+                public function __construct(private $test) {}
+
+                public function envoyer(string $to, string $message): bool
+                {
+                    $this->test->whatsappEnvoyes[] = $to;
+                    return $this->test->whatsappAccepte;
+                }
+
+                public function envoyerAvecPdf(string $to, string $message, string $pdfUrl): bool
+                {
+                    return $this->envoyer($to, $message);
+                }
+            });
+
         $this->app->bind(MailgunSender::class, fn () => new class($this) extends MailgunSender {
             public function __construct(private $test) {}
 
@@ -123,7 +147,9 @@ class RappelsEcheanceTest extends TestCase
     private function cagnotte(int $dans, ?string $email = null): string
     {
         $userId = (string) Str::uuid();
-        DB::table('users')->insert(['id' => $userId, 'email' => $email]);
+        DB::table('users')->insert([
+            'id' => $userId, 'email' => $email, 'numero' => '+24177730634',
+        ]);
 
         $id = (string) Str::uuid();
         DB::table('tondo_cagnottes')->insert([
@@ -171,6 +197,36 @@ class RappelsEcheanceTest extends TestCase
         $this->artisan('tonji:echeances-cagnottes')->assertSuccessful();
 
         $this->assertCount(0, $this->pushEnvoyes);
+    }
+
+    public function test_le_rappel_part_aussi_par_whatsapp(): void
+    {
+        // Le canal qui rattrape les organisateurs venus du bot : ni
+        // application installée, ni adresse connue. Sans lui, quinze des
+        // vingt-cinq organisateurs de production ne recevaient rien.
+        $this->reglage(self::DUREE);
+        $this->cagnotte(30);
+
+        $this->artisan('tonji:echeances-cagnottes')->assertSuccessful();
+
+        $this->assertSame(['+24177730634'], $this->whatsappEnvoyes);
+        $this->assertSame('push,whatsapp', DB::table('tondo_rappels_echeance')->value('canaux'));
+    }
+
+    public function test_un_whatsapp_refuse_n_est_pas_compte_comme_envoye(): void
+    {
+        // Hors de la fenêtre de 24 h, Meta refuse un texte libre. Inscrire le
+        // canal quand même ferait croire plus tard que l'organisateur avait
+        // été prévenu — et c'est précisément sur cette trace qu'on décidera
+        // si une clôture était annoncée ou subie.
+        $this->whatsappAccepte = false;
+        $this->reglage(self::DUREE);
+        $this->cagnotte(30);
+
+        $this->artisan('tonji:echeances-cagnottes')->assertSuccessful();
+
+        $this->assertSame(['+24177730634'], $this->whatsappEnvoyes, 'La tentative a bien eu lieu.');
+        $this->assertSame('push', DB::table('tondo_rappels_echeance')->value('canaux'));
     }
 
     public function test_un_palier_ne_part_jamais_deux_fois(): void

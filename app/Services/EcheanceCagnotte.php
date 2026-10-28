@@ -190,6 +190,62 @@ class EcheanceCagnotte
     }
 
     /**
+     * Une durée en jours, dite dans l'unité qui a du sens.
+     *
+     * 365 jours se dit « 1 an », 180 « 6 mois », 45 reste « 45 jours ».
+     * L'unité suit la DIVISIBILITÉ et non la taille : « 1 mois » pour 45 jours
+     * serait faux de moitié, et « 12 mois » pour 365 ne se dit pas comme un an.
+     *
+     * Posée ici, dans le service qui porte la règle, parce que les trois
+     * canaux l'affichent — application, web et bot. Trois formulations du même
+     * réglage feraient croire à qui passe de l'un à l'autre qu'il a changé.
+     */
+    public static function dureeEnClair(int $jours): string
+    {
+        if ($jours >= 365 && $jours % 365 === 0) {
+            $ans = intdiv($jours, 365);
+
+            return $ans === 1 ? '1 an' : "{$ans} ans";
+        }
+
+        if ($jours >= 30 && $jours % 30 === 0) {
+            $mois = intdiv($jours, 30);
+
+            return $mois === 1 ? '1 mois' : "{$mois} mois";
+        }
+
+        return $jours === 1 ? '1 jour' : "{$jours} jours";
+    }
+
+    /**
+     * La phrase annonçant la validité, pour les messages du bot.
+     *
+     * Rendue vide quand il n'y a rien à dire — pas de durée réglée, ou une
+     * tontine, dont la durée tient au nombre de participants. Un canal ne doit
+     * pas annoncer une règle qui ne s'applique pas à ce qu'il vient de créer.
+     *
+     * Formulée ici et non dans chaque message : le bot a deux parcours — le
+     * formulaire natif et le fil texte — et deux phrases distinctes pour la
+     * même règle finiraient par diverger.
+     */
+    public function ligneValidite(mixed $cagnotte, string $projectId): string
+    {
+        if (($cagnotte->type ?? null) !== self::TYPE_CONCERNE) {
+            return '';
+        }
+
+        $jours = $this->dureeMax($projectId);
+
+        if ($jours === null) {
+            return '';
+        }
+
+        return "\n⏳ Valable " . self::dureeEnClair($jours)
+            . ". À l'échéance, les fonds sont transférés sur le numéro de "
+            . 'retrait et la cagnotte est clôturée. Vous serez prévenu avant.';
+    }
+
+    /**
      * Le palier atteint aujourd'hui, ou `null` si aucun.
      *
      * Comparaison sur une ÉGALITÉ de jours restants, pas sur un intervalle :
