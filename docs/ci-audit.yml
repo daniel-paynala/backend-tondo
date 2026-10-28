@@ -1,33 +1,114 @@
-# ⚠️ À DÉPOSER DANS .github/workflows/audit.yml
+# ⚠️ À DÉPOSER DANS .github/workflows/ci.yml
 #
 # Ce fichier n'est pas à sa place définitive : le jeton d'accès utilisé pour
 # pousser n'a pas la permission « workflow », GitHub refuse donc la création
 # d'un workflow depuis la ligne de commande. Deux façons de l'activer :
 #   – ajouter la portée « workflow » au jeton, puis déplacer ce fichier ;
 #   – ou le créer directement depuis l'interface GitHub, en copiant ce contenu.
+#     L'interface passe par la session et non par le jeton : aucune portée
+#     supplémentaire n'est alors nécessaire.
 #
-# Intégrité du produit — exécuté à chaque poussée et sur chaque demande de
-# fusion. Aucun dépôt n'avait d'intégration continue jusqu'ici : un préfixe
-# renommé à moitié pouvait traverser la revue sans que rien ne le signale.
-name: Audit d'intégrité
+# Report décidé le 2026-10-28 : rien ne presse, le fichier attend ici.
+#
+# Deux barrières à chaque poussée. Aucun dépôt n'avait d'intégration continue :
+# un préfixe renommé à moitié pouvait traverser la revue sans que rien ne le
+# signale, et un commit qui ne compilait pas est parti sur main sans que
+# personne ne le sache avant un déploiement manuel, trois jours plus tard.
+name: Intégrité et tests
 
 on:
   push:
-    branches: [main, develop, audit]
+    # Toutes les branches, mais pas les tags : un tag ne change pas le code.
+    branches:
+      - '**'
   pull_request:
+    branches:
+      - main
+      - develop
+
+# Une poussée qui en remplace une autre sur la même branche annule la
+# précédente : inutile de payer deux fois pour un code déjà dépassé.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  audit:
+  # Les deux tâches sont séparées volontairement : un audit rouge ne doit pas
+  # masquer le résultat des tests, et inversement. Elles tournent en parallèle.
+  tests:
+    name: Tests (PHP 8.4)
     runs-on: ubuntu-latest
+    # Filet : la suite tourne en ~2 s, au-delà de 15 min c'est un blocage.
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Récupérer le code
+        uses: actions/checkout@v4
 
-      - name: Installer PHP
+      # PHP 8.4 = la version des serveurs (recette et production).
+      # Tester sur une autre version ne prouverait rien sur ce qui tourne.
+      - name: Installer PHP 8.4
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mbstring, pdo, pdo_pgsql, bcmath
+          extensions: mbstring, pdo, pdo_sqlite, sqlite3, pdo_pgsql, bcmath, intl, zip, gd
           coverage: none
+
+      # Les dépendances sont mises en cache sur l'empreinte du composer.lock :
+      # tant que le lock ne change pas, l'installation est quasi instantanée.
+      - name: Localiser le cache Composer
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Restaurer le cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-php8.4-${{ hashFiles('**/composer.lock') }}
+          restore-keys: composer-php8.4-
+
+      - name: Installer les dépendances
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      # Laravel refuse de démarrer sans APP_KEY. Les autres variables n'ont
+      # pas à être renseignées : phpunit.xml impose déjà SQLite en mémoire, le
+      # cache en tableau, la file en synchrone et les mails en tableau, et la
+      # classe de base des tests installe les identifiants factices dont les
+      # clients Twilio et Wirepick ont besoin pour se construire.
+      - name: Préparer l'environnement de test
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # Attendu sur un clone de CI : 364 passés, 1 ignoré, 0 échec. Le test
+      # ignoré lit le drapeau du dépôt `admin` voisin, absent ici.
+      - name: Lancer la suite de tests
+        run: php artisan test
+
+  audit:
+    name: Audit d'intégrité
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite, sqlite3, pdo_pgsql, bcmath
+          coverage: none
+
+      - name: Localiser le cache Composer
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Restaurer le cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-php8.4-${{ hashFiles('**/composer.lock') }}
+          restore-keys: composer-php8.4-
 
       - name: Installer les dépendances
         run: composer install --no-interaction --prefer-dist --no-progress
@@ -42,6 +123,3 @@ jobs:
       # parité s'ignorent d'eux-mêmes plutôt que d'échouer.
       - name: Audit d'intégrité
         run: php artisan tonji:audit
-
-      - name: Tests
-        run: php artisan test
